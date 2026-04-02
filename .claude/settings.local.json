@@ -33,7 +33,8 @@
       "Bash(.venv/bin/ruff format:*)",
       "Bash(cargo fmt:*)",
       "Bash(git add:*)",
-      "Bash(git commit -m ':*)"
+      "Bash(git commit -m ':*)",
+      "Bash(gh run:*)"
     ]
   }
 }
