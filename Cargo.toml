@@ -3,6 +3,8 @@ name = "trucktrack"
 version = "0.1.0"
 edition = "2021"
 description = "Rust backend for trucktrack"
+license = "MIT"
+repository = "https://github.com/twedl/trucktrack"
 
 [profile.release]
 lto = true
