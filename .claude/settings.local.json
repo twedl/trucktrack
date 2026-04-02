@@ -27,7 +27,13 @@
       "Bash(.venv/bin/trucktrack process:*)",
       "Bash(.venv/bin/trucktrack split-stops:*)",
       "Bash(.venv/bin/maturin build:*)",
-      "Bash(.venv/bin/maturin sdist:*)"
+      "Bash(.venv/bin/maturin sdist:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(.venv/bin/ruff check:*)",
+      "Bash(.venv/bin/ruff format:*)",
+      "Bash(cargo fmt:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)"
     ]
   }
 }

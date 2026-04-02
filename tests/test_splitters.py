@@ -7,7 +7,6 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-
 import trucktrack
 
 DATA_DIR = Path(__file__).parent.parent / "data"
@@ -58,7 +57,7 @@ class TestObservationGapSplitter:
         assert len(result) == len(truck_a)
 
     def test_multiple_vehicles_independent(self, tracks: pl.DataFrame) -> None:
-        """truck_A has 1 gap, truck_C has 1 gap, truck_B has none (with 2-min threshold)."""
+        """A/C have 1 gap each, B has none (2-min threshold)."""
         result = trucktrack.split_by_observation_gap(tracks, timedelta(minutes=2))
         a_segs = result.filter(pl.col("id") == "truck_A")["segment_id"].n_unique()
         b_segs = result.filter(pl.col("id") == "truck_B")["segment_id"].n_unique()
@@ -103,7 +102,7 @@ class TestStopSplitter:
         assert "segment_id" in result.columns
 
     def test_truck_b_stop_detected(self, truck_b: pl.DataFrame) -> None:
-        """truck_B has a stop (9 rows over ~5 min within ~25m). Should produce 2 movement segments."""
+        """truck_B stop produces 2 movement segments."""
         result = trucktrack.split_by_stops(
             truck_b, max_diameter=50.0, min_duration=timedelta(minutes=2)
         )
@@ -126,7 +125,7 @@ class TestStopSplitter:
         assert len(result) == len(truck_a)
 
     def test_large_diameter_no_stops(self, truck_b: pl.DataFrame) -> None:
-        """With a very large diameter, nothing is a stop (duration won't be met in small area)."""
+        """Large diameter + long duration threshold = no stops."""
         result = trucktrack.split_by_stops(
             truck_b, max_diameter=100_000.0, min_duration=timedelta(hours=24)
         )
@@ -142,7 +141,7 @@ class TestStopSplitter:
         assert len(result) < len(truck_c)
 
     def test_min_length_filters(self, truck_b: pl.DataFrame) -> None:
-        """With min_length=15, short movement segments after splitting should be dropped."""
+        """min_length=15 drops short movement segments."""
         result = trucktrack.split_by_stops(
             truck_b,
             max_diameter=50.0,

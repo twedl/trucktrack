@@ -6,7 +6,6 @@ from pathlib import Path
 
 import polars as pl
 import pytest
-
 import trucktrack
 
 DATA_DIR = Path(__file__).parent.parent / "data"
@@ -57,14 +56,22 @@ class TestReadParquet:
         assert len(df) == 10
 
     def test_missing_file_raises(self) -> None:
-        with pytest.raises(Exception):
+        with pytest.raises((FileNotFoundError, OSError)):
             trucktrack.read_parquet("nonexistent.parquet")
 
 
 class TestReadDataset:
     def test_passthrough(self) -> None:
-        df = pl.DataFrame({"id": [1, 2], "time": ["t1", "t2"], "speed": [1.0, 2.0],
-                           "heading": [0.0, 90.0], "lat": [0.0, 1.0], "lon": [0.0, 1.0]})
+        df = pl.DataFrame(
+            {
+                "id": [1, 2],
+                "time": ["t1", "t2"],
+                "speed": [1.0, 2.0],
+                "heading": [0.0, 90.0],
+                "lat": [0.0, 1.0],
+                "lon": [0.0, 1.0],
+            }
+        )
         result = trucktrack.read_dataset(df)
         assert result.shape == df.shape
         assert result.columns == df.columns
@@ -96,8 +103,10 @@ class TestProcessTracksFile:
         assert result["speed_mps"].to_list() == pytest.approx(expected.to_list())
 
     def test_missing_input_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(Exception):
-            trucktrack.process_parquet_in_rust("nonexistent.parquet", tmp_path / "out.parquet")
+        with pytest.raises(RuntimeError):
+            trucktrack.process_parquet_in_rust(
+                "nonexistent.parquet", tmp_path / "out.parquet"
+            )
 
 
 class TestProcessDataframeInRust:

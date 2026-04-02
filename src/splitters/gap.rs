@@ -48,7 +48,10 @@ pub fn split_by_observation_gap(
                 JoinArgs::new(JoinType::Inner),
             )
             .filter(col("_cnt").gt_eq(lit(min_length as u32)))
-            .drop(Selector::ByName { names: Arc::new([PlSmallStr::from_static("_cnt")]), strict: false })
+            .drop(Selector::ByName {
+                names: Arc::new([PlSmallStr::from_static("_cnt")]),
+                strict: false,
+            })
             .collect()?;
 
         Ok(filtered)

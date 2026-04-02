@@ -10,6 +10,7 @@ use crate::geo::haversine_distance_meters;
 /// meters and the duration is at least `min_duration_us` microseconds.
 /// Rows belonging to stops are excluded; movement segments between stops get
 /// incrementing `segment_id` values.
+#[allow(clippy::too_many_arguments)]
 pub fn split_by_stops(
     df: DataFrame,
     id_col: &str,
@@ -39,8 +40,8 @@ pub fn split_by_stops(
         // Build a boolean mask: true = movement, false = stop
         let mut is_movement = vec![true; n];
         for (start, end) in &stops {
-            for i in *start..=*end {
-                is_movement[i] = false;
+            for val in &mut is_movement[*start..=*end] {
+                *val = false;
             }
         }
 
@@ -80,9 +81,10 @@ pub fn split_by_stops(
 
     let mut combined = if result_frames.is_empty() {
         let mut empty = sorted.head(Some(0));
-        let _ = empty.with_column(
-            Column::new_empty(PlSmallStr::from_static("segment_id"), &DataType::UInt32),
-        );
+        let _ = empty.with_column(Column::new_empty(
+            PlSmallStr::from_static("segment_id"),
+            &DataType::UInt32,
+        ));
         empty
     } else {
         let lfs: Vec<LazyFrame> = result_frames.into_iter().map(|f| f.lazy()).collect();
@@ -106,7 +108,10 @@ pub fn split_by_stops(
                 JoinArgs::new(JoinType::Inner),
             )
             .filter(col("_cnt").gt_eq(lit(min_length as u32)))
-            .drop(Selector::ByName { names: Arc::new([PlSmallStr::from_static("_cnt")]), strict: false })
+            .drop(Selector::ByName {
+                names: Arc::new([PlSmallStr::from_static("_cnt")]),
+                strict: false,
+            })
             .collect()?;
     }
 
@@ -116,9 +121,7 @@ pub fn split_by_stops(
 /// Extract microsecond timestamps from a datetime column.
 fn datetime_to_microseconds(col: &Column) -> PolarsResult<Vec<i64>> {
     let ca = col.datetime().map_err(|_| {
-        PolarsError::ComputeError(
-            format!("Expected datetime column, got {:?}", col.dtype()).into(),
-        )
+        PolarsError::ComputeError(format!("Expected datetime column, got {:?}", col.dtype()).into())
     })?;
     // Access the underlying physical Int64Chunked via the Series
     let phys = ca.phys.clone().into_series();

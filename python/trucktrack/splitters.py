@@ -49,7 +49,7 @@ def split_by_observation_gap_file(
     time_col: str = "time",
     min_length: int = 0,
 ) -> int:
-    """Split trajectories at temporal gaps, reading/writing parquet files entirely in Rust."""
+    """Split at temporal gaps via parquet files entirely in Rust."""
     gap_us = int(gap.total_seconds() * 1_000_000)
     return _core.split_by_gap_file(
         str(input_path), str(output_path), id_col, time_col, gap_us, min_length
@@ -70,7 +70,7 @@ def split_by_stops(
     lon_col: str = "lon",
     min_length: int = 0,
 ) -> pl.DataFrame:
-    """Split trajectories at detected stops, returning movement segments with ``segment_id``."""
+    """Split at detected stops, returning movement segments with ``segment_id``."""
     dur_us = int(min_duration.total_seconds() * 1_000_000)
     result_bytes = _core.split_by_stops_ipc(
         _to_ipc(df),

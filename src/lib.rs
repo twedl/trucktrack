@@ -50,6 +50,7 @@ fn split_by_gap_file(
 
 #[pyfunction]
 #[pyo3(signature = (ipc_bytes, id_col, time_col, lat_col, lon_col, max_diameter_m, min_duration_us, min_length))]
+#[allow(clippy::too_many_arguments)]
 fn split_by_stops_ipc(
     ipc_bytes: &[u8],
     id_col: &str,
@@ -77,6 +78,7 @@ fn split_by_stops_ipc(
 
 #[pyfunction]
 #[pyo3(signature = (input_path, output_path, id_col, time_col, lat_col, lon_col, max_diameter_m, min_duration_us, min_length))]
+#[allow(clippy::too_many_arguments)]
 fn split_by_stops_file(
     input_path: &str,
     output_path: &str,

@@ -12,7 +12,6 @@ import polars as pl
 
 import trucktrack
 
-
 # ── Output helpers ───────────────────────────────────────────────────────
 
 
@@ -84,9 +83,7 @@ def _cmd_split_gap(args: argparse.Namespace, parser: argparse.ArgumentParser) ->
     return 0
 
 
-def _cmd_split_stops(
-    args: argparse.Namespace, parser: argparse.ArgumentParser
-) -> int:
+def _cmd_split_stops(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     to_stdout = args.output == "-"
     fmt = args.format or ("csv" if to_stdout else "parquet")
     duration = timedelta(seconds=args.duration)
@@ -153,7 +150,9 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SECS",
         help="Gap threshold in seconds.",
     )
-    p_gap.add_argument("--min-length", type=int, default=0, help="Min rows per segment.")
+    p_gap.add_argument(
+        "--min-length", type=int, default=0, help="Min rows per segment."
+    )
 
     # split-stops
     p_stop = sub.add_parser("split-stops", help="Split at detected stops.")
@@ -172,7 +171,9 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SECS",
         help="Min stop duration in seconds.",
     )
-    p_stop.add_argument("--min-length", type=int, default=0, help="Min rows per segment.")
+    p_stop.add_argument(
+        "--min-length", type=int, default=0, help="Min rows per segment."
+    )
 
     return parser
 
@@ -184,7 +185,8 @@ def main(argv: list[str] | None = None) -> int:
     # Default to "process" when no subcommand given
     if args.command is None:
         # Re-parse as "process" subcommand
-        parser.parse_args(["process", "--help"] if not argv else ["process"] + (argv or sys.argv[1:]), args)
+        sub_argv = ["process"] + (argv or sys.argv[1:])
+        parser.parse_args(sub_argv, args)
         args.command = "process"
 
     handlers = {
