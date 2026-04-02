@@ -1,0 +1,64 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "trucktrack"
+version = "0.1.0"
+description = "High-performance trajectory splitting and analysis, powered by Rust"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "jesse tweedle", email = "jesse.tweedle@gmail.com" }]
+keywords = ["trajectory", "movement", "splitting", "rust", "polars"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Rust",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: GIS",
+]
+dependencies = [
+    "polars>=1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/twedl/trucktrack"
+Repository = "https://github.com/twedl/trucktrack"
+Issues = "https://github.com/twedl/trucktrack/issues"
+
+[project.scripts]
+trucktrack = "trucktrack.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-benchmark>=4.0",
+    "mypy>=1.9",
+    "ruff>=0.4",
+]
+
+[tool.maturin]
+python-source = "python"
+module-name = "trucktrack._core"
+features = ["pyo3/extension-module"]
+exclude = ["data/*", "scripts/*", "tests/*", ".github/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["trucktrack"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

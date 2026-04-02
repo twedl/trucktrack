@@ -1,0 +1,18 @@
+[package]
+name = "trucktrack"
+version = "0.1.0"
+edition = "2021"
+description = "Rust backend for trucktrack"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[lib]
+name = "trucktrack"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.28", features = ["extension-module"] }
+polars = { version = "0.53", features = ["parquet", "ipc", "lazy", "temporal", "dtype-duration", "cum_agg", "diff", "abs"] }

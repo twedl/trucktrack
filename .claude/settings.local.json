@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(maturin --version)",
+      "Bash(rustc --version)",
+      "Bash(cargo --version)",
+      "Bash(curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs)",
+      "Bash(sh -s -- -y --no-modify-path)",
+      "Bash(pip3 install:*)",
+      "Bash(.venv/bin/pip install:*)",
+      "Bash(.venv/bin/python3 -m pytest tests/test_io.py -v)",
+      "Bash(.venv/bin/maturin develop:*)",
+      "Bash(.venv/bin/trucktrack --help)",
+      "Bash(.venv/bin/trucktrack data/example_tracks.parquet)",
+      "Bash(.venv/bin/trucktrack data/example_tracks.parquet -o /tmp/out.parquet)",
+      "Bash(.venv/bin/python3 -c \"import polars as pl; print\\(pl.read_parquet\\('/tmp/out.parquet'\\)\\)\")",
+      "WebFetch(domain:movingpandas.org)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(python3 -c \"import polars as pl; df = pl.read_parquet\\('data/example_tracks.parquet'\\); print\\('Schema:'\\); print\\(df.schema\\); print\\('\\\\nFirst 5 rows:'\\); print\\(df.head\\(5\\)\\); print\\(f'\\\\nShape: {df.shape}'\\); print\\(f'\\\\nData types: {df.dtypes}'\\)\")",
+      "Bash(python3 -c \"import polars as pl; df = pl.read_parquet\\('data/example_tracks.parquet'\\); print\\(df\\); print\\(\\); print\\(df.dtypes\\)\")",
+      "Bash(python3 -c \"import polars as pl; df = pl.read_parquet\\('data/example_tracks.parquet'\\); print\\(df\\); print\\(\\); print\\(df.schema\\)\")",
+      "Bash(grep -r \"fn diff\" target/debug/build/polars-*/out/)",
+      "Bash(grep -rn \"pub enum NullBehavior\" ~/.cargo/registry/src/index.crates.io-*/polars-core-0.53.0/)",
+      "Bash(cargo test:*)",
+      "Bash(.venv/bin/python:*)",
+      "Bash(.venv/bin/trucktrack split-gap:*)",
+      "Bash(.venv/bin/trucktrack process:*)",
+      "Bash(.venv/bin/trucktrack split-stops:*)",
+      "Bash(.venv/bin/maturin build:*)",
+      "Bash(.venv/bin/maturin sdist:*)"
+    ]
+  }
+}
