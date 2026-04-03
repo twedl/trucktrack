@@ -1,77 +1,116 @@
 # trucktrack
 
-High-performance Python package with a Rust extension backend (PyO3 + maturin).
+High-performance trajectory splitting and analysis, powered by Rust.
 
-## Requirements
+A Python package that replicates and extends
+[movingpandas](https://movingpandas.org/) trajectory splitters
+(ObservationGapSplitter, StopSplitter) with a Rust backend for speed.
+Data flows through [Polars](https://pola.rs/) DataFrames, with the option
+to process entirely in Rust (parquet in, parquet out) or pass data between
+Python and Rust via Arrow IPC.
 
-- Python 3.11+
-- Rust stable toolchain
-- maturin
-
-## Quick Start
+## Install
 
 ```bash
-# 1. Install Rust (if not already installed)
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source $HOME/.cargo/env
+pip install trucktrack
+```
 
-# 2. Create and activate a virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
+### From source
 
-# 3. Install maturin and dev dependencies
-pip install "maturin>=1.7,<2.0" pytest pytest-benchmark ruff mypy
-
-# 4. Build and install the Rust extension
+```bash
+# Requires Python 3.11+ and Rust stable
+git clone https://github.com/twedl/trucktrack.git
+cd trucktrack
+python3 -m venv .venv && source .venv/bin/activate
+pip install "maturin>=1.7,<2.0" polars pytest
 maturin develop
-
-# 5. Run tests
-pytest tests/ -v
 ```
 
 ## Usage
 
+### Python API
+
 ```python
+from datetime import timedelta
+import polars as pl
 import trucktrack
 
-trucktrack.fast_sum(list(range(1_000_000)))   # -> 499999500000
-trucktrack.fibonacci(30)                      # -> 832040
-trucktrack.word_count("hello world foo bar")  # -> 4
-print(trucktrack.__version__)                 # -> 0.1.0
+df = pl.read_parquet("tracks.parquet")
+# Expected columns: id, time, speed, heading, lat, lon
+
+# Split at observation gaps > 2 minutes
+result = trucktrack.split_by_observation_gap(df, timedelta(minutes=2))
+# Returns df with a segment_id column appended
+
+# Split at detected stops (within 50m for at least 2 minutes)
+result = trucktrack.split_by_stops(
+    df, max_diameter=50.0, min_duration=timedelta(minutes=2)
+)
+# Returns movement segments only, with segment_id column
+
+# Process entirely in Rust (parquet in, parquet out)
+trucktrack.split_by_observation_gap_file(
+    "input.parquet", "output.parquet", timedelta(minutes=2)
+)
+
+# Add speed_mps derived column
+result = trucktrack.process_dataframe_in_rust(df)
 ```
 
-## Project Layout
+### CLI
+
+```bash
+# Add derived columns (speed_mps), output CSV to stdout
+trucktrack process tracks.parquet
+
+# Split at observation gaps, write parquet
+trucktrack split-gap tracks.parquet --gap 120 -o split.parquet
+
+# Split at stops, output CSV
+trucktrack split-stops tracks.parquet --diameter 50 --duration 120
+
+# All subcommands support -o (file or stdout) and --format (csv/parquet)
+trucktrack split-gap tracks.parquet --gap 120 -o result.csv --format csv
+```
+
+## How it works
+
+| Path | Description |
+|------|-------------|
+| **Pure Rust** | `split_by_observation_gap_file()` / `split_by_stops_file()` read parquet, process, and write parquet entirely in Rust. No Python objects created. |
+| **Python <-> Rust** | `split_by_observation_gap()` / `split_by_stops()` serialize the DataFrame to Arrow IPC bytes, hand them to Rust, and deserialize the result back. Version-independent of the Python polars package. |
+| **Python only** | `read_parquet()` / `read_dataset()` use polars directly in Python. |
+
+## Project layout
 
 ```
-.
-├── pyproject.toml          # Build config (maturin backend)
-├── Cargo.toml              # Rust crate manifest
-├── src/
-│   └── lib.rs              # Rust source
-└── python/
-    └── trucktrack/
-        ├── __init__.py     # Public Python API
-        ├── _core.pyi       # Type stubs
-        └── py.typed        # PEP 561 marker
+src/
+  lib.rs              # PyO3 module registration + splitter wrappers
+  geo.rs              # Haversine distance (pure Rust math)
+  transform.rs        # add_speed_mps, IPC/parquet helpers
+  splitters/
+    gap.rs            # ObservationGapSplitter (Polars lazy expressions)
+    stop.rs           # StopSplitter (Polars groupby + Rust sliding window)
+python/trucktrack/
+  __init__.py         # Public API re-exports
+  io.py               # read_parquet, process_dataframe_in_rust
+  splitters.py        # split_by_observation_gap, split_by_stops
+  cli.py              # CLI entry point (argparse subcommands)
+  _core.pyi           # Type stubs for the Rust extension
+data/
+  example_tracks.parquet          # 10-row single vehicle example
+  splitter_test_tracks.parquet    # 83-row, 3-vehicle test dataset
 ```
 
-## Dev Workflow
+## Dev workflow
 
 | Task | Command |
 |------|---------|
-| Rebuild after Rust changes | `maturin develop` |
-| Optimized build | `maturin develop --release` |
-| Run tests | `pytest tests/ -v` |
-| Type-check | `mypy python/trucktrack` |
+| Build | `maturin develop` |
+| Tests | `pytest tests/ -v` |
 | Lint Python | `ruff check python/ tests/` |
-| Lint Rust | `cargo clippy` |
+| Format Python | `ruff format python/ tests/` |
+| Lint Rust | `cargo clippy --all-targets --all-features -- -D warnings` |
+| Format Rust | `cargo fmt --all` |
+| Type-check | `mypy python/trucktrack` |
 | Build wheel | `maturin build --release` |
-| Publish | `maturin publish` |
-
-## Adding New Rust Functions
-
-1. Add a `#[pyfunction]` in `src/lib.rs`
-2. Register it in the `#[pymodule]` block
-3. Add a corresponding entry to `python/trucktrack/_core.pyi`
-4. Re-export from `python/trucktrack/__init__.py`
-5. Run `maturin develop` and add tests
