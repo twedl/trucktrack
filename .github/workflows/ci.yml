@@ -144,8 +144,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        # macos-latest = arm64, macos-13 = x86_64. Both needed for full Mac coverage.
-        os: [ubuntu-latest, macos-latest, macos-13, windows-latest]
+        # macos-latest is arm64. The macos-13 (x86_64) runner has been retired
+        # by GitHub Actions, so Intel Mac users fall back to building from the
+        # sdist (requires a Rust toolchain). Reintroduce a paid x86_64 macOS
+        # runner here if Intel Mac wheels become a real requirement.
+        os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
       - uses: actions/checkout@v4
