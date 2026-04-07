@@ -23,6 +23,10 @@ classifiers = [
 ]
 dependencies = [
     "polars>=1.0",
+    "requests>=2.31",
+    "numpy>=1.26",
+    "pyarrow>=15.0",
+    "hilbertcurve>=2.0",
 ]
 
 [project.urls]
@@ -55,6 +59,22 @@ addopts = "-v"
 python_version = "3.11"
 strict = true
 packages = ["trucktrack"]
+
+# Lifted Python-only subpackages — fully typing them is a follow-up.
+[[tool.mypy.overrides]]
+module = [
+    "trucktrack.generate.*",
+    "trucktrack.partition.*",
+]
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = [
+    "hilbertcurve.*",
+    "pyarrow.*",
+    "requests.*",
+]
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 88

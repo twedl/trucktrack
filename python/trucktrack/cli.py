@@ -5,12 +5,14 @@ from __future__ import annotations
 import argparse
 import io
 import sys
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import polars as pl
 
 import trucktrack
+from trucktrack.generate import TripConfig, generate_trace, traces_to_parquet
+from trucktrack.partition import partition_existing_parquet
 
 # ── Output helpers ───────────────────────────────────────────────────────
 
@@ -109,6 +111,57 @@ def _cmd_split_stops(args: argparse.Namespace, parser: argparse.ArgumentParser) 
     return 0
 
 
+def _parse_latlon(value: str) -> tuple[float, float]:
+    try:
+        lat_s, lon_s = value.split(",", 1)
+        return float(lat_s), float(lon_s)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"expected LAT,LON, got {value!r}"
+        ) from exc
+
+
+def _cmd_generate(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> int:
+    departure = (
+        datetime.fromisoformat(args.departure)
+        if args.departure
+        else datetime.now(UTC)
+    )
+    config = TripConfig(
+        origin=args.origin,
+        destination=args.destination,
+        departure_time=departure,
+        gps_noise_meters=args.noise,
+        seed=args.seed,
+        valhalla_url=args.valhalla_url,
+    )
+    points = generate_trace(config)
+    if not points:
+        parser.error("generate produced zero points")
+
+    out = Path(args.output)
+    traces_to_parquet([(points, config.trip_id)], str(out))
+    print(
+        f"Wrote {len(points)} points to {out} (trip_id={config.trip_id})",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def _cmd_partition(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> int:
+    summary = partition_existing_parquet(args.input, args.output_dir)
+    if not summary:
+        print("No partitions written (input was empty?)", file=sys.stderr)
+        return 0
+    parts = ", ".join(f"{tier}={n}" for tier, n in sorted(summary.items()))
+    print(f"Wrote partitions: {parts}", file=sys.stderr)
+    return 0
+
+
 # ── Parser ───────────────────────────────────────────────────────────────
 
 
@@ -175,6 +228,50 @@ def build_parser() -> argparse.ArgumentParser:
         "--min-length", type=int, default=0, help="Min rows per segment."
     )
 
+    # generate
+    p_gen = sub.add_parser(
+        "generate", help="Synthesize a truck GPS trace and write to parquet."
+    )
+    p_gen.add_argument(
+        "--origin",
+        type=_parse_latlon,
+        required=True,
+        metavar="LAT,LON",
+        help="Origin coordinates as LAT,LON.",
+    )
+    p_gen.add_argument(
+        "--destination",
+        type=_parse_latlon,
+        required=True,
+        metavar="LAT,LON",
+        help="Destination coordinates as LAT,LON.",
+    )
+    p_gen.add_argument(
+        "-o", "--output", type=Path, required=True, help="Output parquet path."
+    )
+    p_gen.add_argument(
+        "--departure",
+        default=None,
+        help="ISO-8601 departure time (default: now, UTC).",
+    )
+    p_gen.add_argument(
+        "--noise", type=float, default=3.0, help="GPS noise stddev in meters."
+    )
+    p_gen.add_argument("--seed", type=int, default=None, help="RNG seed.")
+    p_gen.add_argument(
+        "--valhalla-url",
+        default="http://localhost:8002",
+        help="Valhalla base URL (falls back to straight-line if unreachable).",
+    )
+
+    # partition
+    p_part = sub.add_parser(
+        "partition",
+        help="Rewrite a flat parquet as a Valhalla-tile-aligned hive dataset.",
+    )
+    p_part.add_argument("input", type=Path, help="Input parquet file.")
+    p_part.add_argument("output_dir", type=Path, help="Output directory.")
+
     return parser
 
 
@@ -193,6 +290,8 @@ def main(argv: list[str] | None = None) -> int:
         "process": _cmd_process,
         "split-gap": _cmd_split_gap,
         "split-stops": _cmd_split_stops,
+        "generate": _cmd_generate,
+        "partition": _cmd_partition,
     }
     return handlers[args.command](args, parser)
 
