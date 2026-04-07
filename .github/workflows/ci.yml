@@ -158,7 +158,10 @@ jobs:
         with:
           command: build
           # abi3-py311 in Cargo.toml means one wheel per OS covers Python 3.11+.
-          args: --release --out dist/
+          # -i python3.11 forces maturin to tag the wheel cp311-abi3 (otherwise
+          # the manylinux container picks Python 3.8 and produces a cp38 wheel
+          # that pip refuses to use on Python 3.11+).
+          args: --release --out dist/ -i python3.11
           manylinux: auto
 
       - name: Upload wheels
