@@ -116,18 +116,12 @@ def _parse_latlon(value: str) -> tuple[float, float]:
         lat_s, lon_s = value.split(",", 1)
         return float(lat_s), float(lon_s)
     except ValueError as exc:
-        raise argparse.ArgumentTypeError(
-            f"expected LAT,LON, got {value!r}"
-        ) from exc
+        raise argparse.ArgumentTypeError(f"expected LAT,LON, got {value!r}") from exc
 
 
-def _cmd_generate(
-    args: argparse.Namespace, parser: argparse.ArgumentParser
-) -> int:
+def _cmd_generate(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     departure = (
-        datetime.fromisoformat(args.departure)
-        if args.departure
-        else datetime.now(UTC)
+        datetime.fromisoformat(args.departure) if args.departure else datetime.now(UTC)
     )
     config = TripConfig(
         origin=args.origin,
@@ -150,9 +144,7 @@ def _cmd_generate(
     return 0
 
 
-def _cmd_partition(
-    args: argparse.Namespace, parser: argparse.ArgumentParser
-) -> int:
+def _cmd_partition(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
     summary = partition_existing_parquet(args.input, args.output_dir)
     if not summary:
         print("No partitions written (input was empty?)", file=sys.stderr)

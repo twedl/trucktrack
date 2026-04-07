@@ -103,9 +103,7 @@ def write_trips_partitioned(
 
     Returns a {tier_name: partition_count} summary.
     """
-    metadata_rows = [
-        metadata_from_trace_points(tid, pts) for pts, tid in trips if pts
-    ]
+    metadata_rows = [metadata_from_trace_points(tid, pts) for pts, tid in trips if pts]
     metadata = pl.DataFrame(
         {
             "id": [m.id for m in metadata_rows],
@@ -120,9 +118,7 @@ def write_trips_partitioned(
     return write_partitions(metadata, points, output_dir)
 
 
-def partition_existing_parquet(
-    input_path: Path, output_dir: Path
-) -> dict[str, int]:
+def partition_existing_parquet(input_path: Path, output_dir: Path) -> dict[str, int]:
     """Read a flat parquet (`id, lat, lon, ...`) and rewrite as hive-partitioned."""
     input_path = Path(input_path)
     points = pl.read_parquet(input_path)
@@ -130,9 +126,7 @@ def partition_existing_parquet(
     required = {"id", "lat", "lon"}
     missing = required - set(points.columns)
     if missing:
-        raise ValueError(
-            f"{input_path} is missing required columns: {sorted(missing)}"
-        )
+        raise ValueError(f"{input_path} is missing required columns: {sorted(missing)}")
 
     agg = points.group_by("id").agg(
         pl.col("lat").min().alias("lat_min"),
@@ -148,11 +142,10 @@ def partition_existing_parquet(
     lat2 = (pl.col("lat_max") * (3.141592653589793 / 180.0)).alias("_lat2")
     agg = agg.with_columns(lat1, lat2)
     agg = agg.with_columns(
-        ((pl.col("_lat2") - pl.col("_lat1"))).alias("_dlat"),
-        (
-            (pl.col("lon_max") - pl.col("lon_min"))
-            * (3.141592653589793 / 180.0)
-        ).alias("_dlon"),
+        (pl.col("_lat2") - pl.col("_lat1")).alias("_dlat"),
+        ((pl.col("lon_max") - pl.col("lon_min")) * (3.141592653589793 / 180.0)).alias(
+            "_dlon"
+        ),
     )
     agg = agg.with_columns(
         (
@@ -162,9 +155,7 @@ def partition_existing_parquet(
             * (pl.col("_dlon") / 2).sin() ** 2
         ).alias("_a")
     )
-    agg = agg.with_columns(
-        (R * 2 * pl.col("_a").sqrt().arcsin()).alias("bbox_diag_km")
-    )
+    agg = agg.with_columns((R * 2 * pl.col("_a").sqrt().arcsin()).alias("bbox_diag_km"))
 
     metadata = assign_partitions(
         agg.select(["id", "centroid_lat", "centroid_lon", "bbox_diag_km"])

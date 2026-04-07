@@ -73,9 +73,7 @@ class TraceMetadata:
     bbox_diag_km: float
 
 
-def metadata_from_trace_points(
-    trip_id: str, points: list[TracePoint]
-) -> TraceMetadata:
+def metadata_from_trace_points(trip_id: str, points: list[TracePoint]) -> TraceMetadata:
     """Compute centroid + bbox-diagonal metadata from in-memory TracePoints."""
     lats = [p.lat for p in points]
     lons = [p.lon for p in points]

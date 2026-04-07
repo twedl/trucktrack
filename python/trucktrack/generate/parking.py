@@ -56,9 +56,7 @@ def _arc_points(
     end_angle: float,
     num_points: int = 15,
 ) -> list[tuple[float, float]]:
-    angles = np.linspace(
-        math.radians(start_angle), math.radians(end_angle), num_points
-    )
+    angles = np.linspace(math.radians(start_angle), math.radians(end_angle), num_points)
     cx, cy = center
     return [(cx + radius * math.cos(a), cy + radius * math.sin(a)) for a in angles]
 
@@ -79,9 +77,7 @@ def _straight_points(
     ]
 
 
-def _heading_between(
-    p1: tuple[float, float], p2: tuple[float, float]
-) -> float:
+def _heading_between(p1: tuple[float, float], p2: tuple[float, float]) -> float:
     dx = p2[0] - p1[0]
     dy = p2[1] - p1[1]
     return (math.degrees(math.atan2(dx, dy)) + 360) % 360
@@ -490,9 +486,7 @@ def generate_departure_maneuver(
             speed = 9.0 + (frac - 0.6) / 0.4 * 3.0
         speeds.append(speed)
 
-        hdg = (
-            _heading_between(path[i], path[i + 1]) if i < n - 1 else dock_heading
-        )
+        hdg = _heading_between(path[i], path[i + 1]) if i < n - 1 else dock_heading
         new_headings.append(hdg)
 
     return _build_trace(

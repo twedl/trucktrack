@@ -30,9 +30,7 @@ def classify_and_cap(speed_mps: float) -> float:
         return min(speed_mps, URBAN_CAP)
 
 
-def smooth_speeds(
-    speeds_mps: list[float], distances_m: list[float]
-) -> list[float]:
+def smooth_speeds(speeds_mps: list[float], distances_m: list[float]) -> list[float]:
     """Apply acceleration/deceleration constraints to a speed sequence."""
     n = len(speeds_mps)
     if n == 0:

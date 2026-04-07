@@ -21,7 +21,7 @@ UNREACHABLE_VALHALLA = "http://127.0.0.1:1"
 
 def _config(**overrides) -> TripConfig:  # type: ignore[no-untyped-def]
     base = dict(
-        origin=(43.65, -79.38),       # Toronto
+        origin=(43.65, -79.38),  # Toronto
         destination=(43.45, -80.49),  # Kitchener
         departure_time=datetime(2026, 1, 1, 8, 0, tzinfo=UTC),
         seed=42,

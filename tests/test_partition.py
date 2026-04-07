@@ -115,9 +115,7 @@ class TestWriteTripsPartitioned:
         assert files
         df = pl.read_parquet(files[0])
         # tier and partition_id come from directory names, not the inner file
-        assert {"id", "lat", "lon", "speed", "heading", "time"}.issubset(
-            df.columns
-        )
+        assert {"id", "lat", "lon", "speed", "heading", "time"}.issubset(df.columns)
 
 
 class TestPartitionExistingParquet:
