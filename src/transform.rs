@@ -1,6 +1,7 @@
 use polars::prelude::*;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
+use pyo3_polars::PyDataFrame;
 
 pub fn polars_err(e: PolarsError) -> PyErr {
     PyRuntimeError::new_err(e.to_string())
@@ -8,17 +9,6 @@ pub fn polars_err(e: PolarsError) -> PyErr {
 
 pub fn io_err(e: std::io::Error) -> PyErr {
     PyRuntimeError::new_err(e.to_string())
-}
-
-pub fn df_from_ipc(ipc_bytes: &[u8]) -> PolarsResult<DataFrame> {
-    let cursor = std::io::Cursor::new(ipc_bytes);
-    IpcReader::new(cursor).finish()
-}
-
-pub fn df_to_ipc(df: &mut DataFrame) -> PolarsResult<Vec<u8>> {
-    let mut out: Vec<u8> = Vec::new();
-    IpcWriter::new(&mut out).finish(df)?;
-    Ok(out)
 }
 
 /// Add a `speed_mps` column (km/h -> m/s) to a DataFrame.
@@ -45,10 +35,10 @@ pub fn process_tracks_file(input_path: &str, output_path: &str) -> PyResult<usiz
     Ok(n)
 }
 
-/// Accept an Arrow IPC buffer from Python, process in Rust, return an Arrow IPC buffer.
+/// Accept a Polars DataFrame from Python via the Arrow C Data Interface,
+/// process in Rust, and return a Polars DataFrame the same way (zero-copy).
 #[pyfunction]
-pub fn tracks_from_ipc(ipc_bytes: &[u8]) -> PyResult<Vec<u8>> {
-    let df = df_from_ipc(ipc_bytes).map_err(polars_err)?;
-    let mut result = add_speed_mps(df).map_err(polars_err)?;
-    df_to_ipc(&mut result).map_err(polars_err)
+pub fn tracks_from_df(df: PyDataFrame) -> PyResult<PyDataFrame> {
+    let result = add_speed_mps(df.into()).map_err(polars_err)?;
+    Ok(PyDataFrame(result))
 }

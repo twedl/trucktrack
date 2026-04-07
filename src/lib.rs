@@ -4,24 +4,24 @@ pub mod transform;
 
 use polars::prelude::*;
 use pyo3::prelude::*;
+use pyo3_polars::PyDataFrame;
 
-use transform::{df_from_ipc, df_to_ipc, io_err, polars_err};
+use transform::{io_err, polars_err};
 
 // ── Splitter PyO3 wrappers ──────────────────────────────────────────────
 
 #[pyfunction]
-fn split_by_gap_ipc(
-    ipc_bytes: &[u8],
+fn split_by_gap_df(
+    df: PyDataFrame,
     id_col: &str,
     time_col: &str,
     gap_us: i64,
     min_length: usize,
-) -> PyResult<Vec<u8>> {
-    let df = df_from_ipc(ipc_bytes).map_err(polars_err)?;
-    let mut result =
-        splitters::gap::split_by_observation_gap(df, id_col, time_col, gap_us, min_length)
+) -> PyResult<PyDataFrame> {
+    let result =
+        splitters::gap::split_by_observation_gap(df.into(), id_col, time_col, gap_us, min_length)
             .map_err(polars_err)?;
-    df_to_ipc(&mut result).map_err(polars_err)
+    Ok(PyDataFrame(result))
 }
 
 #[pyfunction]
@@ -49,10 +49,10 @@ fn split_by_gap_file(
 }
 
 #[pyfunction]
-#[pyo3(signature = (ipc_bytes, id_col, time_col, lat_col, lon_col, max_diameter_m, min_duration_us, min_length))]
+#[pyo3(signature = (df, id_col, time_col, lat_col, lon_col, max_diameter_m, min_duration_us, min_length))]
 #[allow(clippy::too_many_arguments)]
-fn split_by_stops_ipc(
-    ipc_bytes: &[u8],
+fn split_by_stops_df(
+    df: PyDataFrame,
     id_col: &str,
     time_col: &str,
     lat_col: &str,
@@ -60,10 +60,9 @@ fn split_by_stops_ipc(
     max_diameter_m: f64,
     min_duration_us: i64,
     min_length: usize,
-) -> PyResult<Vec<u8>> {
-    let df = df_from_ipc(ipc_bytes).map_err(polars_err)?;
-    let mut result = splitters::stop::split_by_stops(
-        df,
+) -> PyResult<PyDataFrame> {
+    let result = splitters::stop::split_by_stops(
+        df.into(),
         id_col,
         time_col,
         lat_col,
@@ -73,7 +72,7 @@ fn split_by_stops_ipc(
         min_length,
     )
     .map_err(polars_err)?;
-    df_to_ipc(&mut result).map_err(polars_err)
+    Ok(PyDataFrame(result))
 }
 
 #[pyfunction]
@@ -118,10 +117,10 @@ fn split_by_stops_file(
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(transform::process_tracks_file, m)?)?;
-    m.add_function(wrap_pyfunction!(transform::tracks_from_ipc, m)?)?;
-    m.add_function(wrap_pyfunction!(split_by_gap_ipc, m)?)?;
+    m.add_function(wrap_pyfunction!(transform::tracks_from_df, m)?)?;
+    m.add_function(wrap_pyfunction!(split_by_gap_df, m)?)?;
     m.add_function(wrap_pyfunction!(split_by_gap_file, m)?)?;
-    m.add_function(wrap_pyfunction!(split_by_stops_ipc, m)?)?;
+    m.add_function(wrap_pyfunction!(split_by_stops_df, m)?)?;
     m.add_function(wrap_pyfunction!(split_by_stops_file, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())

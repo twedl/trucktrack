@@ -15,6 +15,10 @@ panic = "abort"
 name = "trucktrack"
 crate-type = ["cdylib", "rlib"]
 
+# NOTE: pyo3, polars, and pyo3-polars must be upgraded together. pyo3-polars
+# pins exact polars and pyo3 minor versions; check crates.io before bumping any
+# of the three.
 [dependencies]
-pyo3 = { version = "0.28", features = ["extension-module"] }
-polars = { version = "0.53", features = ["parquet", "ipc", "lazy", "temporal", "dtype-duration", "cum_agg", "diff", "abs"] }
+pyo3 = { version = "0.27", features = ["extension-module"] }
+polars = { version = "0.53", features = ["parquet", "lazy", "temporal", "dtype-duration", "cum_agg", "diff", "abs"] }
+pyo3-polars = "0.26"

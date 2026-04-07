@@ -2,24 +2,12 @@
 
 from __future__ import annotations
 
-import io as _io
 from datetime import timedelta
 from pathlib import Path
 
 import polars as pl
 
 from trucktrack import _core
-
-
-def _to_ipc(df: pl.DataFrame) -> bytes:
-    buf = _io.BytesIO()
-    df.write_ipc(buf)
-    return buf.getvalue()
-
-
-def _from_ipc(data: bytes) -> pl.DataFrame:
-    return pl.read_ipc(_io.BytesIO(data))
-
 
 # ── ObservationGapSplitter ───────────────────────────────────────────────
 
@@ -34,10 +22,7 @@ def split_by_observation_gap(
 ) -> pl.DataFrame:
     """Split trajectories at temporal gaps, returning df with ``segment_id`` column."""
     gap_us = int(gap.total_seconds() * 1_000_000)
-    result_bytes = _core.split_by_gap_ipc(
-        _to_ipc(df), id_col, time_col, gap_us, min_length
-    )
-    return _from_ipc(result_bytes)
+    return _core.split_by_gap_df(df, id_col, time_col, gap_us, min_length)
 
 
 def split_by_observation_gap_file(
@@ -72,8 +57,8 @@ def split_by_stops(
 ) -> pl.DataFrame:
     """Split at detected stops, returning movement segments with ``segment_id``."""
     dur_us = int(min_duration.total_seconds() * 1_000_000)
-    result_bytes = _core.split_by_stops_ipc(
-        _to_ipc(df),
+    return _core.split_by_stops_df(
+        df,
         id_col,
         time_col,
         lat_col,
@@ -82,7 +67,6 @@ def split_by_stops(
         dur_us,
         min_length,
     )
-    return _from_ipc(result_bytes)
 
 
 def split_by_stops_file(

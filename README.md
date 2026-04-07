@@ -6,8 +6,8 @@ A Python package that replicates and extends
 [movingpandas](https://movingpandas.org/) trajectory splitters
 (ObservationGapSplitter, StopSplitter) with a Rust backend for speed.
 Data flows through [Polars](https://pola.rs/) DataFrames, with the option
-to process entirely in Rust (parquet in, parquet out) or pass data between
-Python and Rust via Arrow IPC.
+to process entirely in Rust (parquet in, parquet out) or share DataFrames
+between Python and Rust zero-copy via `pyo3-polars`.
 
 ## Install
 
@@ -78,7 +78,7 @@ trucktrack split-gap tracks.parquet --gap 120 -o result.csv --format csv
 | Path | Description |
 |------|-------------|
 | **Pure Rust** | `split_by_observation_gap_file()` / `split_by_stops_file()` read parquet, process, and write parquet entirely in Rust. No Python objects created. |
-| **Python <-> Rust** | `split_by_observation_gap()` / `split_by_stops()` serialize the DataFrame to Arrow IPC bytes, hand them to Rust, and deserialize the result back. Version-independent of the Python polars package. |
+| **Python <-> Rust** | `split_by_observation_gap()` / `split_by_stops()` share the Polars DataFrame with Rust via `pyo3-polars` (Arrow C Data Interface, zero-copy on column buffers). The Python `polars`, Rust `polars`, and `pyo3-polars` versions must be kept in sync. |
 | **Python only** | `read_parquet()` / `read_dataset()` use polars directly in Python. |
 
 ## Project layout

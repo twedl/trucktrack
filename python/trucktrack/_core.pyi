@@ -1,5 +1,7 @@
 """Type stubs for trucktrack._core (compiled Rust extension)."""
 
+import polars as pl
+
 __version__: str
 
 def process_tracks_file(input_path: str, output_path: str) -> int:
@@ -9,18 +11,18 @@ def process_tracks_file(input_path: str, output_path: str) -> int:
     """
     ...
 
-def tracks_from_ipc(ipc_bytes: bytes) -> bytes:
-    """Accept Arrow IPC bytes, process in Rust, return Arrow IPC bytes."""
+def tracks_from_df(df: pl.DataFrame) -> pl.DataFrame:
+    """Process a Polars DataFrame in Rust (zero-copy via Arrow C Data Interface)."""
     ...
 
-def split_by_gap_ipc(
-    ipc_bytes: bytes,
+def split_by_gap_df(
+    df: pl.DataFrame,
     id_col: str,
     time_col: str,
     gap_us: int,
     min_length: int,
-) -> bytes:
-    """Split trajectories at observation gaps via Arrow IPC."""
+) -> pl.DataFrame:
+    """Split trajectories at observation gaps (zero-copy DataFrame handoff)."""
     ...
 
 def split_by_gap_file(
@@ -34,8 +36,8 @@ def split_by_gap_file(
     """Split trajectories at observation gaps, reading/writing parquet files."""
     ...
 
-def split_by_stops_ipc(
-    ipc_bytes: bytes,
+def split_by_stops_df(
+    df: pl.DataFrame,
     id_col: str,
     time_col: str,
     lat_col: str,
@@ -43,8 +45,8 @@ def split_by_stops_ipc(
     max_diameter_m: float,
     min_duration_us: int,
     min_length: int,
-) -> bytes:
-    """Split trajectories at detected stops via Arrow IPC."""
+) -> pl.DataFrame:
+    """Split trajectories at detected stops (zero-copy DataFrame handoff)."""
     ...
 
 def split_by_stops_file(

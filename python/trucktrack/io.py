@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import io as _io
 from pathlib import Path
 
 import polars as pl
@@ -35,10 +34,7 @@ def process_parquet_in_rust(input_path: str | Path, output_path: str | Path) -> 
 def process_dataframe_in_rust(df: pl.DataFrame) -> pl.DataFrame:
     """Pass *df* to Rust for processing and return the result as a new DataFrame.
 
-    Serialises to Arrow IPC bytes, hands the buffer to the Rust extension,
-    then deserialises the result back into a Polars DataFrame.
+    The DataFrame is shared with Rust via the Arrow C Data Interface
+    (``pyo3-polars``), so column buffers are not copied.
     """
-    buf = _io.BytesIO()
-    df.write_ipc(buf)
-    result_bytes = _core.tracks_from_ipc(buf.getvalue())
-    return pl.read_ipc(_io.BytesIO(result_bytes))
+    return _core.tracks_from_df(df)
