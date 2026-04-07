@@ -7,15 +7,11 @@ so the rest of the pipeline keeps working without an external dependency.
 from __future__ import annotations
 
 import math
-import time
 from typing import Any
 
 import requests
 
 from trucktrack.generate.models import DEFAULT_VALHALLA_URL, RouteSegment
-
-MAX_RETRIES = 3
-RETRY_DELAYS = [2, 4, 8]
 
 
 def fetch_route(
@@ -43,19 +39,13 @@ def fetch_route(
     }
 
     url = valhalla_url.rstrip("/") + "/route"
-    for attempt in range(MAX_RETRIES):
-        try:
-            resp = requests.post(url, json=body, timeout=30)
-            resp.raise_for_status()
-            return _parse_valhalla_response(resp.json())
-        except (requests.RequestException, KeyError, ValueError) as e:
-            if attempt == MAX_RETRIES - 1:
-                print(f"Valhalla error: {e}")
-        if attempt < MAX_RETRIES - 1:
-            time.sleep(RETRY_DELAYS[attempt])
-
-    print("Valhalla unavailable, using straight-line fallback")
-    return _straight_line_fallback(origin, destination)
+    try:
+        resp = requests.post(url, json=body, timeout=30)
+        resp.raise_for_status()
+        return _parse_valhalla_response(resp.json())
+    except (requests.RequestException, KeyError, ValueError) as e:
+        print(f"Valhalla error: {e}, using straight-line fallback")
+        return _straight_line_fallback(origin, destination)
 
 
 def _decode_polyline6(encoded: str) -> list[tuple[float, float]]:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import random
+from datetime import datetime
 from io import BytesIO, StringIO
 
 from trucktrack.generate.interpolator import bearing, interpolate_route
@@ -107,7 +108,7 @@ def traces_to_parquet(
     lons: list[float] = []
     speeds: list[float] = []
     headings: list[float] = []
-    timestamps: list = []
+    timestamps: list[datetime] = []
     for points, trip_id in trips:
         for pt in points:
             ids.append(trip_id)

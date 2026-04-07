@@ -63,7 +63,6 @@ packages = ["trucktrack"]
 # Lifted Python-only subpackages — fully typing them is a follow-up.
 [[tool.mypy.overrides]]
 module = [
-    "trucktrack.generate.*",
     "trucktrack.partition.*",
 ]
 ignore_errors = true

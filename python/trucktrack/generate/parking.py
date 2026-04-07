@@ -423,11 +423,10 @@ def generate_arrival_maneuver(
     approach_side: str = "right",
 ) -> list[TracePoint]:
     """Trace points for a truck arriving at a target location."""
-    generator = _GENERATORS[maneuver_type]
     if maneuver_type is ManeuverType.ALLEY_DOCK:
-        path, speeds, headings = generator(dock_heading, rng, approach_side)  # type: ignore[call-arg]
+        path, speeds, headings = _alley_dock(dock_heading, rng, approach_side)
     else:
-        path, speeds, headings = generator(dock_heading, rng)  # type: ignore[call-arg]
+        path, speeds, headings = _GENERATORS[maneuver_type](dock_heading, rng)
 
     jitter = 2.5 if maneuver_type is not ManeuverType.PULL_THROUGH else 0.5
 
@@ -468,11 +467,10 @@ def generate_departure_maneuver(
             heading_jitter=0.5,
         )
 
-    generator = _GENERATORS[maneuver_type]
     if maneuver_type is ManeuverType.ALLEY_DOCK:
-        path, _, headings = generator(dock_heading, rng, approach_side)  # type: ignore[call-arg]
+        path, _, headings = _alley_dock(dock_heading, rng, approach_side)
     else:
-        path, _, headings = generator(dock_heading, rng)  # type: ignore[call-arg]
+        path, _, headings = _GENERATORS[maneuver_type](dock_heading, rng)
 
     path = list(reversed(path))
     headings = list(reversed(headings))
