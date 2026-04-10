@@ -1,5 +1,13 @@
 # CLAUDE.md
 
+## Setup
+
+After cloning, install the pre-push hook:
+
+```
+ln -sf ../../scripts/pre-push .git/hooks/pre-push
+```
+
 ## Build
 
 ```

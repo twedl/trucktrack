@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "=== pre-push: running CI checks ==="
+
+echo "--- cargo fmt ---"
+cargo fmt --all -- --check
+
+echo "--- cargo clippy ---"
+cargo clippy --all-targets --all-features -- -D warnings
+
+echo "--- ruff check ---"
+uv run ruff check python/ tests/
+
+echo "--- ruff format ---"
+uv run ruff format --check python/ tests/
+
+echo "--- mypy ---"
+uv run mypy python/trucktrack
+
+echo "--- version check ---"
+PY_VER=$(grep -E '^version[[:space:]]*=' pyproject.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+RS_VER=$(grep -E '^version[[:space:]]*=' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+if [ "$PY_VER" != "$RS_VER" ]; then
+  echo "ERROR: version mismatch: pyproject.toml=$PY_VER Cargo.toml=$RS_VER"
+  exit 1
+fi
+
+echo "--- pytest ---"
+uv run pytest tests/ -v
+
+echo "=== pre-push: all checks passed ==="
