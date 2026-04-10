@@ -67,15 +67,13 @@ pub fn filter_traffic_stops(
 
         let mut group = group.drop("is_stop")?.drop("segment_id")?;
 
-        let seg_col =
-            UInt32Chunked::from_vec(PlSmallStr::from_static("segment_id"), segment_ids)
-                .into_series()
-                .into_column();
+        let seg_col = UInt32Chunked::from_vec(PlSmallStr::from_static("segment_id"), segment_ids)
+            .into_series()
+            .into_column();
 
-        let stop_col =
-            BooleanChunked::from_slice(PlSmallStr::from_static("is_stop"), &is_stop)
-                .into_series()
-                .into_column();
+        let stop_col = BooleanChunked::from_slice(PlSmallStr::from_static("is_stop"), &is_stop)
+            .into_series()
+            .into_column();
 
         let _ = group.with_column(seg_col)?;
         let _ = group.with_column(stop_col)?;
@@ -268,23 +266,26 @@ mod tests {
         let is_stop = vec![false, false, false, true, true, false, false];
         let segment_ids: Vec<u32> = vec![0, 0, 0, 1, 1, 2, 2];
 
-        let df = DataFrame::new(7, vec![
-            Column::new("id".into(), vec!["a"; 7]),
-            Series::new("lat".into(), &lats)
-                .cast(&DataType::Float64)
-                .unwrap()
-                .into_column(),
-            Series::new("lon".into(), &lons)
-                .cast(&DataType::Float64)
-                .unwrap()
-                .into_column(),
-            BooleanChunked::from_slice("is_stop".into(), &is_stop)
-                .into_series()
-                .into_column(),
-            UInt32Chunked::from_vec("segment_id".into(), segment_ids)
-                .into_series()
-                .into_column(),
-        ])
+        let df = DataFrame::new(
+            7,
+            vec![
+                Column::new("id".into(), vec!["a"; 7]),
+                Series::new("lat".into(), &lats)
+                    .cast(&DataType::Float64)
+                    .unwrap()
+                    .into_column(),
+                Series::new("lon".into(), &lons)
+                    .cast(&DataType::Float64)
+                    .unwrap()
+                    .into_column(),
+                BooleanChunked::from_slice("is_stop".into(), &is_stop)
+                    .into_series()
+                    .into_column(),
+                UInt32Chunked::from_vec("segment_id".into(), segment_ids)
+                    .into_series()
+                    .into_column(),
+            ],
+        )
         .unwrap();
 
         let result = filter_traffic_stops(df, "id", "lat", "lon", 30.0, 5.0).unwrap();
@@ -321,23 +322,26 @@ mod tests {
         let is_stop = vec![false, false, false, true, true, false, false];
         let segment_ids: Vec<u32> = vec![0, 0, 0, 1, 1, 2, 2];
 
-        let df = DataFrame::new(7, vec![
-            Column::new("id".into(), vec!["a"; 7]),
-            Series::new("lat".into(), &lats)
-                .cast(&DataType::Float64)
-                .unwrap()
-                .into_column(),
-            Series::new("lon".into(), &lons)
-                .cast(&DataType::Float64)
-                .unwrap()
-                .into_column(),
-            BooleanChunked::from_slice("is_stop".into(), &is_stop)
-                .into_series()
-                .into_column(),
-            UInt32Chunked::from_vec("segment_id".into(), segment_ids)
-                .into_series()
-                .into_column(),
-        ])
+        let df = DataFrame::new(
+            7,
+            vec![
+                Column::new("id".into(), vec!["a"; 7]),
+                Series::new("lat".into(), &lats)
+                    .cast(&DataType::Float64)
+                    .unwrap()
+                    .into_column(),
+                Series::new("lon".into(), &lons)
+                    .cast(&DataType::Float64)
+                    .unwrap()
+                    .into_column(),
+                BooleanChunked::from_slice("is_stop".into(), &is_stop)
+                    .into_series()
+                    .into_column(),
+                UInt32Chunked::from_vec("segment_id".into(), segment_ids)
+                    .into_series()
+                    .into_column(),
+            ],
+        )
         .unwrap();
 
         let result = filter_traffic_stops(df, "id", "lat", "lon", 30.0, 5.0).unwrap();
