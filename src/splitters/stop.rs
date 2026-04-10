@@ -134,7 +134,12 @@ fn datetime_to_microseconds(col: &Column) -> PolarsResult<Vec<i64>> {
         .cast(&DataType::Int64)
         .map_err(|e| {
             PolarsError::ComputeError(
-                format!("cannot cast '{}' ({}) to Int64: {e}", col.name(), col.dtype()).into(),
+                format!(
+                    "cannot cast '{}' ({}) to Int64: {e}",
+                    col.name(),
+                    col.dtype()
+                )
+                .into(),
             )
         })?
         .take_materialized_series();
@@ -293,8 +298,20 @@ mod tests {
     #[test]
     fn detect_stops_movement_breaks_stop() {
         // Stationary then moves far away
-        let lats = vec![Some(43.65), Some(43.65), Some(43.65), Some(50.0), Some(50.0)];
-        let lons = vec![Some(-79.38), Some(-79.38), Some(-79.38), Some(-79.38), Some(-79.38)];
+        let lats = vec![
+            Some(43.65),
+            Some(43.65),
+            Some(43.65),
+            Some(50.0),
+            Some(50.0),
+        ];
+        let lons = vec![
+            Some(-79.38),
+            Some(-79.38),
+            Some(-79.38),
+            Some(-79.38),
+            Some(-79.38),
+        ];
         let times: Vec<i64> = (0..5).map(|i| i * 1_000_000).collect();
         let stops = detect_stops(&lats, &lons, &times, 100.0, 1_000_000);
         assert_eq!(stops, vec![(0, 2)]);
