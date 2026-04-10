@@ -1,6 +1,12 @@
 """Trip generation: routing, interpolation, noise, parking maneuvers."""
 
-from trucktrack.generate.models import ErrorConfig, RouteSegment, TracePoint, TripConfig
+from trucktrack.generate.models import (
+    ErrorConfig,
+    RouteSegment,
+    TracePoint,
+    TripConfig,
+    default_error_profile,
+)
 from trucktrack.generate.trace import generate_trace, traces_to_csv, traces_to_parquet
 
 __all__ = [
@@ -8,6 +14,7 @@ __all__ = [
     "RouteSegment",
     "TracePoint",
     "TripConfig",
+    "default_error_profile",
     "generate_trace",
     "traces_to_csv",
     "traces_to_parquet",

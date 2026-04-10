@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 
 import numpy as np
 
+from trucktrack.generate.interpolator import offset_to_latlon
 from trucktrack.generate.models import TracePoint
 
 MIN_TURN_RADIUS = 12.8
@@ -44,9 +45,7 @@ def _heading_to_xy(heading_deg: float) -> tuple[float, float]:
 def _offset_to_latlon(
     base_lat: float, base_lon: float, dx_east: float, dy_north: float
 ) -> tuple[float, float]:
-    dlat = dy_north / 111320.0
-    dlon = dx_east / (111320.0 * math.cos(math.radians(base_lat)))
-    return base_lat + dlat, base_lon + dlon
+    return offset_to_latlon(base_lat, base_lon, dx_east, dy_north)
 
 
 def _arc_points(

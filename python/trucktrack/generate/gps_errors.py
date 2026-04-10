@@ -8,15 +8,36 @@ from __future__ import annotations
 
 import math
 import random
+from dataclasses import replace
 from datetime import timedelta
+from typing import Callable
 
-from trucktrack.generate.interpolator import INTERVAL_S
+from trucktrack.generate.interpolator import INTERVAL_S, offset_to_latlon
 from trucktrack.generate.models import TracePoint
 
+ErrorFn = Callable[..., list[TracePoint]]
 
-# ---------------------------------------------------------------------------
-# 1. Signal dropout — remove a contiguous stretch of points
-# ---------------------------------------------------------------------------
+
+def _random_window(
+    n: int, duration_s: float, rng: random.Random, margin_frac: float = 0.2,
+) -> tuple[int, int]:
+    """Return (start, end) indices for a random contiguous window."""
+    count = max(2, int(duration_s / INTERVAL_S))
+    margin = int(n * margin_frac)
+    hi = max(margin, n - margin - count)
+    start = rng.randint(margin, hi)
+    return start, min(start + count, n)
+
+
+def _offset_point(
+    pt: TracePoint, distance_m: float, angle: float,
+) -> TracePoint:
+    """Shift *pt* by *distance_m* at *angle* (radians)."""
+    dx = distance_m * math.cos(angle)
+    dy = distance_m * math.sin(angle)
+    lat, lon = offset_to_latlon(pt.lat, pt.lon, dx, dy)
+    return replace(pt, lat=round(lat, 6), lon=round(lon, 6))
+
 
 def signal_dropout(
     points: list[TracePoint],
@@ -34,10 +55,6 @@ def signal_dropout(
     return points[:start] + points[end:]
 
 
-# ---------------------------------------------------------------------------
-# 2. Cold-start drift — large positional error after existing gaps
-# ---------------------------------------------------------------------------
-
 def cold_start_drift(
     points: list[TracePoint],
     rng: random.Random,
@@ -53,24 +70,11 @@ def cold_start_drift(
         if gap > INTERVAL_S * 2:
             for j in range(i, min(i + n_points, len(result))):
                 decay = drift_meters * (1.0 - (j - i) / n_points)
-                angle = rng.uniform(0, 2 * math.pi)
-                dlat = (decay * math.sin(angle)) / 111_320.0
-                dlon = (decay * math.cos(angle)) / (
-                    111_320.0 * math.cos(math.radians(result[j].lat))
-                )
-                result[j] = TracePoint(
-                    lat=round(result[j].lat + dlat, 6),
-                    lon=round(result[j].lon + dlon, 6),
-                    speed_mph=result[j].speed_mph,
-                    heading=result[j].heading,
-                    timestamp=result[j].timestamp,
+                result[j] = _offset_point(
+                    result[j], decay, rng.uniform(0, 2 * math.pi),
                 )
     return result
 
-
-# ---------------------------------------------------------------------------
-# 3. Urban-canyon / multipath — large position jumps with speed spikes
-# ---------------------------------------------------------------------------
 
 def multipath(
     points: list[TracePoint],
@@ -88,24 +92,10 @@ def multipath(
     )
     for i in indices:
         offset = rng.uniform(offset_min_m, offset_max_m)
-        angle = rng.uniform(0, 2 * math.pi)
-        dlat = (offset * math.sin(angle)) / 111_320.0
-        dlon = (offset * math.cos(angle)) / (
-            111_320.0 * math.cos(math.radians(result[i].lat))
-        )
-        result[i] = TracePoint(
-            lat=round(result[i].lat + dlat, 6),
-            lon=round(result[i].lon + dlon, 6),
-            speed_mph=round(rng.uniform(60, 120), 1),
-            heading=result[i].heading,
-            timestamp=result[i].timestamp,
-        )
+        moved = _offset_point(result[i], offset, rng.uniform(0, 2 * math.pi))
+        result[i] = replace(moved, speed_mph=round(rng.uniform(60, 120), 1))
     return result
 
-
-# ---------------------------------------------------------------------------
-# 4. Stuck / frozen fix — same lat/lon repeated while truck moves
-# ---------------------------------------------------------------------------
 
 def frozen_fix(
     points: list[TracePoint],
@@ -115,28 +105,16 @@ def frozen_fix(
 ) -> list[TracePoint]:
     if len(points) < 10:
         return points
-    n_frozen = max(2, int(duration_s / INTERVAL_S))
-    margin = len(points) // 5
-    hi = max(margin, len(points) - margin - n_frozen)
-    start = rng.randint(margin, hi)
-    end = min(start + n_frozen, len(points))
+    start, end = _random_window(len(points), duration_s, rng)
     frozen_lat = points[start].lat
     frozen_lon = points[start].lon
     result = list(points)
     for i in range(start, end):
-        result[i] = TracePoint(
-            lat=frozen_lat,
-            lon=frozen_lon,
-            speed_mph=0.0,
-            heading=result[i].heading,
-            timestamp=result[i].timestamp,
+        result[i] = replace(
+            result[i], lat=frozen_lat, lon=frozen_lon, speed_mph=0.0,
         )
     return result
 
-
-# ---------------------------------------------------------------------------
-# 5. Timestamp glitch — jumps, duplicates, or backwards timestamps
-# ---------------------------------------------------------------------------
 
 def timestamp_glitch(
     points: list[TracePoint],
@@ -158,16 +136,9 @@ def timestamp_glitch(
             ts = pt.timestamp + timedelta(hours=rng.uniform(1, 12))
         else:
             ts = pt.timestamp - timedelta(hours=rng.uniform(1, 6))
-        result[i] = TracePoint(
-            lat=pt.lat, lon=pt.lon, speed_mph=pt.speed_mph,
-            heading=pt.heading, timestamp=ts,
-        )
+        result[i] = replace(pt, timestamp=ts)
     return result
 
-
-# ---------------------------------------------------------------------------
-# 6. Coordinate corruption — truncation, sign flip, lat/lon swap
-# ---------------------------------------------------------------------------
 
 def coordinate_corruption(
     points: list[TracePoint],
@@ -190,16 +161,9 @@ def coordinate_corruption(
             lat, lon = pt.lat, -pt.lon
         else:  # swap
             lat, lon = round(pt.lon, 6), round(pt.lat, 6)
-        result[i] = TracePoint(
-            lat=lat, lon=lon, speed_mph=pt.speed_mph,
-            heading=pt.heading, timestamp=pt.timestamp,
-        )
+        result[i] = replace(pt, lat=lat, lon=lon)
     return result
 
-
-# ---------------------------------------------------------------------------
-# 7. Speed / heading desync — zero speed while moving, lagged heading
-# ---------------------------------------------------------------------------
 
 def speed_heading_desync(
     points: list[TracePoint],
@@ -209,26 +173,14 @@ def speed_heading_desync(
 ) -> list[TracePoint]:
     if len(points) < 10:
         return points
-    n_affected = max(2, int(duration_s / INTERVAL_S))
-    margin = len(points) // 5
-    hi = max(margin, len(points) - margin - n_affected)
-    start = rng.randint(margin, hi)
-    end = min(start + n_affected, len(points))
+    start, end = _random_window(len(points), duration_s, rng)
     heading_lag = rng.randint(2, 5)
     result = list(points)
     for i in range(start, end):
         lagged = result[max(i - heading_lag, 0)].heading
-        result[i] = TracePoint(
-            lat=result[i].lat, lon=result[i].lon,
-            speed_mph=0.0, heading=lagged,
-            timestamp=result[i].timestamp,
-        )
+        result[i] = replace(result[i], speed_mph=0.0, heading=lagged)
     return result
 
-
-# ---------------------------------------------------------------------------
-# 8. Jitter at rest — random walk on stationary points
-# ---------------------------------------------------------------------------
 
 def jitter_at_rest(
     points: list[TracePoint],
@@ -247,12 +199,12 @@ def jitter_at_rest(
             )
             walk_lat += step_lat
             walk_lon += step_lon
-            result[i] = TracePoint(
+            result[i] = replace(
+                result[i],
                 lat=round(result[i].lat + walk_lat, 6),
                 lon=round(result[i].lon + walk_lon, 6),
                 speed_mph=round(rng.uniform(0, 0.5), 1),
                 heading=round(rng.uniform(0, 360), 1),
-                timestamp=result[i].timestamp,
             )
         else:
             walk_lat = 0.0
@@ -260,11 +212,7 @@ def jitter_at_rest(
     return result
 
 
-# ---------------------------------------------------------------------------
-# Registry
-# ---------------------------------------------------------------------------
-
-GPS_ERRORS: dict[str, object] = {
+GPS_ERRORS: dict[str, ErrorFn] = {
     "signal_dropout": signal_dropout,
     "cold_start_drift": cold_start_drift,
     "multipath": multipath,

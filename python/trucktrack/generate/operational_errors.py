@@ -8,26 +8,20 @@ from __future__ import annotations
 
 import math
 import random
+from dataclasses import replace
 from datetime import timedelta
+from typing import Callable
 
-from trucktrack.generate.interpolator import INTERVAL_S, haversine_m
+from trucktrack.generate.interpolator import INTERVAL_S, haversine_m, offset_to_latlon
 from trucktrack.generate.models import TracePoint
 
+ErrorFn = Callable[..., list[TracePoint]]
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _shift_timestamps(
     points: list[TracePoint], delta: timedelta,
 ) -> list[TracePoint]:
-    return [
-        TracePoint(
-            lat=p.lat, lon=p.lon, speed_mph=p.speed_mph,
-            heading=p.heading, timestamp=p.timestamp + delta,
-        )
-        for p in points
-    ]
+    return [replace(p, timestamp=p.timestamp + delta) for p in points]
 
 
 def _make_dwell_points(
@@ -39,14 +33,14 @@ def _make_dwell_points(
 ) -> list[TracePoint]:
     pts: list[TracePoint] = []
     for i in range(n):
-        dlat = rng.gauss(0, jitter_m) / 111_320.0
-        dlon = rng.gauss(0, jitter_m) / (
-            111_320.0 * math.cos(math.radians(anchor.lat))
+        lat, lon = offset_to_latlon(
+            anchor.lat, anchor.lon,
+            rng.gauss(0, jitter_m), rng.gauss(0, jitter_m),
         )
         pts.append(
             TracePoint(
-                lat=round(anchor.lat + dlat, 6),
-                lon=round(anchor.lon + dlon, 6),
+                lat=round(lat, 6),
+                lon=round(lon, 6),
                 speed_mph=0.0,
                 heading=round(rng.uniform(0, 360), 1),
                 timestamp=start_time + timedelta(seconds=i * INTERVAL_S),
@@ -54,10 +48,6 @@ def _make_dwell_points(
         )
     return pts
 
-
-# ---------------------------------------------------------------------------
-# 1. Privacy shutoff — long gap, minimal position change
-# ---------------------------------------------------------------------------
 
 def privacy_shutoff(
     points: list[TracePoint],
@@ -68,19 +58,12 @@ def privacy_shutoff(
     if len(points) < 20:
         return points
     start_idx = rng.randint(int(len(points) * 0.7), int(len(points) * 0.85))
-    # Remove a small number of points but inject a large time gap
     n_remove = rng.randint(3, max(4, len(points) // 10))
     end_idx = min(start_idx + n_remove, len(points) - 2)
     actual_removed_s = (end_idx - start_idx) * INTERVAL_S
     extra = timedelta(seconds=duration_s - actual_removed_s)
-    before = points[:start_idx]
-    after = _shift_timestamps(points[end_idx:], extra)
-    return before + after
+    return points[:start_idx] + _shift_timestamps(points[end_idx:], extra)
 
-
-# ---------------------------------------------------------------------------
-# 2. Relay driving — remove rest stops, continuous movement
-# ---------------------------------------------------------------------------
 
 def relay_driving(
     points: list[TracePoint],
@@ -92,7 +75,6 @@ def relay_driving(
     if len(points) < 10:
         return points
 
-    # Collect moving segments, dropping clusters of stopped points
     segments: list[list[TracePoint]] = []
     current: list[TracePoint] = []
     stopped = 0
@@ -104,7 +86,6 @@ def relay_driving(
                 current.append(pt)
         else:
             if stopped > min_stop_points and current:
-                # Trim trailing stopped points
                 while current and current[-1].speed_mph < speed_threshold_mph:
                     current.pop()
                 if current:
@@ -118,24 +99,14 @@ def relay_driving(
     if not segments:
         return points
 
-    # Stitch with continuous timestamps
     result: list[TracePoint] = []
     t = points[0].timestamp
     for seg in segments:
         for pt in seg:
-            result.append(
-                TracePoint(
-                    lat=pt.lat, lon=pt.lon, speed_mph=pt.speed_mph,
-                    heading=pt.heading, timestamp=t,
-                )
-            )
+            result.append(replace(pt, timestamp=t))
             t += timedelta(seconds=INTERVAL_S)
     return result
 
-
-# ---------------------------------------------------------------------------
-# 3. Yard dwell — long stationary period at start or end
-# ---------------------------------------------------------------------------
 
 def yard_dwell(
     points: list[TracePoint],
@@ -157,10 +128,6 @@ def yard_dwell(
         return points + _make_dwell_points(anchor, n, t0, rng)
 
 
-# ---------------------------------------------------------------------------
-# 4. Fuel / rest stop — medium stop mid-route
-# ---------------------------------------------------------------------------
-
 def fuel_rest_stop(
     points: list[TracePoint],
     rng: random.Random,
@@ -172,8 +139,7 @@ def fuel_rest_stop(
         return points
     if position_fraction is None:
         position_fraction = rng.uniform(0.4, 0.6)
-    idx = int(len(points) * position_fraction)
-    idx = max(1, min(idx, len(points) - 2))
+    idx = max(1, min(int(len(points) * position_fraction), len(points) - 2))
     anchor = points[idx]
     n_stop = max(1, int(duration_s / INTERVAL_S))
     t0 = anchor.timestamp + timedelta(seconds=INTERVAL_S)
@@ -181,10 +147,6 @@ def fuel_rest_stop(
     shift = timedelta(seconds=n_stop * INTERVAL_S)
     return points[: idx + 1] + stop_pts + _shift_timestamps(points[idx + 1 :], shift)
 
-
-# ---------------------------------------------------------------------------
-# 5. Weigh station / border crossing — brief stop with slow approach
-# ---------------------------------------------------------------------------
 
 def weigh_station_stop(
     points: list[TracePoint],
@@ -198,12 +160,9 @@ def weigh_station_stop(
     idx = rng.randint(int(len(points) * 0.3), int(len(points) * 0.6))
     result = list(points)
 
-    # Slow approach
     for i in range(max(0, idx - approach_points), idx):
-        result[i] = TracePoint(
-            lat=result[i].lat, lon=result[i].lon,
-            speed_mph=round(result[i].speed_mph * 0.3, 1),
-            heading=result[i].heading, timestamp=result[i].timestamp,
+        result[i] = replace(
+            result[i], speed_mph=round(result[i].speed_mph * 0.3, 1),
         )
 
     anchor = result[idx]
@@ -213,10 +172,6 @@ def weigh_station_stop(
     shift = timedelta(seconds=n_stop * INTERVAL_S)
     return result[: idx + 1] + stop_pts + _shift_timestamps(result[idx + 1 :], shift)
 
-
-# ---------------------------------------------------------------------------
-# 6. Bobtail / empty repositioning — higher speeds (no trailer)
-# ---------------------------------------------------------------------------
 
 def bobtail_segment(
     points: list[TracePoint],
@@ -232,17 +187,12 @@ def bobtail_segment(
     result = list(points)
     for i in range(start, start + n):
         if result[i].speed_mph > 5.0:
-            result[i] = TracePoint(
-                lat=result[i].lat, lon=result[i].lon,
+            result[i] = replace(
+                result[i],
                 speed_mph=round(result[i].speed_mph * speed_factor, 1),
-                heading=result[i].heading, timestamp=result[i].timestamp,
             )
     return result
 
-
-# ---------------------------------------------------------------------------
-# 7. Off-route detour — bell-curve lateral offset
-# ---------------------------------------------------------------------------
 
 def off_route_detour(
     points: list[TracePoint],
@@ -262,21 +212,10 @@ def off_route_detour(
         scale = math.sin(progress * math.pi)
         dx = offset_meters * scale * math.cos(angle)
         dy = offset_meters * scale * math.sin(angle)
-        dlat = dy / 111_320.0
-        dlon = dx / (111_320.0 * math.cos(math.radians(result[i].lat)))
-        result[i] = TracePoint(
-            lat=round(result[i].lat + dlat, 6),
-            lon=round(result[i].lon + dlon, 6),
-            speed_mph=result[i].speed_mph,
-            heading=result[i].heading,
-            timestamp=result[i].timestamp,
-        )
+        lat, lon = offset_to_latlon(result[i].lat, result[i].lon, dx, dy)
+        result[i] = replace(result[i], lat=round(lat, 6), lon=round(lon, 6))
     return result
 
-
-# ---------------------------------------------------------------------------
-# 8. Loading / unloading dwell — extended stop at origin or destination
-# ---------------------------------------------------------------------------
 
 def loading_dwell(
     points: list[TracePoint],
@@ -287,10 +226,6 @@ def loading_dwell(
 ) -> list[TracePoint]:
     return yard_dwell(points, rng, duration_s=duration_s, position=position)
 
-
-# ---------------------------------------------------------------------------
-# 9. Device power cycle — small gap + cold-start drift on resume
-# ---------------------------------------------------------------------------
 
 def device_power_cycle(
     points: list[TracePoint],
@@ -311,37 +246,75 @@ def device_power_cycle(
     before = points[:idx]
     after_raw = points[end_idx:]
 
-    after: list[TracePoint] = []
-    for j, pt in enumerate(after_raw):
-        ts = pt.timestamp + extra
-        if j < drift_points:
-            decay = drift_meters * (1.0 - j / drift_points)
-            angle = rng.uniform(0, 2 * math.pi)
-            dlat = (decay * math.sin(angle)) / 111_320.0
-            dlon = (decay * math.cos(angle)) / (
-                111_320.0 * math.cos(math.radians(pt.lat))
-            )
-            after.append(
-                TracePoint(
-                    lat=round(pt.lat + dlat, 6),
-                    lon=round(pt.lon + dlon, 6),
-                    speed_mph=pt.speed_mph, heading=pt.heading,
-                    timestamp=ts,
-                )
-            )
-        else:
-            after.append(
-                TracePoint(
-                    lat=pt.lat, lon=pt.lon, speed_mph=pt.speed_mph,
-                    heading=pt.heading, timestamp=ts,
-                )
-            )
+    # Shift all timestamps, then apply decaying drift to the first few
+    after = _shift_timestamps(after_raw, extra)
+    for j in range(min(drift_points, len(after))):
+        decay = drift_meters * (1.0 - j / drift_points)
+        angle = rng.uniform(0, 2 * math.pi)
+        dx = decay * math.cos(angle)
+        dy = decay * math.sin(angle)
+        lat, lon = offset_to_latlon(after[j].lat, after[j].lon, dx, dy)
+        after[j] = replace(after[j], lat=round(lat, 6), lon=round(lon, 6))
+
     return before + after
 
 
-# ---------------------------------------------------------------------------
-# 10. Geofence compliance gap — remove points within a zone
-# ---------------------------------------------------------------------------
+def traffic_jam(
+    points: list[TracePoint],
+    rng: random.Random,
+    *,
+    duration_s: float = 7_200.0,
+    crawl_speed_mph: float = 3.0,
+    full_stop_fraction: float = 0.4,
+) -> list[TracePoint]:
+    """Slow or stop a highway segment to simulate extreme traffic.
+
+    A stretch of the trace (in the middle 30-70%) has its speeds crushed
+    to *crawl_speed_mph* or zero, and stationary dwell points are inserted
+    to pad the duration.  Simulates weather closures, construction,
+    accidents, protests, etc.
+    """
+    if len(points) < 20:
+        return points
+
+    # Pick a window in the highway portion (middle 30-70%)
+    start_idx = rng.randint(int(len(points) * 0.3), int(len(points) * 0.5))
+    end_idx = rng.randint(int(len(points) * 0.5), int(len(points) * 0.7))
+    if end_idx <= start_idx:
+        end_idx = start_idx + 5
+
+    # Slow existing points in the window to crawl or full stop
+    result = list(points)
+    for i in range(start_idx, min(end_idx, len(result))):
+        if rng.random() < full_stop_fraction:
+            result[i] = replace(result[i], speed_mph=0.0)
+        else:
+            result[i] = replace(
+                result[i],
+                speed_mph=round(rng.uniform(0.5, crawl_speed_mph), 1),
+            )
+
+    # Insert dwell points at the jam midpoint to pad the total delay
+    existing_window_s = (end_idx - start_idx) * INTERVAL_S
+    extra_s = max(0.0, duration_s - existing_window_s)
+    n_dwell = int(extra_s / INTERVAL_S)
+    if n_dwell > 0:
+        mid = (start_idx + min(end_idx, len(result))) // 2
+        anchor = result[mid]
+        t0 = anchor.timestamp + timedelta(seconds=INTERVAL_S)
+        dwell_pts = _make_dwell_points(anchor, n_dwell, t0, rng, jitter_m=1.0)
+        # Override dwell headings to match travel direction (not random)
+        for k in range(len(dwell_pts)):
+            dwell_pts[k] = replace(dwell_pts[k], heading=anchor.heading)
+        shift = timedelta(seconds=n_dwell * INTERVAL_S)
+        result = (
+            result[: mid + 1]
+            + dwell_pts
+            + _shift_timestamps(result[mid + 1 :], shift)
+        )
+
+    return result
+
 
 def geofence_gap(
     points: list[TracePoint],
@@ -356,11 +329,7 @@ def geofence_gap(
     ]
 
 
-# ---------------------------------------------------------------------------
-# Registry
-# ---------------------------------------------------------------------------
-
-OPERATIONAL_ERRORS: dict[str, object] = {
+OPERATIONAL_ERRORS: dict[str, ErrorFn] = {
     "privacy_shutoff": privacy_shutoff,
     "relay_driving": relay_driving,
     "yard_dwell": yard_dwell,
@@ -369,6 +338,7 @@ OPERATIONAL_ERRORS: dict[str, object] = {
     "bobtail_segment": bobtail_segment,
     "off_route_detour": off_route_detour,
     "loading_dwell": loading_dwell,
+    "traffic_jam": traffic_jam,
     "device_power_cycle": device_power_cycle,
     "geofence_gap": geofence_gap,
 }

@@ -8,7 +8,6 @@ from datetime import datetime, timedelta
 
 import numpy as np
 
-from trucktrack import _core
 from trucktrack.generate.models import RouteSegment, TracePoint
 from trucktrack.generate.speed_profile import (
     inject_traffic_stops,
@@ -17,6 +16,15 @@ from trucktrack.generate.speed_profile import (
 )
 
 INTERVAL_S = 60.0
+
+
+def offset_to_latlon(
+    base_lat: float, base_lon: float, dx_east: float, dy_north: float,
+) -> tuple[float, float]:
+    """Shift a lat/lon by a meter-scale offset.  Returns ``(lat, lon)``."""
+    dlat = dy_north / 111_320.0
+    dlon = dx_east / (111_320.0 * math.cos(math.radians(base_lat)))
+    return base_lat + dlat, base_lon + dlon
 
 
 def resample_trace(points: list[TracePoint], interval_s: float = INTERVAL_S) -> list[TracePoint]:
@@ -84,7 +92,15 @@ def bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Distance in meters between two lat/lon points."""
-    return _core.haversine_km(lat1, lon1, lat2, lon2) * 1000.0
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (
+        math.sin(dlat / 2) ** 2
+        + math.cos(math.radians(lat1))
+        * math.cos(math.radians(lat2))
+        * math.sin(dlon / 2) ** 2
+    )
+    return 6_371_000 * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
 def interpolate_route(

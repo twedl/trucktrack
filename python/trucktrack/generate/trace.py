@@ -77,12 +77,16 @@ def _apply_errors(
     rng: random.Random,
 ) -> list[TracePoint]:
     """Apply error injectors: operational patterns first, then GPS errors."""
-    operational = [e for e in errors if e.error_type in OPERATIONAL_ERRORS]
-    gps = [e for e in errors if e.error_type in GPS_ERRORS]
-    unknown = [
-        e.error_type for e in errors
-        if e.error_type not in OPERATIONAL_ERRORS and e.error_type not in GPS_ERRORS
-    ]
+    operational: list[ErrorConfig] = []
+    gps: list[ErrorConfig] = []
+    unknown: list[str] = []
+    for e in errors:
+        if e.error_type in OPERATIONAL_ERRORS:
+            operational.append(e)
+        elif e.error_type in GPS_ERRORS:
+            gps.append(e)
+        else:
+            unknown.append(e.error_type)
     if unknown:
         raise ValueError(f"Unknown error types: {unknown}")
 

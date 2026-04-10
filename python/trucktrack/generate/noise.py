@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import random
 
+from trucktrack.generate.interpolator import offset_to_latlon
 from trucktrack.generate.models import TracePoint
 
 
@@ -24,8 +25,7 @@ def apply_noise(
         dx = offset_m * math.cos(angle)
         dy = offset_m * math.sin(angle)
 
-        dlat = dy / 111320.0
-        dlon = dx / (111320.0 * math.cos(math.radians(pt.lat)))
+        lat, lon = offset_to_latlon(pt.lat, pt.lon, dx, dy)
 
         speed_noise = rng.gauss(0, 0.5)
         noisy_speed = max(0.0, pt.speed_mph + speed_noise)
@@ -40,8 +40,8 @@ def apply_noise(
 
         noisy.append(
             TracePoint(
-                lat=round(pt.lat + dlat, 6),
-                lon=round(pt.lon + dlon, 6),
+                lat=round(lat, 6),
+                lon=round(lon, 6),
                 speed_mph=round(noisy_speed, 1),
                 heading=round(noisy_heading, 1),
                 timestamp=pt.timestamp,
