@@ -6,7 +6,7 @@ dataset and parameters, produced by
 
 ## Setup
 
-- **Dataset**: `data/route.parquet` (1,884 GPS rows, 5 real trips), tiled K
+- **Dataset**: `data/route.parquet` (826 GPS rows, 5 generated trips), tiled K
   times with disjoint trip ids and forward-shifted timestamps so replicas do
   not interleave.
 - **Parameters**: `max_diameter = 250 m`, `min_duration = 300 s`.
@@ -27,23 +27,23 @@ dataset and parameters, produced by
 
 | K | rows | trips | regime | trucktrack (min) | movingpandas (min) | speedup |
 |---:|---:|---:|---|---:|---:|---:|
-| 100  | 188,400   | 500   | splitter-only | 244 ms   | 3,478 ms  | **14.3×** |
-| 100  | 188,400   | 500   | end-to-end    | 243 ms   | 4,832 ms  | **19.9×** |
-| 1000 | 1,884,000 | 5,000 | splitter-only | 3,063 ms | 34,717 ms | **11.3×** |
-| 1000 | 1,884,000 | 5,000 | end-to-end    | 3,089 ms | 48,472 ms | **15.7×** |
+| 100  | 82,600  | 500   | splitter-only | 9 ms     | 1,294 ms  | **145×** |
+| 100  | 82,600  | 500   | end-to-end    | 9 ms     | 2,061 ms  | **235×** |
+| 1000 | 826,000 | 5,000 | splitter-only | 300 ms   | 13,116 ms | **44×**  |
+| 1000 | 826,000 | 5,000 | end-to-end    | 298 ms   | 20,687 ms | **70×**  |
 
-trucktrack is consistently **~11–14× faster** at the algorithm level and
-**~16–20× faster** end-to-end. Speedup ratios are stable across K=100 → K=1000,
-so the comparison is not an artifact of small-dataset noise.
+trucktrack is consistently **~44–145× faster** at the algorithm level and
+**~70–235× faster** end-to-end. The speedup ratio is higher at smaller K
+because trucktrack's fixed overhead is negligible relative to movingpandas'.
 
 ## Memory (tracemalloc, peak Python allocations)
 
 | K    | regime        | trucktrack | movingpandas |
 |---:|---|---:|---:|
-| 100  | splitter-only | <0.1 MiB   | 11.6 MiB     |
-| 100  | end-to-end    | <0.1 MiB   | 56.8 MiB     |
-| 1000 | splitter-only | <0.1 MiB   | 114.4 MiB    |
-| 1000 | end-to-end    | <0.1 MiB   | 565.2 MiB    |
+| 100  | splitter-only | <0.1 MiB   | 7.9 MiB      |
+| 100  | end-to-end    | <0.1 MiB   | 27.3 MiB     |
+| 1000 | splitter-only | <0.1 MiB   | 77.5 MiB     |
+| 1000 | end-to-end    | <0.1 MiB   | 268.8 MiB    |
 
 **Important caveat.** `tracemalloc` only sees Python allocations.
 trucktrack's Rust working set is invisible to it. The result DataFrame is
@@ -57,7 +57,7 @@ What is meaningful:
 - The **movingpandas** column is a real cost — pandas frames, GeoPandas
   geometries, shapely `Point` objects, and the projected
   `TrajectoryCollection` all live in the Python heap. The end-to-end row
-  (~57 MiB at K=100, ~565 MiB at K=1000) is what a polars-native pipeline
+  (~27 MiB at K=100, ~269 MiB at K=1000) is what a polars-native pipeline
   has to budget for if it routes data through movingpandas.
 - The trucktrack column is *not* a claim that trucktrack uses less memory
   than movingpandas at the splitter level — Rust allocations are
@@ -65,36 +65,36 @@ What is meaningful:
 
 ## Detailed timings
 
-K = 100 (188,400 rows, 500 trips), 10 repeats:
+K = 100 (82,600 rows, 500 trips), 10 repeats:
 
 ```
 Splitter-only (algorithm)
                        min      mean    median     stdev
-  trucktrack      243.85ms  267.61ms  248.83ms   38.00ms
-  movingpandas   3478.40ms 3522.93ms 3490.82ms   90.06ms
-  speedup (mp / tt, by min): 14.3×
+  trucktrack        8.90ms    9.34ms    9.20ms    0.39ms
+  movingpandas   1293.78ms 1297.80ms 1296.13ms    4.84ms
+  speedup (mp / tt, by min): 145.3×
 
 End-to-end (from polars DataFrame)
                        min      mean    median     stdev
-  trucktrack      242.58ms  243.69ms  243.47ms    0.90ms
-  movingpandas   4831.85ms 4850.24ms 4849.63ms   13.64ms
-  speedup (mp / tt, by min): 19.9×
+  trucktrack        8.79ms    9.49ms    9.55ms    0.52ms
+  movingpandas   2061.42ms 2086.58ms 2083.54ms   33.30ms
+  speedup (mp / tt, by min): 234.5×
 ```
 
-K = 1000 (1,884,000 rows, 5,000 trips), 10 repeats:
+K = 1000 (826,000 rows, 5,000 trips), 10 repeats:
 
 ```
 Splitter-only (algorithm)
                        min      mean    median     stdev
-  trucktrack     3063.20ms 3276.38ms 3245.75ms  226.85ms
-  movingpandas  34716.60ms35578.82ms34976.14ms 1125.23ms
-  speedup (mp / tt, by min): 11.3×
+  trucktrack      299.59ms  312.40ms  311.14ms   10.63ms
+  movingpandas  13116.27ms13186.34ms13160.30ms   80.75ms
+  speedup (mp / tt, by min): 43.8×
 
 End-to-end (from polars DataFrame)
                        min      mean    median     stdev
-  trucktrack     3088.96ms 3135.75ms 3140.44ms   33.99ms
-  movingpandas  48472.45ms50866.04ms51604.55ms 1865.76ms
-  speedup (mp / tt, by min): 15.7×
+  trucktrack      297.64ms  321.53ms  320.78ms   13.55ms
+  movingpandas  20686.98ms21176.75ms20869.77ms  707.27ms
+  speedup (mp / tt, by min): 69.5×
 ```
 
 ## Reproducing
@@ -117,6 +117,7 @@ quantity.
 ## Correctness
 
 These performance numbers are only meaningful because the two implementations
-agree on the segmentation result at `min_duration ≥ 5 min`. See
+agree on the segmentation result at `min_duration ≥ 5 min` with small
+`max_diameter`. See
 [`movingpandas_equivalence.md`](./movingpandas_equivalence.md) for the
 parity finding.
