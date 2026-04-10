@@ -32,6 +32,8 @@ from trucktrack.partition import (
     write_trips_partitioned,
 )
 from trucktrack.splitters import (
+    filter_traffic_stops,
+    filter_traffic_stops_file,
     split_by_observation_gap,
     split_by_observation_gap_file,
     split_by_stops,
@@ -44,6 +46,8 @@ __all__ = [
     "read_dataset",
     "process_parquet_in_rust",
     "process_dataframe_in_rust",
+    "filter_traffic_stops",
+    "filter_traffic_stops_file",
     "split_by_observation_gap",
     "split_by_observation_gap_file",
     "split_by_stops",

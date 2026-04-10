@@ -69,6 +69,29 @@ def split_by_stops_file(
     """
     ...
 
+def filter_traffic_stops_df(
+    df: pl.DataFrame,
+    id_col: str,
+    lat_col: str,
+    lon_col: str,
+    max_angle_change: float,
+    min_distance_m: float,
+) -> pl.DataFrame:
+    """Filter out stops where approach/departure bearings are collinear (traffic)."""
+    ...
+
+def filter_traffic_stops_file(
+    input_path: str,
+    output_path: str,
+    id_col: str,
+    lat_col: str,
+    lon_col: str,
+    max_angle_change: float,
+    min_distance_m: float,
+) -> int:
+    """File-based variant of filter_traffic_stops_df."""
+    ...
+
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Haversine distance in kilometers between two (lat, lon) points."""
     ...

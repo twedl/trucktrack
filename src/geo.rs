@@ -1,3 +1,16 @@
+/// Forward bearing in degrees (0–360) from point 1 to point 2.
+#[must_use]
+pub fn bearing_degrees(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
+    let lat1_r = lat1.to_radians();
+    let lat2_r = lat2.to_radians();
+    let dlon = (lon2 - lon1).to_radians();
+
+    let x = dlon.sin() * lat2_r.cos();
+    let y = lat1_r.cos() * lat2_r.sin() - lat1_r.sin() * lat2_r.cos() * dlon.cos();
+
+    x.atan2(y).to_degrees().rem_euclid(360.0)
+}
+
 /// Haversine distance between two (lat, lon) points in meters.
 #[must_use]
 pub fn haversine_distance_meters(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {

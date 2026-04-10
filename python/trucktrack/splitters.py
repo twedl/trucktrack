@@ -100,3 +100,63 @@ def split_by_stops_file(
         dur_us,
         min_length,
     )
+
+
+# ── TrafficFilter ───────────────────────────────────────────────────────
+
+
+def filter_traffic_stops(
+    df: pl.DataFrame,
+    *,
+    max_angle_change: float = 30.0,
+    min_distance: float = 10.0,
+    id_col: str = "id",
+    lat_col: str = "lat",
+    lon_col: str = "lon",
+) -> pl.DataFrame:
+    """Remove stops where the truck stayed on the road corridor.
+
+    Compares approach and departure bearings (computed from positions, not
+    device heading) around each stop segment.  If the angular change is
+    below ``max_angle_change`` degrees the stop is reclassified as movement.
+
+    Designed to run on the output of :func:`split_by_stops`.
+
+    Parameters
+    ----------
+    df
+        DataFrame with ``segment_id`` and ``is_stop`` columns.
+    max_angle_change
+        Maximum bearing change in degrees for a stop to be considered
+        traffic. Stops with a smaller change are reclassified.
+    min_distance
+        Minimum distance in meters between point pairs used for bearing
+        computation. Filters out GPS jitter.
+    id_col, lat_col, lon_col
+        Column names.
+    """
+    return _core.filter_traffic_stops_df(
+        df, id_col, lat_col, lon_col, max_angle_change, min_distance
+    )
+
+
+def filter_traffic_stops_file(
+    input_path: str | Path,
+    output_path: str | Path,
+    *,
+    max_angle_change: float = 30.0,
+    min_distance: float = 10.0,
+    id_col: str = "id",
+    lat_col: str = "lat",
+    lon_col: str = "lon",
+) -> int:
+    """File-based variant of :func:`filter_traffic_stops`."""
+    return _core.filter_traffic_stops_file(
+        str(input_path),
+        str(output_path),
+        id_col,
+        lat_col,
+        lon_col,
+        max_angle_change,
+        min_distance,
+    )

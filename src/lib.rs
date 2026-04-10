@@ -113,6 +113,62 @@ fn split_by_stops_file(
     Ok(n)
 }
 
+// ── Traffic filter PyO3 wrappers ────────────────────────────────────────
+
+#[pyfunction]
+#[pyo3(signature = (df, id_col, lat_col, lon_col, max_angle_change, min_distance_m))]
+fn filter_traffic_stops_df(
+    df: PyDataFrame,
+    id_col: &str,
+    lat_col: &str,
+    lon_col: &str,
+    max_angle_change: f64,
+    min_distance_m: f64,
+) -> PyResult<PyDataFrame> {
+    let result = splitters::traffic::filter_traffic_stops(
+        df.into(),
+        id_col,
+        lat_col,
+        lon_col,
+        max_angle_change,
+        min_distance_m,
+    )
+    .map_err(polars_err)?;
+    Ok(PyDataFrame(result))
+}
+
+#[pyfunction]
+#[pyo3(signature = (input_path, output_path, id_col, lat_col, lon_col, max_angle_change, min_distance_m))]
+fn filter_traffic_stops_file(
+    input_path: &str,
+    output_path: &str,
+    id_col: &str,
+    lat_col: &str,
+    lon_col: &str,
+    max_angle_change: f64,
+    min_distance_m: f64,
+) -> PyResult<usize> {
+    let in_file = std::fs::File::open(input_path).map_err(io_err)?;
+    let df = ParquetReader::new(in_file).finish().map_err(polars_err)?;
+
+    let mut result = splitters::traffic::filter_traffic_stops(
+        df,
+        id_col,
+        lat_col,
+        lon_col,
+        max_angle_change,
+        min_distance_m,
+    )
+    .map_err(polars_err)?;
+
+    let n = result.height();
+    let out_file = std::fs::File::create(output_path).map_err(io_err)?;
+    ParquetWriter::new(out_file)
+        .finish(&mut result)
+        .map_err(polars_err)?;
+    Ok(n)
+}
+
 // ── Module registration ─────────────────────────────────────────────────
 
 #[pymodule]
@@ -123,6 +179,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(split_by_gap_file, m)?)?;
     m.add_function(wrap_pyfunction!(split_by_stops_df, m)?)?;
     m.add_function(wrap_pyfunction!(split_by_stops_file, m)?)?;
+    m.add_function(wrap_pyfunction!(filter_traffic_stops_df, m)?)?;
+    m.add_function(wrap_pyfunction!(filter_traffic_stops_file, m)?)?;
     m.add_function(wrap_pyfunction!(partition::haversine_km, m)?)?;
     m.add_function(wrap_pyfunction!(partition::valhalla_tile_id, m)?)?;
     m.add_function(wrap_pyfunction!(partition::classify_and_partition_key, m)?)?;

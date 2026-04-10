@@ -169,3 +169,74 @@ class TestStopSplitter:
         assert "segment_id" in result.columns
         assert "is_stop" in result.columns
         assert n == 83  # all rows preserved
+
+
+# ── TrafficFilter ───────────────────────────────────────────────────────
+
+
+def _make_trajectory(
+    lats: list[float],
+    lons: list[float],
+    is_stop: list[bool],
+) -> pl.DataFrame:
+    """Helper: build a minimal DataFrame with segment_id derived from is_stop."""
+    seg_ids: list[int] = [0]
+    for i in range(1, len(is_stop)):
+        seg_ids.append(seg_ids[-1] + (1 if is_stop[i] != is_stop[i - 1] else 0))
+    return pl.DataFrame(
+        {
+            "id": ["t"] * len(lats),
+            "lat": lats,
+            "lon": lons,
+            "is_stop": is_stop,
+            "segment_id": pl.Series("segment_id", seg_ids, dtype=pl.UInt32),
+        }
+    )
+
+
+class TestFilterTrafficStops:
+    def test_collinear_stop_reclassified(self) -> None:
+        """A stop along a straight northbound corridor should be filtered."""
+        lats = [43.0, 43.001, 43.002, 43.0025, 43.0025, 43.003, 43.004]
+        lons = [-79.0] * 7
+        is_stop = [False, False, False, True, True, False, False]
+        df = _make_trajectory(lats, lons, is_stop)
+
+        result = trucktrack.filter_traffic_stops(df, max_angle_change=30.0, min_distance=5.0)
+
+        assert result["is_stop"].sum() == 0
+
+    def test_real_stop_preserved(self) -> None:
+        """A stop with a bearing change (north in, east out) should survive."""
+        lats = [43.0, 43.001, 43.002, 43.0025, 43.0025, 43.0025, 43.0025]
+        lons = [-79.0, -79.0, -79.0, -79.0, -79.0, -78.999, -78.998]
+        is_stop = [False, False, False, True, True, False, False]
+        df = _make_trajectory(lats, lons, is_stop)
+
+        result = trucktrack.filter_traffic_stops(df, max_angle_change=30.0, min_distance=5.0)
+
+        assert result["is_stop"].sum() == 2
+
+    def test_no_stops_unchanged(self) -> None:
+        """A trajectory with no stops should pass through unchanged."""
+        lats = [43.0, 43.001, 43.002, 43.003]
+        lons = [-79.0] * 4
+        is_stop = [False] * 4
+        df = _make_trajectory(lats, lons, is_stop)
+
+        result = trucktrack.filter_traffic_stops(df)
+
+        assert len(result) == 4
+        assert result["is_stop"].sum() == 0
+
+    def test_segment_ids_reassigned(self) -> None:
+        """After reclassifying a traffic stop, segment_ids should be sequential."""
+        lats = [43.0, 43.001, 43.002, 43.0025, 43.0025, 43.003, 43.004]
+        lons = [-79.0] * 7
+        is_stop = [False, False, False, True, True, False, False]
+        df = _make_trajectory(lats, lons, is_stop)
+
+        result = trucktrack.filter_traffic_stops(df, max_angle_change=30.0, min_distance=5.0)
+
+        # All movement now, single segment
+        assert result["segment_id"].n_unique() == 1
