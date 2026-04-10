@@ -7,9 +7,11 @@ import random
 from datetime import datetime
 from io import BytesIO, StringIO
 
+from trucktrack.generate.gps_errors import GPS_ERRORS
 from trucktrack.generate.interpolator import bearing, interpolate_route, resample_trace
-from trucktrack.generate.models import RouteSegment, TracePoint, TripConfig
+from trucktrack.generate.models import ErrorConfig, RouteSegment, TracePoint, TripConfig
 from trucktrack.generate.noise import apply_noise
+from trucktrack.generate.operational_errors import OPERATIONAL_ERRORS
 from trucktrack.generate.parking import (
     ManeuverType,
     generate_arrival_maneuver,
@@ -63,7 +65,32 @@ def generate_trace(config: TripConfig) -> list[TracePoint]:
     arrival_pts = resample_trace(arrival_pts)
     all_points.extend(arrival_pts)
 
+    if config.errors:
+        all_points = _apply_errors(all_points, config.errors, rng)
+
     return apply_noise(all_points, config.gps_noise_meters, rng)
+
+
+def _apply_errors(
+    points: list[TracePoint],
+    errors: list[ErrorConfig],
+    rng: random.Random,
+) -> list[TracePoint]:
+    """Apply error injectors: operational patterns first, then GPS errors."""
+    operational = [e for e in errors if e.error_type in OPERATIONAL_ERRORS]
+    gps = [e for e in errors if e.error_type in GPS_ERRORS]
+    unknown = [
+        e.error_type for e in errors
+        if e.error_type not in OPERATIONAL_ERRORS and e.error_type not in GPS_ERRORS
+    ]
+    if unknown:
+        raise ValueError(f"Unknown error types: {unknown}")
+
+    for spec in operational + gps:
+        if rng.random() < spec.probability:
+            fn = OPERATIONAL_ERRORS.get(spec.error_type) or GPS_ERRORS[spec.error_type]
+            points = fn(points, rng, **spec.params)
+    return points
 
 
 def _csv_rows(points: list[TracePoint], trip_id: str) -> list[list[str]]:

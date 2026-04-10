@@ -8,6 +8,20 @@ DEFAULT_VALHALLA_URL = "http://localhost:8002"
 
 
 @dataclass
+class ErrorConfig:
+    """A single error to inject into the trace.
+
+    *error_type* selects the injector function (e.g. ``"signal_dropout"``).
+    *probability* controls how often the error fires (0–1).
+    *params* is forwarded as ``**kwargs`` to the injector.
+    """
+
+    error_type: str
+    probability: float = 1.0
+    params: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass
 class TripConfig:
     origin: tuple[float, float]  # (lat, lon)
     destination: tuple[float, float]  # (lat, lon)
@@ -18,6 +32,7 @@ class TripConfig:
     origin_maneuver: str = "alley_dock"
     destination_maneuver: str = "alley_dock"
     valhalla_url: str = DEFAULT_VALHALLA_URL
+    errors: list[ErrorConfig] = field(default_factory=list)
 
 
 @dataclass
