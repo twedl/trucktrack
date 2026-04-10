@@ -74,26 +74,34 @@ def _process_chunk(
         min_length=min_segment_length,
     )
 
-    # Composite trip IDs.
-    df = df.with_columns(
-        (pl.col("id") + "_seg" + pl.col("segment_id").cast(pl.Utf8)).alias("trip_id")
-    )
+    # Rename gap segment_id before stop splitting overwrites it.
+    df = df.rename({"segment_id": "gap_segment_id"})
 
     # Stop splitting.
     df = trucktrack.split_by_stops(
         df,
         max_diameter=stop_max_diameter,
         min_duration=stop_min_duration,
-        id_col="trip_id",
+        id_col="id",
         time_col="time",
         lat_col="lat",
         lon_col="lon",
         min_length=min_segment_length,
     )
 
+    # Composite ID: {id}_gap{gap_seg}_stop{stop_seg}
+    df = df.with_columns(
+        (
+            pl.col("id")
+            + "_gap"
+            + pl.col("gap_segment_id").cast(pl.Utf8)
+            + "_stop"
+            + pl.col("segment_id").cast(pl.Utf8)
+        ).alias("id")
+    )
+
     # Keep only movement rows.
     df = df.filter(~pl.col("is_stop"))
-    df = df.rename({"trip_id": "id"})
 
     # Partition metadata.
     df = trucktrack.partition_points(df)
