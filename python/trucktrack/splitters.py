@@ -55,7 +55,7 @@ def split_by_stops(
     lon_col: str = "lon",
     min_length: int = 0,
 ) -> pl.DataFrame:
-    """Split at detected stops, returning movement segments with ``segment_id``."""
+    """Split at detected stops, returning all rows with ``segment_id`` and ``is_stop`` columns."""
     dur_us = int(min_duration.total_seconds() * 1_000_000)
     return _core.split_by_stops_df(
         df,
@@ -81,7 +81,10 @@ def split_by_stops_file(
     lon_col: str = "lon",
     min_length: int = 0,
 ) -> int:
-    """Split trajectories at stops, reading/writing parquet files entirely in Rust."""
+    """Split trajectories at stops, reading/writing parquet files entirely in Rust.
+
+    Output includes all rows with ``segment_id`` and ``is_stop`` columns.
+    """
     dur_us = int(min_duration.total_seconds() * 1_000_000)
     return _core.split_by_stops_file(
         str(input_path),

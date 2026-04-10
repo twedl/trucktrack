@@ -4,12 +4,13 @@ use polars::prelude::*;
 
 use crate::geo::haversine_distance_meters;
 
-/// Detect stops and split trajectory into movement segments between them.
+/// Detect stops and split trajectory into labelled segments.
 ///
 /// A stop is a contiguous window where all points fit within `max_diameter_m`
 /// meters and the duration is at least `min_duration_us` microseconds.
-/// Rows belonging to stops are excluded; movement segments between stops get
-/// incrementing `segment_id` values.
+/// All rows are kept. Each contiguous movement or stop region gets a
+/// sequential `segment_id`. A boolean `is_stop` column distinguishes
+/// stop rows from movement rows.
 #[allow(clippy::too_many_arguments)]
 pub fn split_by_stops(
     df: DataFrame,
@@ -37,46 +38,46 @@ pub fn split_by_stops(
         let n = group.height();
         let stops = detect_stops(&lats, &lons, &times_us, max_diameter_m, min_duration_us);
 
-        // Build a boolean mask: true = movement, false = stop
-        let mut is_movement = vec![true; n];
+        // Mark stop rows
+        let mut is_stop_vec = vec![false; n];
         for (start, end) in &stops {
-            for val in &mut is_movement[*start..=*end] {
-                *val = false;
+            for val in &mut is_stop_vec[*start..=*end] {
+                *val = true;
             }
         }
 
-        // Assign segment_id to movement rows
-        let mut segment_ids: Vec<Option<u32>> = vec![None; n];
-        let mut current_seg: u32 = 0;
-        let mut in_segment = false;
-
-        for i in 0..n {
-            if is_movement[i] {
-                if !in_segment {
-                    if i > 0 {
-                        current_seg += 1;
-                    }
-                    in_segment = true;
+        // Assign sequential segment_id to all rows, incrementing on transitions
+        let mut segment_ids: Vec<u32> = vec![0; n];
+        if n > 0 {
+            for i in 1..n {
+                if is_stop_vec[i] != is_stop_vec[i - 1] {
+                    segment_ids[i] = segment_ids[i - 1] + 1;
+                } else {
+                    segment_ids[i] = segment_ids[i - 1];
                 }
-                segment_ids[i] = Some(current_seg);
-            } else {
-                in_segment = false;
             }
         }
 
-        // Filter to movement rows only, add segment_id
-        let mask = BooleanChunked::from_slice(PlSmallStr::from_static("mask"), &is_movement);
-        let seg_ca: UInt32Chunked = segment_ids.into_iter().collect();
-        let seg_col = seg_ca
-            .with_name(PlSmallStr::from_static("segment_id"))
-            .into_series()
-            .into_column();
+        // Attach segment_id and is_stop columns (keep all rows)
+        let seg_col = UInt32Chunked::from_vec(
+            PlSmallStr::from_static("segment_id"),
+            segment_ids,
+        )
+        .into_series()
+        .into_column();
 
-        let mut filtered = group.filter(&mask)?;
-        let seg_filtered = seg_col.filter(&mask)?;
-        let _ = filtered.with_column(seg_filtered)?;
+        let stop_col = BooleanChunked::from_slice(
+            PlSmallStr::from_static("is_stop"),
+            &is_stop_vec,
+        )
+        .into_series()
+        .into_column();
 
-        result_frames.push(filtered);
+        let mut group = group;
+        let _ = group.with_column(seg_col)?;
+        let _ = group.with_column(stop_col)?;
+
+        result_frames.push(group);
     }
 
     let mut combined = if result_frames.is_empty() {
@@ -85,6 +86,10 @@ pub fn split_by_stops(
             PlSmallStr::from_static("segment_id"),
             &DataType::UInt32,
         ));
+        let _ = empty.with_column(Column::new_empty(
+            PlSmallStr::from_static("is_stop"),
+            &DataType::Boolean,
+        ));
         empty
     } else {
         let lfs: Vec<LazyFrame> = result_frames.into_iter().map(|f| f.lazy()).collect();
@@ -92,9 +97,13 @@ pub fn split_by_stops(
     };
 
     if min_length > 0 {
-        let counts = combined
+        // Only filter short *movement* segments; stop segments always survive.
+        // Count rows per movement segment, then mark each row with its count
+        // (stop rows get null _cnt via left join and are always kept).
+        let movement_counts = combined
             .clone()
             .lazy()
+            .filter(col("is_stop").eq(lit(false)))
             .group_by([col(id_col), col("segment_id")])
             .agg([col(time_col).count().alias("_cnt")])
             .collect()?;
@@ -102,12 +111,16 @@ pub fn split_by_stops(
         combined = combined
             .lazy()
             .join(
-                counts.lazy(),
+                movement_counts.lazy(),
                 [col(id_col), col("segment_id")],
                 [col(id_col), col("segment_id")],
-                JoinArgs::new(JoinType::Inner),
+                JoinArgs::new(JoinType::Left),
             )
-            .filter(col("_cnt").gt_eq(lit(min_length as u32)))
+            .filter(
+                col("is_stop")
+                    .eq(lit(true))
+                    .or(col("_cnt").gt_eq(lit(min_length as u32))),
+            )
             .drop(Selector::ByName {
                 names: Arc::new([PlSmallStr::from_static("_cnt")]),
                 strict: false,

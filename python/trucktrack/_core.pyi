@@ -46,7 +46,10 @@ def split_by_stops_df(
     min_duration_us: int,
     min_length: int,
 ) -> pl.DataFrame:
-    """Split trajectories at detected stops (zero-copy DataFrame handoff)."""
+    """Split trajectories at detected stops (zero-copy DataFrame handoff).
+
+    Returns all rows with ``segment_id`` and ``is_stop`` columns.
+    """
     ...
 
 def split_by_stops_file(
@@ -60,7 +63,10 @@ def split_by_stops_file(
     min_duration_us: int,
     min_length: int,
 ) -> int:
-    """Split trajectories at detected stops, reading/writing parquet files."""
+    """Split trajectories at detected stops, reading/writing parquet files.
+
+    Output includes all rows with ``segment_id`` and ``is_stop`` columns.
+    """
     ...
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:

@@ -95,26 +95,28 @@ class TestObservationGapSplitter:
 
 
 class TestStopSplitter:
-    def test_has_segment_id(self, tracks: pl.DataFrame) -> None:
+    def test_has_segment_id_and_is_stop(self, tracks: pl.DataFrame) -> None:
         result = trucktrack.split_by_stops(
             tracks, max_diameter=50.0, min_duration=timedelta(minutes=2)
         )
         assert "segment_id" in result.columns
+        assert "is_stop" in result.columns
 
     def test_truck_b_stop_detected(self, truck_b: pl.DataFrame) -> None:
-        """truck_B stop produces 2 movement segments."""
+        """truck_B stop produces 3 segments (movement, stop, movement)."""
         result = trucktrack.split_by_stops(
             truck_b, max_diameter=50.0, min_duration=timedelta(minutes=2)
         )
         n_segs = result["segment_id"].n_unique()
-        assert n_segs == 2, f"Expected 2 movement segments, got {n_segs}"
+        assert n_segs == 3, f"Expected 3 segments, got {n_segs}"
 
-    def test_truck_b_stop_rows_excluded(self, truck_b: pl.DataFrame) -> None:
-        """Stop rows should be excluded from output."""
+    def test_truck_b_all_rows_preserved(self, truck_b: pl.DataFrame) -> None:
+        """All rows should be preserved, with stop rows marked via is_stop."""
         result = trucktrack.split_by_stops(
             truck_b, max_diameter=50.0, min_duration=timedelta(minutes=2)
         )
-        assert len(result) < len(truck_b)
+        assert len(result) == len(truck_b)
+        assert result["is_stop"].sum() > 0
 
     def test_no_stops_single_segment(self, truck_a: pl.DataFrame) -> None:
         """truck_A has no stops, should return 1 segment with all rows."""
@@ -123,6 +125,7 @@ class TestStopSplitter:
         )
         assert result["segment_id"].n_unique() == 1
         assert len(result) == len(truck_a)
+        assert result["is_stop"].sum() == 0
 
     def test_large_diameter_no_stops(self, truck_b: pl.DataFrame) -> None:
         """Large diameter + long duration threshold = no stops."""
@@ -137,19 +140,21 @@ class TestStopSplitter:
         result = trucktrack.split_by_stops(
             truck_c, max_diameter=50.0, min_duration=timedelta(minutes=2)
         )
-        assert result["segment_id"].n_unique() == 2
-        assert len(result) < len(truck_c)
+        assert result["segment_id"].n_unique() == 3
+        assert len(result) == len(truck_c)
 
     def test_min_length_filters(self, truck_b: pl.DataFrame) -> None:
-        """min_length=15 drops short movement segments."""
+        """min_length=15 drops short movement segments but keeps stop segments."""
         result = trucktrack.split_by_stops(
             truck_b,
             max_diameter=50.0,
             min_duration=timedelta(minutes=2),
             min_length=15,
         )
-        # Both movement segments in truck_B are ~10-11 rows, so all get filtered
-        assert len(result) == 0
+        # Both movement segments in truck_B are ~10-11 rows, so they get filtered.
+        # Stop segments survive regardless of min_length.
+        assert len(result) > 0
+        assert result["is_stop"].all()
 
     def test_file_io_path(self, tmp_path: Path) -> None:
         out = tmp_path / "stop_out.parquet"
@@ -162,4 +167,5 @@ class TestStopSplitter:
         assert out.exists()
         result = pl.read_parquet(out)
         assert "segment_id" in result.columns
-        assert n < 83  # some rows removed as stops
+        assert "is_stop" in result.columns
+        assert n == 83  # all rows preserved
