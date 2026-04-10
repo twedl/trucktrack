@@ -1,4 +1,5 @@
 pub mod geo;
+pub mod partition;
 pub mod splitters;
 pub mod transform;
 
@@ -122,6 +123,10 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(split_by_gap_file, m)?)?;
     m.add_function(wrap_pyfunction!(split_by_stops_df, m)?)?;
     m.add_function(wrap_pyfunction!(split_by_stops_file, m)?)?;
+    m.add_function(wrap_pyfunction!(partition::haversine_km, m)?)?;
+    m.add_function(wrap_pyfunction!(partition::valhalla_tile_id, m)?)?;
+    m.add_function(wrap_pyfunction!(partition::classify_and_partition_key, m)?)?;
+    m.add_function(wrap_pyfunction!(partition::hilbert_indices, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

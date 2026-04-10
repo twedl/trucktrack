@@ -11,25 +11,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import polars as pl
-from hilbertcurve.hilbertcurve import HilbertCurve
 
+from trucktrack import _core
 from trucktrack.generate.models import TracePoint
 from trucktrack.partition.tiles import (
     VALHALLA_L0_DEG,
     VALHALLA_L1_DEG,
     haversine_km,
-    valhalla_l0_tile,
-    valhalla_l1_tile,
-    valhalla_tile_id,
 )
 
 # p=12 → 4096 cells per axis ≈ 1.6 km cells over the US+Canada bbox.
 HILBERT_ORDER = 12
-_hc = HilbertCurve(p=HILBERT_ORDER, n=2)
-
-# Bounding box for US + Canada
-LAT_MIN, LAT_MAX = 24.0, 84.0
-LON_MIN, LON_MAX = -141.0, -52.0
 
 
 LOCAL_KM = 100.0
@@ -51,18 +43,7 @@ def classify_and_partition_key(
         bits 62–60: tier  (0=local, 1=regional, 2=longhaul)
         bits 59–0:  tile index
     """
-    if bbox_diag_km < LOCAL_KM:
-        tier = 0
-        tile = valhalla_l1_tile(centroid_lat, centroid_lon)
-    elif bbox_diag_km < REGIONAL_KM:
-        tier = 1
-        tile = valhalla_l0_tile(centroid_lat, centroid_lon)
-    else:
-        tier = 2
-        tile = valhalla_tile_id(centroid_lat, centroid_lon, LONGHAUL_DEG)
-
-    partition_id = (tier << 60) | tile
-    return TIER_NAMES[tier], partition_id
+    return _core.classify_and_partition_key(centroid_lat, centroid_lon, bbox_diag_km)
 
 
 @dataclass
@@ -140,15 +121,9 @@ def assign_partitions(df: pl.DataFrame) -> pl.DataFrame:
         partition_id=partition_id,
     )
 
-    n = (1 << HILBERT_ORDER) - 1
     lat_vals = enriched["centroid_lat"].to_list()
     lon_vals = enriched["centroid_lon"].to_list()
-    coords = []
-    for la, lo in zip(lat_vals, lon_vals, strict=True):
-        x = max(0, min(n, int((lo - LON_MIN) / (LON_MAX - LON_MIN) * n)))
-        y = max(0, min(n, int((la - LAT_MIN) / (LAT_MAX - LAT_MIN) * n)))
-        coords.append([x, y])
-    hilbert = _hc.distances_from_points(coords) if coords else []
+    hilbert = _core.hilbert_indices(lat_vals, lon_vals) if lat_vals else []
 
     return enriched.with_columns(
         hilbert_idx=pl.Series("hilbert_idx", hilbert, dtype=pl.Int64)

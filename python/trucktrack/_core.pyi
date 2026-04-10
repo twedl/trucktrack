@@ -62,3 +62,23 @@ def split_by_stops_file(
 ) -> int:
     """Split trajectories at detected stops, reading/writing parquet files."""
     ...
+
+def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Haversine distance in kilometers between two (lat, lon) points."""
+    ...
+
+def valhalla_tile_id(lat: float, lon: float, tile_deg: float) -> int:
+    """Flat tile index matching Valhalla's row-major numbering."""
+    ...
+
+def classify_and_partition_key(
+    centroid_lat: float,
+    centroid_lon: float,
+    bbox_diag_km: float,
+) -> tuple[str, int]:
+    """Return (tier_name, partition_id) for a trip's centroid + bbox diagonal."""
+    ...
+
+def hilbert_indices(lats: list[float], lons: list[float]) -> list[int]:
+    """Compute Hilbert curve indices for arrays of lat/lon coordinates."""
+    ...

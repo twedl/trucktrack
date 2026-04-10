@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 
 import numpy as np
 
+from trucktrack import _core
 from trucktrack.generate.models import RouteSegment, TracePoint
 from trucktrack.generate.speed_profile import (
     inject_traffic_stops,
@@ -32,15 +33,7 @@ def bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Distance in meters between two lat/lon points."""
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
-    a = (
-        math.sin(dlat / 2) ** 2
-        + math.cos(math.radians(lat1))
-        * math.cos(math.radians(lat2))
-        * math.sin(dlon / 2) ** 2
-    )
-    return 6371000 * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return _core.haversine_km(lat1, lon1, lat2, lon2) * 1000.0
 
 
 def interpolate_route(

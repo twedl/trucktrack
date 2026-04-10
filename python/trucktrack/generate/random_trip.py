@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import math
 import random
 
 import requests
+
+from trucktrack import _core
 
 from trucktrack.generate.models import DEFAULT_VALHALLA_URL
 
@@ -86,14 +87,7 @@ def _snap_to_road(
 
 
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    a = (
-        math.sin(dlat / 2) ** 2
-        + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
-    )
-    return 6371 * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return _core.haversine_km(lat1, lon1, lat2, lon2)
 
 
 def generate_random_endpoints(
