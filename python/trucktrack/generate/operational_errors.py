@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import math
 import random
+from collections.abc import Callable
 from dataclasses import replace
-from datetime import timedelta
-from typing import Callable
+from datetime import datetime, timedelta
 
 from trucktrack.generate.interpolator import INTERVAL_S, haversine_m, offset_to_latlon
 from trucktrack.generate.models import TracePoint
@@ -19,7 +19,8 @@ ErrorFn = Callable[..., list[TracePoint]]
 
 
 def _shift_timestamps(
-    points: list[TracePoint], delta: timedelta,
+    points: list[TracePoint],
+    delta: timedelta,
 ) -> list[TracePoint]:
     return [replace(p, timestamp=p.timestamp + delta) for p in points]
 
@@ -27,15 +28,17 @@ def _shift_timestamps(
 def _make_dwell_points(
     anchor: TracePoint,
     n: int,
-    start_time,
+    start_time: datetime,
     rng: random.Random,
     jitter_m: float = 2.0,
 ) -> list[TracePoint]:
     pts: list[TracePoint] = []
     for i in range(n):
         lat, lon = offset_to_latlon(
-            anchor.lat, anchor.lon,
-            rng.gauss(0, jitter_m), rng.gauss(0, jitter_m),
+            anchor.lat,
+            anchor.lon,
+            rng.gauss(0, jitter_m),
+            rng.gauss(0, jitter_m),
         )
         pts.append(
             TracePoint(
@@ -162,7 +165,8 @@ def weigh_station_stop(
 
     for i in range(max(0, idx - approach_points), idx):
         result[i] = replace(
-            result[i], speed_mph=round(result[i].speed_mph * 0.3, 1),
+            result[i],
+            speed_mph=round(result[i].speed_mph * 0.3, 1),
         )
 
     anchor = result[idx]
@@ -308,9 +312,7 @@ def traffic_jam(
             dwell_pts[k] = replace(dwell_pts[k], heading=anchor.heading)
         shift = timedelta(seconds=n_dwell * INTERVAL_S)
         result = (
-            result[: mid + 1]
-            + dwell_pts
-            + _shift_timestamps(result[mid + 1 :], shift)
+            result[: mid + 1] + dwell_pts + _shift_timestamps(result[mid + 1 :], shift)
         )
 
     return result
@@ -324,7 +326,8 @@ def geofence_gap(
     radius_m: float = 1_000.0,
 ) -> list[TracePoint]:
     return [
-        pt for pt in points
+        pt
+        for pt in points
         if haversine_m(pt.lat, pt.lon, center[0], center[1]) > radius_m
     ]
 

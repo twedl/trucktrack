@@ -19,7 +19,10 @@ INTERVAL_S = 60.0
 
 
 def offset_to_latlon(
-    base_lat: float, base_lon: float, dx_east: float, dy_north: float,
+    base_lat: float,
+    base_lon: float,
+    dx_east: float,
+    dy_north: float,
 ) -> tuple[float, float]:
     """Shift a lat/lon by a meter-scale offset.  Returns ``(lat, lon)``."""
     dlat = dy_north / 111_320.0
@@ -27,7 +30,9 @@ def offset_to_latlon(
     return base_lat + dlat, base_lon + dlon
 
 
-def resample_trace(points: list[TracePoint], interval_s: float = INTERVAL_S) -> list[TracePoint]:
+def resample_trace(
+    points: list[TracePoint], interval_s: float = INTERVAL_S
+) -> list[TracePoint]:
     """Resample a list of trace points at fixed time intervals.
 
     Linearly interpolates lat, lon, and speed.  Heading is interpolated

@@ -7,7 +7,6 @@ import random
 import requests
 
 from trucktrack import _core
-
 from trucktrack.generate.models import DEFAULT_VALHALLA_URL
 
 # (name, min_lat, max_lat, min_lon, max_lon, weight)

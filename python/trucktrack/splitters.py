@@ -55,7 +55,10 @@ def split_by_stops(
     lon_col: str = "lon",
     min_length: int = 0,
 ) -> pl.DataFrame:
-    """Split at detected stops, returning all rows with ``segment_id`` and ``is_stop`` columns."""
+    """Split at detected stops.
+
+    Returns all rows with ``segment_id`` and ``is_stop`` columns.
+    """
     dur_us = int(min_duration.total_seconds() * 1_000_000)
     return _core.split_by_stops_df(
         df,

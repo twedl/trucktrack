@@ -59,19 +59,13 @@ pub fn split_by_stops(
         }
 
         // Attach segment_id and is_stop columns (keep all rows)
-        let seg_col = UInt32Chunked::from_vec(
-            PlSmallStr::from_static("segment_id"),
-            segment_ids,
-        )
-        .into_series()
-        .into_column();
+        let seg_col = UInt32Chunked::from_vec(PlSmallStr::from_static("segment_id"), segment_ids)
+            .into_series()
+            .into_column();
 
-        let stop_col = BooleanChunked::from_slice(
-            PlSmallStr::from_static("is_stop"),
-            &is_stop_vec,
-        )
-        .into_series()
-        .into_column();
+        let stop_col = BooleanChunked::from_slice(PlSmallStr::from_static("is_stop"), &is_stop_vec)
+            .into_series()
+            .into_column();
 
         let mut group = group;
         let _ = group.with_column(seg_col)?;

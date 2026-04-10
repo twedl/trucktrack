@@ -43,9 +43,14 @@ def default_error_profile() -> list[ErrorConfig]:
         ErrorConfig("traffic_jam", probability=0.06),
         ErrorConfig("off_route_detour", probability=0.04),
         ErrorConfig("privacy_shutoff", probability=0.03),
-        ErrorConfig("geofence_gap", probability=0.02, params={
-            "center": (44.25, -76.5), "radius_m": 2000,
-        }),
+        ErrorConfig(
+            "geofence_gap",
+            probability=0.02,
+            params={
+                "center": (44.25, -76.5),
+                "radius_m": 2000,
+            },
+        ),
         ErrorConfig("relay_driving", probability=0.01),
     ]
 

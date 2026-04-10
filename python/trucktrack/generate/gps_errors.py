@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import math
 import random
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import timedelta
-from typing import Callable
 
 from trucktrack.generate.interpolator import INTERVAL_S, offset_to_latlon
 from trucktrack.generate.models import TracePoint
@@ -19,7 +19,10 @@ ErrorFn = Callable[..., list[TracePoint]]
 
 
 def _random_window(
-    n: int, duration_s: float, rng: random.Random, margin_frac: float = 0.2,
+    n: int,
+    duration_s: float,
+    rng: random.Random,
+    margin_frac: float = 0.2,
 ) -> tuple[int, int]:
     """Return (start, end) indices for a random contiguous window."""
     count = max(2, int(duration_s / INTERVAL_S))
@@ -30,7 +33,9 @@ def _random_window(
 
 
 def _offset_point(
-    pt: TracePoint, distance_m: float, angle: float,
+    pt: TracePoint,
+    distance_m: float,
+    angle: float,
 ) -> TracePoint:
     """Shift *pt* by *distance_m* at *angle* (radians)."""
     dx = distance_m * math.cos(angle)
@@ -71,7 +76,9 @@ def cold_start_drift(
             for j in range(i, min(i + n_points, len(result))):
                 decay = drift_meters * (1.0 - (j - i) / n_points)
                 result[j] = _offset_point(
-                    result[j], decay, rng.uniform(0, 2 * math.pi),
+                    result[j],
+                    decay,
+                    rng.uniform(0, 2 * math.pi),
                 )
     return result
 
@@ -87,9 +94,7 @@ def multipath(
     if len(points) < 5:
         return points
     result = list(points)
-    indices = rng.sample(
-        range(1, len(result) - 1), min(count, len(result) - 2)
-    )
+    indices = rng.sample(range(1, len(result) - 1), min(count, len(result) - 2))
     for i in indices:
         offset = rng.uniform(offset_min_m, offset_max_m)
         moved = _offset_point(result[i], offset, rng.uniform(0, 2 * math.pi))
@@ -111,7 +116,10 @@ def frozen_fix(
     result = list(points)
     for i in range(start, end):
         result[i] = replace(
-            result[i], lat=frozen_lat, lon=frozen_lon, speed_mph=0.0,
+            result[i],
+            lat=frozen_lat,
+            lon=frozen_lon,
+            speed_mph=0.0,
         )
     return result
 
