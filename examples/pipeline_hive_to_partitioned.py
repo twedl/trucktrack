@@ -1,6 +1,6 @@
 """Hive-partitioned GPS trace pipeline.
 
-Gap splitting, stop splitting, and partitioned output.
+Gap splitting, stop splitting, traffic filtering, and partitioned output.
 
 Processes input chunks in parallel using threads (the Rust backend
 releases the GIL). Each chunk is written with a unique filename so
@@ -9,11 +9,12 @@ tiles shared across chunks accumulate rather than overwrite.
     1. Discover input parquet files.
     2. For each chunk (in parallel):
        a. Gap-split into discrete trip segments.
-       b. Assign composite trip IDs ({id}_seg{segment_id}).
-       c. Stop-split into movement and stop sub-segments.
-       d. Keep only movement rows (is_stop == False).
-       e. Compute spatial partition metadata.
-       f. Write to hive-partitioned output with chunk-unique
+       b. Stop-split into movement and stop sub-segments.
+       c. Reclassify traffic stops as movement (bearing filter).
+       d. Assign composite trip IDs ({id}_gap{gap}_trip{seg}).
+       e. Keep only movement rows (is_stop == False).
+       f. Compute spatial partition metadata.
+       g. Write to hive-partitioned output with chunk-unique
           filenames.
     3. Print summary.
 
@@ -37,6 +38,7 @@ import trucktrack
 GAP_THRESHOLD = timedelta(minutes=30)
 STOP_MAX_DIAMETER = 250.0  # meters
 STOP_MIN_DURATION = timedelta(minutes=5)
+TRAFFIC_MAX_ANGLE = 30.0  # degrees
 MIN_SEGMENT_LENGTH = 2
 
 
@@ -59,6 +61,7 @@ def _process_chunk(
     gap: timedelta,
     stop_max_diameter: float,
     stop_min_duration: timedelta,
+    traffic_max_angle: float,
     min_segment_length: int,
 ) -> pl.DataFrame:
     """Run gap split, stop split, filter, and partition on one chunk.
@@ -89,13 +92,22 @@ def _process_chunk(
         min_length=min_segment_length,
     )
 
-    # Composite ID: {id}_gap{gap_seg}_stop{stop_seg}
+    # Reclassify traffic stops as movement and re-number segments.
+    df = trucktrack.filter_traffic_stops(
+        df,
+        max_angle_change=traffic_max_angle,
+        id_col="id",
+        lat_col="lat",
+        lon_col="lon",
+    )
+
+    # Composite ID: {id}_gap{gap_seg}_trip{trip_seg}
     df = df.with_columns(
         (
             pl.col("id")
             + "_gap"
             + pl.col("gap_segment_id").cast(pl.Utf8)
-            + "_stop"
+            + "_trip"
             + pl.col("segment_id").cast(pl.Utf8)
         ).alias("id")
     )
@@ -116,6 +128,7 @@ def _process_and_write(
     gap: timedelta,
     stop_max_diameter: float,
     stop_min_duration: timedelta,
+    traffic_max_angle: float,
     min_segment_length: int,
 ) -> tuple[int, int]:
     """Read, process, and write one chunk. Returns (rows_in, rows_out)."""
@@ -127,6 +140,7 @@ def _process_and_write(
         gap=gap,
         stop_max_diameter=stop_max_diameter,
         stop_min_duration=stop_min_duration,
+        traffic_max_angle=traffic_max_angle,
         min_segment_length=min_segment_length,
     )
 
@@ -146,6 +160,7 @@ def run_pipeline(
     gap: timedelta = GAP_THRESHOLD,
     stop_max_diameter: float = STOP_MAX_DIAMETER,
     stop_min_duration: timedelta = STOP_MIN_DURATION,
+    traffic_max_angle: float = TRAFFIC_MAX_ANGLE,
     min_segment_length: int = MIN_SEGMENT_LENGTH,
     max_workers: int | None = None,
 ) -> dict[str, int]:
@@ -190,6 +205,7 @@ def run_pipeline(
                 gap,
                 stop_max_diameter,
                 stop_min_duration,
+                traffic_max_angle,
                 min_segment_length,
             ): chunk_path
             for chunk_path in chunks
