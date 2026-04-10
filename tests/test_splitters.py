@@ -202,7 +202,9 @@ class TestFilterTrafficStops:
         is_stop = [False, False, False, True, True, False, False]
         df = _make_trajectory(lats, lons, is_stop)
 
-        result = trucktrack.filter_traffic_stops(df, max_angle_change=30.0, min_distance=5.0)
+        result = trucktrack.filter_traffic_stops(
+            df, max_angle_change=30.0, min_distance=5.0
+        )
 
         assert result["is_stop"].sum() == 0
 
@@ -213,7 +215,9 @@ class TestFilterTrafficStops:
         is_stop = [False, False, False, True, True, False, False]
         df = _make_trajectory(lats, lons, is_stop)
 
-        result = trucktrack.filter_traffic_stops(df, max_angle_change=30.0, min_distance=5.0)
+        result = trucktrack.filter_traffic_stops(
+            df, max_angle_change=30.0, min_distance=5.0
+        )
 
         assert result["is_stop"].sum() == 2
 
@@ -236,7 +240,9 @@ class TestFilterTrafficStops:
         is_stop = [False, False, False, True, True, False, False]
         df = _make_trajectory(lats, lons, is_stop)
 
-        result = trucktrack.filter_traffic_stops(df, max_angle_change=30.0, min_distance=5.0)
+        result = trucktrack.filter_traffic_stops(
+            df, max_angle_change=30.0, min_distance=5.0
+        )
 
         # All movement now, single segment
         assert result["segment_id"].n_unique() == 1
