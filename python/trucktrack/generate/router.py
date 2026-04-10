@@ -1,12 +1,7 @@
-"""Route fetching via a Valhalla instance with truck costing.
-
-Falls back to a straight-line great-circle route if Valhalla is unreachable,
-so the rest of the pipeline keeps working without an external dependency.
-"""
+"""Route fetching via a Valhalla instance with truck costing."""
 
 from __future__ import annotations
 
-import math
 from typing import Any
 
 import requests
@@ -19,7 +14,10 @@ def fetch_route(
     destination: tuple[float, float],
     valhalla_url: str = DEFAULT_VALHALLA_URL,
 ) -> RouteSegment:
-    """Fetch a truck route from Valhalla. Falls back to straight-line on failure."""
+    """Fetch a truck route from Valhalla.
+
+    Raises if Valhalla is unreachable or returns an error.
+    """
     body = {
         "locations": [
             {"lat": origin[0], "lon": origin[1]},
@@ -39,13 +37,9 @@ def fetch_route(
     }
 
     url = valhalla_url.rstrip("/") + "/route"
-    try:
-        resp = requests.post(url, json=body, timeout=30)
-        resp.raise_for_status()
-        return _parse_valhalla_response(resp.json())
-    except (requests.RequestException, KeyError, ValueError) as e:
-        print(f"Valhalla error: {e}, using straight-line fallback")
-        return _straight_line_fallback(origin, destination)
+    resp = requests.post(url, json=body, timeout=30)
+    resp.raise_for_status()
+    return _parse_valhalla_response(resp.json())
 
 
 def _decode_polyline6(encoded: str) -> list[tuple[float, float]]:
@@ -131,41 +125,4 @@ def _parse_valhalla_response(data: dict[str, Any]) -> RouteSegment:
         distances_m=all_distances,
         total_distance_m=total_distance_m,
         total_duration_s=total_duration_s,
-    )
-
-
-def _straight_line_fallback(
-    origin: tuple[float, float],
-    destination: tuple[float, float],
-    num_points: int = 200,
-) -> RouteSegment:
-    lat1, lon1 = math.radians(origin[0]), math.radians(origin[1])
-    lat2, lon2 = math.radians(destination[0]), math.radians(destination[1])
-
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    a = (
-        math.sin(dlat / 2) ** 2
-        + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
-    )
-    total_dist_m = 6371000 * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-    coords: list[tuple[float, float]] = []
-    for i in range(num_points):
-        f = i / (num_points - 1)
-        lat = origin[0] + f * (destination[0] - origin[0])
-        lon = origin[1] + f * (destination[1] - origin[1])
-        coords.append((lat, lon))
-
-    seg_dist = total_dist_m / (num_points - 1)
-    avg_speed = 25.0
-    distances_m = [seg_dist] * (num_points - 1)
-    speeds_mps = [avg_speed] * (num_points - 1)
-
-    return RouteSegment(
-        coords=coords,
-        speeds_mps=speeds_mps,
-        distances_m=distances_m,
-        total_distance_m=total_dist_m,
-        total_duration_s=total_dist_m / avg_speed if avg_speed else 0.0,
     )
