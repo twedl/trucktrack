@@ -15,6 +15,7 @@ from trucktrack.partition.classify import (
     assign_partitions,
     classify_and_partition_key,
     metadata_from_trace_points,
+    partition_points,
 )
 from trucktrack.partition.tiles import (
     VALHALLA_L0_DEG,
@@ -44,6 +45,7 @@ __all__ = [
     "haversine_km",
     "metadata_from_trace_points",
     "partition_existing_parquet",
+    "partition_points",
     "valhalla_l0_tile",
     "valhalla_l1_tile",
     "valhalla_tile_id",

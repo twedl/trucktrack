@@ -8,6 +8,7 @@ Tiers:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import polars as pl
@@ -19,6 +20,8 @@ from trucktrack.partition.tiles import (
     VALHALLA_L1_DEG,
     haversine_km,
 )
+
+EARTH_RADIUS_KM = 6371.0
 
 # p=12 → 4096 cells per axis ≈ 1.6 km cells over the US+Canada bbox.
 HILBERT_ORDER = 12
@@ -71,6 +74,68 @@ def _tile_expr(lat: pl.Expr, lon: pl.Expr, deg: float) -> pl.Expr:
     col = ((lon + 180.0) / deg).floor().cast(pl.Int64).clip(0, n_cols - 1)
     row = ((lat + 90.0) / deg).floor().cast(pl.Int64).clip(0, int(180 / deg) - 1)
     return row * n_cols + col
+
+
+def _compute_trip_metadata(df: pl.DataFrame) -> pl.DataFrame:
+    """Aggregate per-trip centroid and bbox diagonal from a points DataFrame.
+
+    Input must contain: id, lat, lon.
+    Returns one row per trip with: id, centroid_lat, centroid_lon, bbox_diag_km.
+    """
+    agg = df.group_by("id").agg(
+        pl.col("lat").min().alias("lat_min"),
+        pl.col("lat").max().alias("lat_max"),
+        pl.col("lon").min().alias("lon_min"),
+        pl.col("lon").max().alias("lon_max"),
+        pl.col("lat").mean().alias("centroid_lat"),
+        pl.col("lon").mean().alias("centroid_lon"),
+    )
+
+    # Vectorized haversine for bbox diagonal — chained because each step
+    # depends on the previous (Polars can't forward-reference within one
+    # with_columns call).
+    deg2rad = math.pi / 180.0
+    agg = agg.with_columns(
+        (pl.col("lat_min") * deg2rad).alias("_lat1"),
+        (pl.col("lat_max") * deg2rad).alias("_lat2"),
+    )
+    agg = agg.with_columns(
+        (pl.col("_lat2") - pl.col("_lat1")).alias("_dlat"),
+        ((pl.col("lon_max") - pl.col("lon_min")) * deg2rad).alias("_dlon"),
+    )
+    agg = agg.with_columns(
+        (
+            (pl.col("_dlat") / 2).sin() ** 2
+            + pl.col("_lat1").cos()
+            * pl.col("_lat2").cos()
+            * (pl.col("_dlon") / 2).sin() ** 2
+        ).alias("_a")
+    )
+    agg = agg.with_columns(
+        (EARTH_RADIUS_KM * 2 * pl.col("_a").sqrt().arcsin()).alias("bbox_diag_km")
+    )
+
+    return agg.select(["id", "centroid_lat", "centroid_lon", "bbox_diag_km"])
+
+
+def partition_points(df: pl.DataFrame) -> pl.DataFrame:
+    """Add tier, partition_id, and hilbert_idx columns to a points DataFrame.
+
+    Single-call entry point for partitioning an in-memory DataFrame.
+    Input must contain at least: id, lat, lon.
+    Returns the original DataFrame with tier, partition_id, hilbert_idx joined in.
+    """
+    required = {"id", "lat", "lon"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"missing required columns: {sorted(missing)}")
+
+    metadata = assign_partitions(_compute_trip_metadata(df))
+
+    return df.join(
+        metadata.select(["id", "tier", "partition_id", "hilbert_idx"]),
+        on="id",
+    )
 
 
 def assign_partitions(df: pl.DataFrame) -> pl.DataFrame:

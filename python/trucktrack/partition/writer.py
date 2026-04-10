@@ -18,6 +18,7 @@ import polars as pl
 
 from trucktrack.generate.models import TracePoint
 from trucktrack.partition.classify import (
+    _compute_trip_metadata,
     assign_partitions,
     metadata_from_trace_points,
 )
@@ -128,37 +129,6 @@ def partition_existing_parquet(input_path: Path, output_dir: Path) -> dict[str, 
     if missing:
         raise ValueError(f"{input_path} is missing required columns: {sorted(missing)}")
 
-    agg = points.group_by("id").agg(
-        pl.col("lat").min().alias("lat_min"),
-        pl.col("lat").max().alias("lat_max"),
-        pl.col("lon").min().alias("lon_min"),
-        pl.col("lon").max().alias("lon_max"),
-        pl.col("lat").mean().alias("centroid_lat"),
-        pl.col("lon").mean().alias("centroid_lon"),
-    )
-
-    R = 6371.0
-    lat1 = (pl.col("lat_min") * (3.141592653589793 / 180.0)).alias("_lat1")
-    lat2 = (pl.col("lat_max") * (3.141592653589793 / 180.0)).alias("_lat2")
-    agg = agg.with_columns(lat1, lat2)
-    agg = agg.with_columns(
-        (pl.col("_lat2") - pl.col("_lat1")).alias("_dlat"),
-        ((pl.col("lon_max") - pl.col("lon_min")) * (3.141592653589793 / 180.0)).alias(
-            "_dlon"
-        ),
-    )
-    agg = agg.with_columns(
-        (
-            (pl.col("_dlat") / 2).sin() ** 2
-            + pl.col("_lat1").cos()
-            * pl.col("_lat2").cos()
-            * (pl.col("_dlon") / 2).sin() ** 2
-        ).alias("_a")
-    )
-    agg = agg.with_columns((R * 2 * pl.col("_a").sqrt().arcsin()).alias("bbox_diag_km"))
-
-    metadata = assign_partitions(
-        agg.select(["id", "centroid_lat", "centroid_lon", "bbox_diag_km"])
-    )
+    metadata = assign_partitions(_compute_trip_metadata(points))
 
     return write_partitions(metadata, points, output_dir)
