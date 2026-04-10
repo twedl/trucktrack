@@ -2,7 +2,7 @@
 
 High-performance trajectory splitting, generation, and partitioning, powered by Rust.
 
-A Python package that replicates and extends
+A Python package implementing logic similar to 
 [movingpandas](https://movingpandas.org/) trajectory splitters
 (ObservationGapSplitter, StopSplitter) with a Rust backend for speed.
 Data flows through [Polars](https://pola.rs/) DataFrames, with the option
