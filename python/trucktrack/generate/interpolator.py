@@ -19,6 +19,57 @@ from trucktrack.generate.speed_profile import (
 INTERVAL_S = 60.0
 
 
+def resample_trace(points: list[TracePoint], interval_s: float = INTERVAL_S) -> list[TracePoint]:
+    """Resample a list of trace points at fixed time intervals.
+
+    Linearly interpolates lat, lon, and speed.  Heading is interpolated
+    along the shortest arc to avoid wrap-around artefacts.
+    """
+    if len(points) < 2:
+        return list(points)
+
+    t0 = points[0].timestamp
+    offsets = [(p.timestamp - t0).total_seconds() for p in points]
+    total = offsets[-1]
+    if total <= 0:
+        return [points[0]]
+
+    result: list[TracePoint] = []
+    elapsed = 0.0
+    j = 0  # index into source points
+
+    while elapsed <= total + 0.1:
+        while j < len(offsets) - 2 and offsets[j + 1] < elapsed:
+            j += 1
+
+        seg_dur = offsets[j + 1] - offsets[j]
+        frac = (elapsed - offsets[j]) / seg_dur if seg_dur > 0 else 0.0
+        frac = min(frac, 1.0)
+
+        p_a, p_b = points[j], points[j + 1]
+
+        lat = p_a.lat + frac * (p_b.lat - p_a.lat)
+        lon = p_a.lon + frac * (p_b.lon - p_a.lon)
+        speed = p_a.speed_mph + frac * (p_b.speed_mph - p_a.speed_mph)
+
+        # Shortest-arc heading interpolation
+        diff = (p_b.heading - p_a.heading + 540) % 360 - 180
+        hdg = (p_a.heading + frac * diff) % 360
+
+        result.append(
+            TracePoint(
+                lat=round(lat, 6),
+                lon=round(lon, 6),
+                speed_mph=round(speed, 1),
+                heading=round(hdg, 1),
+                timestamp=t0 + timedelta(seconds=elapsed),
+            )
+        )
+        elapsed += interval_s
+
+    return result
+
+
 def bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Compass bearing in degrees [0, 360), 0 = north, clockwise."""
     dlon = math.radians(lon2 - lon1)

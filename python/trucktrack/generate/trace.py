@@ -7,7 +7,7 @@ import random
 from datetime import datetime
 from io import BytesIO, StringIO
 
-from trucktrack.generate.interpolator import bearing, interpolate_route
+from trucktrack.generate.interpolator import bearing, interpolate_route, resample_trace
 from trucktrack.generate.models import RouteSegment, TracePoint, TripConfig
 from trucktrack.generate.noise import apply_noise
 from trucktrack.generate.parking import (
@@ -40,6 +40,7 @@ def generate_trace(config: TripConfig) -> list[TracePoint]:
         rng=rng,
         maneuver_type=origin_maneuver,
     )
+    departure_pts = resample_trace(departure_pts)
     all_points.extend(departure_pts)
 
     driving_start = (
@@ -59,6 +60,7 @@ def generate_trace(config: TripConfig) -> list[TracePoint]:
         rng=rng,
         maneuver_type=dest_maneuver,
     )
+    arrival_pts = resample_trace(arrival_pts)
     all_points.extend(arrival_pts)
 
     return apply_noise(all_points, config.gps_noise_meters, rng)
