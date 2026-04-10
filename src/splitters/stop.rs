@@ -24,7 +24,7 @@ pub fn split_by_stops(
 ) -> PolarsResult<DataFrame> {
     let sorted = df
         .lazy()
-        .sort([id_col, time_col], Default::default())
+        .sort([id_col, time_col], SortMultipleOptions::default())
         .collect()?;
 
     let groups = sorted.partition_by([id_col], true)?;
@@ -50,11 +50,11 @@ pub fn split_by_stops(
         let mut segment_ids: Vec<u32> = vec![0; n];
         if n > 0 {
             for i in 1..n {
-                if is_stop_vec[i] != is_stop_vec[i - 1] {
-                    segment_ids[i] = segment_ids[i - 1] + 1;
+                segment_ids[i] = if is_stop_vec[i] != is_stop_vec[i - 1] {
+                    segment_ids[i - 1].saturating_add(1)
                 } else {
-                    segment_ids[i] = segment_ids[i - 1];
-                }
+                    segment_ids[i - 1]
+                };
             }
         }
 
@@ -87,25 +87,24 @@ pub fn split_by_stops(
         empty
     } else {
         let lfs: Vec<LazyFrame> = result_frames.into_iter().map(|f| f.lazy()).collect();
-        concat(lfs, Default::default())?.collect()?
+        concat(lfs, UnionArgs::default())?.collect()?
     };
 
     if min_length > 0 {
         // Only filter short *movement* segments; stop segments always survive.
         // Count rows per movement segment, then mark each row with its count
         // (stop rows get null _cnt via left join and are always kept).
-        let movement_counts = combined
+        let cached = combined.lazy().cache();
+
+        let movement_counts = cached
             .clone()
-            .lazy()
             .filter(col("is_stop").eq(lit(false)))
             .group_by([col(id_col), col("segment_id")])
-            .agg([col(time_col).count().alias("_cnt")])
-            .collect()?;
+            .agg([col(time_col).count().alias("_cnt")]);
 
-        combined = combined
-            .lazy()
+        combined = cached
             .join(
-                movement_counts.lazy(),
+                movement_counts,
                 [col(id_col), col("segment_id")],
                 [col(id_col), col("segment_id")],
                 JoinArgs::new(JoinType::Left),
@@ -126,17 +125,23 @@ pub fn split_by_stops(
 }
 
 /// Extract microsecond timestamps from a datetime column.
+///
+/// Returns an error if the column is not a datetime type.
+/// Null timestamps are mapped to `i64::MIN` so they sort before all valid times
+/// and never satisfy duration checks in `detect_stops`.
 fn datetime_to_microseconds(col: &Column) -> PolarsResult<Vec<i64>> {
-    let ca = col.datetime().map_err(|_| {
-        PolarsError::ComputeError(format!("Expected datetime column, got {:?}", col.dtype()).into())
-    })?;
-    // Access the underlying physical Int64Chunked via the Series
-    let phys = ca.phys.clone().into_series();
-    let i64_ca = phys.i64()?;
+    let series = col
+        .cast(&DataType::Int64)
+        .map_err(|e| {
+            PolarsError::ComputeError(
+                format!("cannot cast '{}' ({}) to Int64: {e}", col.name(), col.dtype()).into(),
+            )
+        })?
+        .take_materialized_series();
+    let i64_ca = series.i64()?;
     Ok(i64_ca
-        .to_vec()
         .into_iter()
-        .map(|opt: Option<i64>| opt.unwrap_or(0))
+        .map(|opt: Option<i64>| opt.unwrap_or(i64::MIN))
         .collect())
 }
 
@@ -144,6 +149,8 @@ fn datetime_to_microseconds(col: &Column) -> PolarsResult<Vec<i64>> {
 ///
 /// Returns a list of (start_idx, end_idx) inclusive ranges where the object
 /// is stopped (within diameter, for at least min_duration).
+///
+/// Rows with null lat/lon are skipped (never start or extend a stop window).
 fn detect_stops(
     lats: &[Option<f64>],
     lons: &[Option<f64>],
@@ -163,20 +170,27 @@ fn detect_stops(
     let mut start = 0;
 
     while start < n {
+        let (start_lat, start_lon) = match (lats[start], lons[start]) {
+            (Some(la), Some(lo)) => (la, lo),
+            _ => {
+                start += 1;
+                continue;
+            }
+        };
+
         let mut end = start;
         let mut best_end: Option<usize> = None;
 
-        // Track bounding box
-        let start_lat = lats[start].unwrap_or(0.0);
-        let start_lon = lons[start].unwrap_or(0.0);
         let mut min_lat = start_lat;
         let mut max_lat = start_lat;
         let mut min_lon = start_lon;
         let mut max_lon = start_lon;
 
         while end < n {
-            let lat = lats[end].unwrap_or(0.0);
-            let lon = lons[end].unwrap_or(0.0);
+            let (lat, lon) = match (lats[end], lons[end]) {
+                (Some(la), Some(lo)) => (la, lo),
+                _ => break,
+            };
 
             min_lat = min_lat.min(lat);
             max_lat = max_lat.max(lat);
@@ -212,4 +226,77 @@ fn detect_stops(
     }
 
     stops
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detect_stops_empty_input() {
+        let stops = detect_stops(&[], &[], &[], 100.0, 60_000_000);
+        assert!(stops.is_empty());
+    }
+
+    #[test]
+    fn detect_stops_single_point() {
+        let lats = vec![Some(43.65)];
+        let lons = vec![Some(-79.38)];
+        let times = vec![0];
+        let stops = detect_stops(&lats, &lons, &times, 100.0, 0);
+        // Single point with min_duration=0 qualifies as a stop
+        assert_eq!(stops, vec![(0, 0)]);
+    }
+
+    #[test]
+    fn detect_stops_stationary_long_enough() {
+        // 5 points at the same location, 1 second apart
+        let lats = vec![Some(43.65); 5];
+        let lons = vec![Some(-79.38); 5];
+        let times: Vec<i64> = (0..5).map(|i| i * 1_000_000).collect();
+        // Requires 3 seconds duration
+        let stops = detect_stops(&lats, &lons, &times, 100.0, 3_000_000);
+        assert_eq!(stops, vec![(0, 4)]);
+    }
+
+    #[test]
+    fn detect_stops_too_short_duration() {
+        let lats = vec![Some(43.65); 3];
+        let lons = vec![Some(-79.38); 3];
+        let times: Vec<i64> = (0..3).map(|i| i * 1_000_000).collect();
+        // Requires 10 seconds — only 2 seconds of data
+        let stops = detect_stops(&lats, &lons, &times, 100.0, 10_000_000);
+        assert!(stops.is_empty());
+    }
+
+    #[test]
+    fn detect_stops_null_coords_skipped() {
+        let lats = vec![None, Some(43.65), Some(43.65), Some(43.65), None];
+        let lons = vec![None, Some(-79.38), Some(-79.38), Some(-79.38), None];
+        let times: Vec<i64> = (0..5).map(|i| i * 1_000_000).collect();
+        let stops = detect_stops(&lats, &lons, &times, 100.0, 1_000_000);
+        // Should detect stop at indices 1..3, skipping nulls at 0 and 4
+        assert_eq!(stops, vec![(1, 3)]);
+    }
+
+    #[test]
+    fn detect_stops_null_breaks_window() {
+        // Null in the middle should break the stop window
+        let lats = vec![Some(43.65), Some(43.65), None, Some(43.65), Some(43.65)];
+        let lons = vec![Some(-79.38), Some(-79.38), None, Some(-79.38), Some(-79.38)];
+        let times: Vec<i64> = (0..5).map(|i| i * 1_000_000).collect();
+        // Requires 2 seconds: first window (0,1) is only 1s, second window (3,4) is only 1s
+        let stops = detect_stops(&lats, &lons, &times, 100.0, 2_000_000);
+        assert!(stops.is_empty());
+    }
+
+    #[test]
+    fn detect_stops_movement_breaks_stop() {
+        // Stationary then moves far away
+        let lats = vec![Some(43.65), Some(43.65), Some(43.65), Some(50.0), Some(50.0)];
+        let lons = vec![Some(-79.38), Some(-79.38), Some(-79.38), Some(-79.38), Some(-79.38)];
+        let times: Vec<i64> = (0..5).map(|i| i * 1_000_000).collect();
+        let stops = detect_stops(&lats, &lons, &times, 100.0, 1_000_000);
+        assert_eq!(stops, vec![(0, 2)]);
+    }
 }

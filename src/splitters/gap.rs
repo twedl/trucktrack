@@ -16,7 +16,7 @@ pub fn split_by_observation_gap(
 ) -> PolarsResult<DataFrame> {
     let result = df
         .lazy()
-        .sort([id_col, time_col], Default::default())
+        .sort([id_col, time_col], SortMultipleOptions::default())
         .with_column(
             col(time_col)
                 .diff(lit(1), NullBehavior::Ignore)
@@ -32,17 +32,16 @@ pub fn split_by_observation_gap(
         .collect()?;
 
     if min_length > 0 {
-        let counts = result
-            .clone()
-            .lazy()
-            .group_by([col(id_col), col("segment_id")])
-            .agg([col(time_col).count().alias("_cnt")])
-            .collect()?;
+        let cached = result.lazy().cache();
 
-        let filtered = result
-            .lazy()
+        let counts = cached
+            .clone()
+            .group_by([col(id_col), col("segment_id")])
+            .agg([col(time_col).count().alias("_cnt")]);
+
+        let filtered = cached
             .join(
-                counts.lazy(),
+                counts,
                 [col(id_col), col("segment_id")],
                 [col(id_col), col("segment_id")],
                 JoinArgs::new(JoinType::Inner),

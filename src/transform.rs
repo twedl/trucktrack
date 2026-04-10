@@ -1,14 +1,20 @@
 use polars::prelude::*;
-use pyo3::exceptions::PyRuntimeError;
+use pyo3::exceptions::{PyOSError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3_polars::PyDataFrame;
 
 pub fn polars_err(e: PolarsError) -> PyErr {
-    PyRuntimeError::new_err(e.to_string())
+    match &e {
+        PolarsError::SchemaMismatch(_)
+        | PolarsError::SchemaFieldNotFound(_)
+        | PolarsError::ColumnNotFound(_)
+        | PolarsError::ShapeMismatch(_) => PyValueError::new_err(e.to_string()),
+        _ => PyRuntimeError::new_err(e.to_string()),
+    }
 }
 
 pub fn io_err(e: std::io::Error) -> PyErr {
-    PyRuntimeError::new_err(e.to_string())
+    PyOSError::new_err(e.to_string())
 }
 
 /// Add a `speed_mps` column (km/h -> m/s) to a DataFrame.

@@ -1,4 +1,5 @@
 /// Haversine distance between two (lat, lon) points in meters.
+#[must_use]
 pub fn haversine_distance_meters(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     const R: f64 = 6_371_000.0; // Earth radius in meters
 

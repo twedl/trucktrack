@@ -103,7 +103,7 @@ class TestProcessTracksFile:
         assert result["speed_mps"].to_list() == pytest.approx(expected.to_list())
 
     def test_missing_input_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(RuntimeError):
+        with pytest.raises(OSError):
             trucktrack.process_parquet_in_rust(
                 "nonexistent.parquet", tmp_path / "out.parquet"
             )
