@@ -12,9 +12,8 @@ tiles shared across chunks accumulate rather than overwrite.
        b. Stop-split into movement and stop sub-segments.
        c. Reclassify traffic stops as movement (bearing filter).
        d. Assign composite trip IDs ({id}_gap{gap}_trip{seg}).
-       e. Keep only movement rows (is_stop == False).
-       f. Compute spatial partition metadata.
-       g. Write to hive-partitioned output with chunk-unique
+       e. Compute spatial partition metadata.
+       f. Write to hive-partitioned output with chunk-unique
           filenames.
     3. Print summary.
 
@@ -112,10 +111,6 @@ def _process_chunk(
         ).alias("id")
     )
 
-    # Keep only movement rows.
-    df = df.filter(~pl.col("is_stop"))
-
-    # Partition metadata.
     df = trucktrack.partition_points(df)
 
     return df
@@ -148,7 +143,7 @@ def _process_and_write(
     _write_chunk(df, output_dir, chunk_path.stem)
 
     rel = chunk_path.relative_to(input_dir)
-    print(f"  {rel}: {n_in:,} rows in -> {n_out:,} movement rows out")
+    print(f"  {rel}: {n_in:,} rows in -> {n_out:,} rows out")
 
     return n_in, n_out
 
@@ -228,7 +223,7 @@ def run_pipeline(
     print(f"  Input chunks:         {len(chunks):>10,}")
     print(f"  Workers:              {max_workers:>10,}")
     print(f"  Input rows:           {total_rows_in:>10,}")
-    print(f"  Movement rows out:    {total_rows_out:>10,}")
+    print(f"  Rows out:             {total_rows_out:>10,}")
     print(f"  Output partitions:    {total_partitions:>10,}")
     for tier, count in sorted(partition_counts.items()):
         print(f"    {tier}: {count:,} partition(s)")
