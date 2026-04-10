@@ -14,8 +14,9 @@ subpackages:
 
 - **`trucktrack.generate`** — synthesize realistic truck GPS traces by
   routing through a [Valhalla](https://valhalla.github.io/valhalla/)
-  instance, interpolating along the route, layering parking maneuvers, and
-  adding GPS noise.
+  instance, interpolating along the route, layering parking maneuvers,
+  adding GPS noise, and optionally injecting configurable data-quality
+  errors (signal dropout, multipath, traffic jams, etc.).
 - **`trucktrack.partition`** — rewrite a flat parquet of trips as a
   Valhalla-tile-aligned, hive-partitioned dataset (`tier=…/partition_id=…/`)
   with rows sorted by a Hilbert-curve index for spatial locality.
@@ -62,7 +63,9 @@ result = trucktrack.split_by_stops(
     min_duration=timedelta(minutes=2),
     min_length=0,
 )
-# Returns movement segments only, with segment_id column
+# Returns all rows with segment_id and is_stop columns.
+# Movement segments shorter than min_length are filtered;
+# stop segments are always kept.
 
 # Process entirely in Rust (parquet in, parquet out)
 trucktrack.split_by_observation_gap_file(
@@ -99,13 +102,67 @@ config = TripConfig(
 )
 
 # Returns list[TracePoint] (lat, lon, speed_mph, heading, timestamp).
-# Falls back to a straight-line route if Valhalla is unreachable.
+# Requires a running Valhalla instance at the configured URL.
 points = generate_trace(config)
 
 # Write one or many trips to a single parquet (columns: id, lat, lon,
 # speed, heading, time — directly consumable by the splitters above).
 traces_to_parquet([(points, config.trip_id)], "trip.parquet")
 ```
+
+#### Error injection
+
+Generate traces with realistic data-quality issues for testing downstream
+pipelines. Errors are configured per-trip via `ErrorConfig` and applied
+after trace synthesis:
+
+```python
+from trucktrack.generate import ErrorConfig, default_error_profile
+
+# Use the built-in profile: 19 error types at realistic probabilities
+# (~1/1000 trips per type — tuned over 1000+ synthetic trips)
+config = TripConfig(
+    origin=(43.6532, -79.3832),
+    destination=(45.5017, -73.5673),
+    departure_time=datetime.now(UTC),
+    valhalla_url="http://localhost:8002",
+    errors=default_error_profile(),
+)
+points = generate_trace(config)
+
+# Or pick specific errors:
+config = TripConfig(
+    ...,
+    errors=[
+        ErrorConfig("signal_dropout", probability=0.5, params={"gap_seconds": 30}),
+        ErrorConfig("traffic_jam", probability=1.0),
+    ],
+)
+```
+
+Available error types:
+
+| Category | Error type | Description |
+|----------|-----------|-------------|
+| GPS | `signal_dropout` | Remove points during signal loss |
+| GPS | `cold_start_drift` | Initial position drift after gaps |
+| GPS | `multipath` | Reflection-induced position spikes |
+| GPS | `frozen_fix` | Position lock-up (repeated coordinates) |
+| GPS | `timestamp_glitch` | Duplicate, jump-forward, or jump-backward timestamps |
+| GPS | `coordinate_corruption` | Precision loss, lat/lon flip, or swap |
+| GPS | `speed_heading_desync` | Speed/heading lag mismatch |
+| GPS | `jitter_at_rest` | Brownian motion when stopped |
+| Operational | `privacy_shutoff` | Entire trip segment removed |
+| Operational | `relay_driving` | Multiple drivers with dwell compression |
+| Operational | `yard_dwell` | Pre/post-trip parking |
+| Operational | `fuel_rest_stop` | Mid-trip fuel/food break |
+| Operational | `weigh_station_stop` | Commercial inspection with approach slowdown |
+| Operational | `bobtail_segment` | Tractor-only faster speeds |
+| Operational | `off_route_detour` | Temporary course deviation |
+| Operational | `loading_dwell` | Cargo transfer dwell |
+| Operational | `traffic_jam` | Highway congestion with optional full stops |
+| Operational | `device_power_cycle` | GPS unit reboot with gap + drift |
+| Operational | `geofence_gap` | Privacy-zone data removal |
 
 ### Python API — `trucktrack.partition`
 
@@ -130,6 +187,10 @@ summary = write_trips_partitioned(
     [(points, "trip-001")], Path("partitioned/")
 )
 
+# Single-call in-memory partitioning (adds tier, partition_id, hilbert_idx):
+from trucktrack.partition import partition_points
+partitioned_df = partition_points(points_df)
+
 # Lower-level: classify trips yourself, then write.
 metadata = pl.DataFrame({
     "id": ["trip-001"],
@@ -145,9 +206,9 @@ Tiers are assigned by trip bounding-box diagonal:
 
 | Tier       | Bbox diagonal | Tile bucket                  |
 |------------|---------------|------------------------------|
-| `local`    | < 100 km      | Valhalla L1 (1°×1°)          |
-| `regional` | 100–800 km    | Valhalla L0 (4°×4°)          |
-| `longhaul` | > 800 km      | Coarse 8°×8° super-region    |
+| `local`    | < 100 km      | Valhalla L1 (1x1 deg)       |
+| `regional` | 100-800 km    | Valhalla L0 (4x4 deg)       |
+| `longhaul` | > 800 km      | Coarse 8x8 deg super-region |
 
 ### CLI
 
@@ -185,7 +246,7 @@ trucktrack partition tracks.parquet partitioned/
 |------|-------------|
 | **Pure Rust** | `split_by_observation_gap_file()` / `split_by_stops_file()` read parquet, process, and write parquet entirely in Rust. No Python objects created. |
 | **Python <-> Rust** | `split_by_observation_gap()` / `split_by_stops()` share the Polars DataFrame with Rust via `pyo3-polars` (Arrow C Data Interface, zero-copy on column buffers). The Python `polars`, Rust `polars`, and `pyo3-polars` versions must be kept in sync. |
-| **Python only** | `read_parquet()` / `read_dataset()` use polars directly in Python. The `generate` and `partition` subpackages are also pure Python on top of Polars / PyArrow / `hilbertcurve`. |
+| **Python only** | `read_parquet()` / `read_dataset()` use polars directly in Python. The `generate` and `partition` subpackages are also pure Python on top of Polars / PyArrow. |
 
 ## Project layout
 
@@ -193,7 +254,8 @@ trucktrack partition tracks.parquet partitioned/
 src/
   lib.rs              # PyO3 module registration + splitter wrappers
   geo.rs              # Haversine distance (pure Rust math)
-  transform.rs        # add_speed_mps, IPC/parquet helpers
+  partition.rs        # Tile classification, Hilbert indexing (Rust)
+  transform.rs        # add_speed_mps, parquet helpers, error mapping
   splitters/
     gap.rs            # ObservationGapSplitter (Polars lazy expressions)
     stop.rs           # StopSplitter (Polars groupby + Rust sliding window)
@@ -204,17 +266,19 @@ python/trucktrack/
   cli.py              # CLI entry point (argparse subcommands)
   _core.pyi           # Type stubs for the Rust extension
   generate/
-    __init__.py       # Re-exports TripConfig, generate_trace, traces_to_*
-    models.py         # TripConfig, TracePoint, RouteSegment dataclasses
-    router.py         # Valhalla HTTP client (with straight-line fallback)
+    __init__.py       # Re-exports TripConfig, generate_trace, traces_to_*, ErrorConfig
+    models.py         # TripConfig, TracePoint, RouteSegment, ErrorConfig dataclasses
+    router.py         # Valhalla HTTP client
     interpolator.py   # Per-segment interpolation, bearing math
     speed_profile.py  # Per-edge speed sampling
     parking.py        # Origin/destination parking maneuvers
     noise.py          # Per-point GPS noise
     trace.py          # Orchestrator + traces_to_csv / traces_to_parquet
     random_trip.py    # Random origin/destination sampling helper
+    gps_errors.py     # Physical GPS error injectors (8 types)
+    operational_errors.py  # Operational pattern injectors (11 types)
   partition/
-    __init__.py       # Re-exports assign_partitions, write_*, etc.
+    __init__.py       # Re-exports assign_partitions, partition_points, write_*, etc.
     tiles.py          # Valhalla L0/L1 tile math, haversine
     classify.py       # Tier assignment + Hilbert-curve indexing (Polars)
     writer.py         # write_partitions, write_trips_partitioned,

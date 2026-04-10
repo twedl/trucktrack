@@ -8,9 +8,11 @@ from __future__ import annotations
 
 from trucktrack._core import __version__
 from trucktrack.generate import (
+    ErrorConfig,
     RouteSegment,
     TracePoint,
     TripConfig,
+    default_error_profile,
     generate_trace,
     traces_to_csv,
     traces_to_parquet,
@@ -25,6 +27,7 @@ from trucktrack.partition import (
     assign_partitions,
     classify_and_partition_key,
     partition_existing_parquet,
+    partition_points,
     write_partitions,
     write_trips_partitioned,
 )
@@ -46,9 +49,11 @@ __all__ = [
     "split_by_stops",
     "split_by_stops_file",
     # generate
+    "ErrorConfig",
     "RouteSegment",
     "TracePoint",
     "TripConfig",
+    "default_error_profile",
     "generate_trace",
     "traces_to_csv",
     "traces_to_parquet",
@@ -56,6 +61,7 @@ __all__ = [
     "assign_partitions",
     "classify_and_partition_key",
     "partition_existing_parquet",
+    "partition_points",
     "write_partitions",
     "write_trips_partitioned",
 ]

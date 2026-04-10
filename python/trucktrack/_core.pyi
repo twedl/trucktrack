@@ -74,7 +74,11 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     ...
 
 def valhalla_tile_id(lat: float, lon: float, tile_deg: float) -> int:
-    """Flat tile index matching Valhalla's row-major numbering."""
+    """Flat tile index matching Valhalla's row-major numbering.
+
+    Raises:
+        ValueError: If ``tile_deg`` is not positive.
+    """
     ...
 
 def classify_and_partition_key(
