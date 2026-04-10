@@ -2,18 +2,20 @@
 
 Gap splitting, stop splitting, and partitioned output.
 
-Reads a hive-partitioned input dataset
-(e.g. data/year=2022/chunk_id=f0c/part-0.parquet), runs the full
-trucktrack processing pipeline, and writes a new hive-partitioned
-output:
+Processes input chunks in parallel using threads (the Rust backend
+releases the GIL). Each chunk is written with a unique filename so
+tiles shared across chunks accumulate rather than overwrite.
 
-    1. Scan all input parquet files lazily via hive partitioning.
-    2. Gap-split each vehicle's trace into discrete trip segments.
-    3. Assign composite trip IDs ({id}_seg{segment_id}).
-    4. Stop-split each trip into movement and stop sub-segments.
-    5. Keep only movement rows (is_stop == False).
-    6. Compute spatial partition metadata.
-    7. Write hive-partitioned parquet to the output directory.
+    1. Discover input parquet files.
+    2. For each chunk (in parallel):
+       a. Gap-split into discrete trip segments.
+       b. Assign composite trip IDs ({id}_seg{segment_id}).
+       c. Stop-split into movement and stop sub-segments.
+       d. Keep only movement rows (is_stop == False).
+       e. Compute spatial partition metadata.
+       f. Write to hive-partitioned output with chunk-unique
+          filenames.
+    3. Print summary.
 
 Usage::
 
@@ -23,6 +25,8 @@ Usage::
 
 from __future__ import annotations
 
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import timedelta
 from pathlib import Path
 
@@ -36,56 +40,48 @@ STOP_MIN_DURATION = timedelta(minutes=5)
 MIN_SEGMENT_LENGTH = 2
 
 
-def run_pipeline(
-    input_dir: Path,
+def _write_chunk(
+    df: pl.DataFrame,
     output_dir: Path,
+    chunk_name: str,
+) -> None:
+    """Write one chunk into hive dirs with a chunk-unique filename."""
+    for (tier, pid), group in df.group_by(["tier", "partition_id"]):
+        tile_dir = output_dir / f"tier={tier}" / f"partition_id={pid}"
+        tile_dir.mkdir(parents=True, exist_ok=True)
+        out_path = tile_dir / f"{chunk_name}.parquet"
+        group.drop(["tier", "partition_id"]).write_parquet(out_path)
+
+
+def _process_chunk(
+    df: pl.DataFrame,
     *,
-    gap: timedelta = GAP_THRESHOLD,
-    stop_max_diameter: float = STOP_MAX_DIAMETER,
-    stop_min_duration: timedelta = STOP_MIN_DURATION,
-    min_segment_length: int = MIN_SEGMENT_LENGTH,
-) -> dict[str, int]:
-    """Run the full gap+stop+partition pipeline.
+    gap: timedelta,
+    stop_max_diameter: float,
+    stop_min_duration: timedelta,
+    min_segment_length: int,
+) -> pl.DataFrame:
+    """Run gap split, stop split, filter, and partition on one chunk.
 
-    Returns a {tier_name: partition_count} summary.
+    Returns a DataFrame with tier/partition_id/hilbert_idx columns.
     """
-    # ── 1. Scan the hive-partitioned input ──────────────────────────
-    parquet_glob = str(input_dir / "**" / "*.parquet")
-    print(f"Scanning input: {parquet_glob}")
-
-    lf = pl.scan_parquet(parquet_glob, hive_partitioning=True)
-    df = lf.collect()
-
-    n_rows_raw = len(df)
-    n_vehicles = df["id"].n_unique()
-    print(f"Loaded {n_rows_raw:,} rows across {n_vehicles:,} vehicles.")
-
-    # ── 2. Gap splitting ────────────────────────────────────────────
-    print(f"\nStep 1/4 — Gap splitting (threshold: {gap}) ...")
-    df_gap = trucktrack.split_by_observation_gap(
+    # Gap splitting.
+    df = trucktrack.split_by_observation_gap(
         df,
         gap,
         id_col="id",
         time_col="time",
         min_length=min_segment_length,
     )
-    n_gap_segments = df_gap.select(pl.struct("id", "segment_id").n_unique()).item()
-    print(f"  {n_gap_segments:,} trip segments after gap splitting.")
 
-    # ── 3. Assign composite trip IDs ────────────────────────────────
-    print("\nStep 2/4 — Building composite trip IDs ...")
-    df_trips = df_gap.with_columns(
+    # Composite trip IDs.
+    df = df.with_columns(
         (pl.col("id") + "_seg" + pl.col("segment_id").cast(pl.Utf8)).alias("trip_id")
     )
 
-    # ── 4. Stop splitting ───────────────────────────────────────────
-    print(
-        f"Step 3/4 — Stop splitting "
-        f"(max_diameter={stop_max_diameter} m, "
-        f"min_duration={stop_min_duration}) ..."
-    )
-    df_split = trucktrack.split_by_stops(
-        df_trips,
+    # Stop splitting.
+    df = trucktrack.split_by_stops(
+        df,
         max_diameter=stop_max_diameter,
         min_duration=stop_min_duration,
         id_col="trip_id",
@@ -95,47 +91,120 @@ def run_pipeline(
         min_length=min_segment_length,
     )
 
-    n_stops = (
-        df_split.filter(pl.col("is_stop")).select(pl.col("trip_id").n_unique()).item()
+    # Keep only movement rows.
+    df = df.filter(~pl.col("is_stop"))
+    df = df.rename({"trip_id": "id"})
+
+    # Partition metadata.
+    df = trucktrack.partition_points(df)
+
+    return df
+
+
+def _process_and_write(
+    chunk_path: Path,
+    input_dir: Path,
+    output_dir: Path,
+    gap: timedelta,
+    stop_max_diameter: float,
+    stop_min_duration: timedelta,
+    min_segment_length: int,
+) -> tuple[int, int]:
+    """Read, process, and write one chunk. Returns (rows_in, rows_out)."""
+    df = pl.read_parquet(chunk_path)
+    n_in = len(df)
+
+    df = _process_chunk(
+        df,
+        gap=gap,
+        stop_max_diameter=stop_max_diameter,
+        stop_min_duration=stop_min_duration,
+        min_segment_length=min_segment_length,
     )
-    n_moving = (
-        df_split.filter(~pl.col("is_stop")).select(pl.col("trip_id").n_unique()).item()
-    )
-    print(f"  Stop segments: {n_stops:,}  |  Movement segments: {n_moving:,}")
 
-    # ── 5. Keep only movement rows ──────────────────────────────────
-    df_moving = df_split.filter(~pl.col("is_stop"))
-    n_moving_rows = len(df_moving)
-    dropped = n_rows_raw - n_moving_rows
-    print(
-        f"\n  Retained {n_moving_rows:,} movement rows ({dropped:,} stop rows dropped)."
-    )
+    n_out = len(df)
+    _write_chunk(df, output_dir, chunk_path.stem)
 
-    # Rename trip_id back to id for the partitioner.
-    df_points = df_moving.rename({"trip_id": "id"})
+    rel = chunk_path.relative_to(input_dir)
+    print(f"  {rel}: {n_in:,} rows in -> {n_out:,} movement rows out")
 
-    # ── 6. Compute spatial partition metadata ───────────────────────
-    print("Step 4/4 — Computing spatial partition metadata ...")
-    df_partitioned = trucktrack.partition_points(df_points)
+    return n_in, n_out
 
-    # ── 7. Write hive-partitioned output ────────────────────────────
+
+def run_pipeline(
+    input_dir: Path,
+    output_dir: Path,
+    *,
+    gap: timedelta = GAP_THRESHOLD,
+    stop_max_diameter: float = STOP_MAX_DIAMETER,
+    stop_min_duration: timedelta = STOP_MIN_DURATION,
+    min_segment_length: int = MIN_SEGMENT_LENGTH,
+    max_workers: int | None = None,
+) -> dict[str, int]:
+    """Run the full gap+stop+partition pipeline in parallel.
+
+    Each input parquet file is processed independently in a thread
+    pool. The Rust backend releases the GIL, so threads achieve
+    real parallelism. Output tiles shared across chunks accumulate
+    multiple files that Polars reads back as a single dataset.
+
+    *max_workers* defaults to ``os.cpu_count()``.
+
+    Returns a {tier_name: partition_count} summary.
+    """
+    output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    print(f"Writing output to: {output_dir}")
 
-    metadata = df_partitioned.select("id", "tier", "partition_id", "hilbert_idx")
-    points = df_partitioned.select(
-        "id", "lat", "lon", "speed", "heading", "time"
-    ).rename({"time": "timestamp"})
+    chunks = sorted(Path(input_dir).rglob("*.parquet"))
+    if not chunks:
+        print(f"No parquet files found under {input_dir}")
+        return {}
 
-    partition_counts = trucktrack.write_partitions(metadata, points, str(output_dir))
+    if max_workers is None:
+        max_workers = os.cpu_count() or 1
+    max_workers = min(max_workers, len(chunks))
 
-    # ── Summary ─────────────────────────────────────────────────────
+    print(
+        f"Found {len(chunks)} input chunk(s) under {input_dir}, "
+        f"processing with {max_workers} worker(s)"
+    )
+
+    total_rows_in = 0
+    total_rows_out = 0
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            pool.submit(
+                _process_and_write,
+                chunk_path,
+                Path(input_dir),
+                output_dir,
+                gap,
+                stop_max_diameter,
+                stop_min_duration,
+                min_segment_length,
+            ): chunk_path
+            for chunk_path in chunks
+        }
+
+        for future in as_completed(futures):
+            n_in, n_out = future.result()
+            total_rows_in += n_in
+            total_rows_out += n_out
+
+    # Count distinct tiles written.
+    tile_dirs: dict[str, set[str]] = {}
+    for p in output_dir.rglob("*.parquet"):
+        tier = p.parent.parent.name.removeprefix("tier=")
+        tile_dirs.setdefault(tier, set()).add(p.parent.name)
+    partition_counts = {t: len(pids) for t, pids in tile_dirs.items()}
+
     total_partitions = sum(partition_counts.values())
     print("\n--- Pipeline complete ---")
-    print(f"  Input rows:           {n_rows_raw:>10,}")
-    print(f"  Vehicles:             {n_vehicles:>10,}")
-    print(f"  Trip segments:        {n_gap_segments:>10,}")
-    print(f"  Movement rows out:    {n_moving_rows:>10,}")
+    print(f"  Input chunks:         {len(chunks):>10,}")
+    print(f"  Workers:              {max_workers:>10,}")
+    print(f"  Input rows:           {total_rows_in:>10,}")
+    print(f"  Movement rows out:    {total_rows_out:>10,}")
     print(f"  Output partitions:    {total_partitions:>10,}")
     for tier, count in sorted(partition_counts.items()):
         print(f"    {tier}: {count:,} partition(s)")
