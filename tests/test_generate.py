@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import polars as pl
+import pytest
+import requests
 from trucktrack.generate import (
     TracePoint,
     TripConfig,
@@ -13,10 +15,21 @@ from trucktrack.generate import (
     traces_to_csv,
     traces_to_parquet,
 )
+from trucktrack.generate.models import DEFAULT_VALHALLA_URL
 
-# Use an unreachable Valhalla URL so the router falls back to straight-line
-# routing — keeps the test self-contained, no external service required.
-UNREACHABLE_VALHALLA = "http://127.0.0.1:1"
+
+def _valhalla_reachable() -> bool:
+    try:
+        requests.get(DEFAULT_VALHALLA_URL, timeout=1)
+    except (requests.ConnectionError, requests.Timeout):
+        return False
+    return True
+
+
+requires_valhalla = pytest.mark.skipif(
+    not _valhalla_reachable(),
+    reason="Valhalla not running at " + DEFAULT_VALHALLA_URL,
+)
 
 
 def _config(**overrides) -> TripConfig:  # type: ignore[no-untyped-def]
@@ -25,12 +38,12 @@ def _config(**overrides) -> TripConfig:  # type: ignore[no-untyped-def]
         destination=(43.45, -80.49),  # Kitchener
         departure_time=datetime(2026, 1, 1, 8, 0, tzinfo=UTC),
         seed=42,
-        valhalla_url=UNREACHABLE_VALHALLA,
     )
     base.update(overrides)
     return TripConfig(**base)
 
 
+@requires_valhalla
 class TestGenerateTrace:
     def test_returns_trace_points(self) -> None:
         points = generate_trace(_config())
@@ -58,6 +71,7 @@ class TestGenerateTrace:
             assert p.speed_mph >= 0.0
 
 
+@requires_valhalla
 class TestTracesToParquet:
     def test_writes_file(self, tmp_path: Path) -> None:
         out = tmp_path / "trip.parquet"
@@ -82,6 +96,7 @@ class TestTracesToParquet:
         assert len(df) == len(points)
 
 
+@requires_valhalla
 class TestTracesToCsv:
     def test_csv_has_header(self) -> None:
         points = generate_trace(_config())
@@ -96,6 +111,7 @@ class TestTracesToCsv:
         assert len(csv.splitlines()) == len(points) + 1
 
 
+@requires_valhalla
 def test_empty_route_handled() -> None:
     # Same origin/destination — straight-line fallback still produces
     # a trace because parking maneuvers always emit points.
