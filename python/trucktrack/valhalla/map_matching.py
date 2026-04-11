@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from typing import Any
 
 import polars as pl
 
@@ -40,22 +41,11 @@ def _build_trace_body(
     return body
 
 
-def map_match(
+def _parse_matched_points(
+    resp: dict[str, Any],
     points: list[tuple[float, float]],
-    tile_extract: str,
-    costing: str = "truck",
-    costing_options: dict[str, object] | None = None,
 ) -> list[MatchedPoint]:
-    """Snap a sequence of (lat, lon) points to the road network.
-
-    Returns one MatchedPoint per input point.
-    """
-    actor = get_actor(tile_extract)
-    body = _build_trace_body(points, costing, costing_options)
-    resp = json.loads(actor.trace_attributes(json.dumps(body)))
-
-    matched_pts = resp.get("matched_points", [])
-
+    matched_pts: list[dict[str, Any]] = resp.get("matched_points", [])
     results: list[MatchedPoint] = []
     for i, mp in enumerate(matched_pts):
         edge_id = mp.get("edge_index")
@@ -71,8 +61,33 @@ def map_match(
                 distance_from_trace=dist,
             )
         )
-
     return results
+
+
+def _parse_way_ids(resp: dict[str, Any]) -> list[int]:
+    edges: list[dict[str, Any]] = resp.get("edges", [])
+    ways: list[int] = []
+    for edge in edges:
+        wid = edge.get("way_id")
+        if wid is not None and (not ways or ways[-1] != wid):
+            ways.append(wid)
+    return ways
+
+
+def map_match(
+    points: list[tuple[float, float]],
+    tile_extract: str,
+    costing: str = "truck",
+    costing_options: dict[str, object] | None = None,
+) -> list[MatchedPoint]:
+    """Snap a sequence of (lat, lon) points to the road network.
+
+    Returns one MatchedPoint per input point.
+    """
+    actor = get_actor(tile_extract)
+    body = _build_trace_body(points, costing, costing_options)
+    resp = json.loads(actor.trace_attributes(json.dumps(body)))
+    return _parse_matched_points(resp, points)
 
 
 def map_match_ways(
@@ -94,13 +109,25 @@ def map_match_ways(
         filters={"attributes": ["edge.way_id"], "action": "include"},
     )
     resp = json.loads(actor.trace_attributes(json.dumps(body)))
-    edges = resp.get("edges", [])
-    ways: list[int] = []
-    for edge in edges:
-        wid = edge.get("way_id")
-        if wid is not None and (not ways or ways[-1] != wid):
-            ways.append(wid)
-    return ways
+    return _parse_way_ids(resp)
+
+
+def map_match_full(
+    points: list[tuple[float, float]],
+    tile_extract: str,
+    costing: str = "truck",
+    costing_options: dict[str, object] | None = None,
+) -> tuple[list[MatchedPoint], list[int]]:
+    """Snap points and return both matched points and OSM way IDs.
+
+    Makes a single ``trace_attributes`` call and extracts both the
+    snapped coordinates and the deduplicated way-ID sequence from the
+    response.
+    """
+    actor = get_actor(tile_extract)
+    body = _build_trace_body(points, costing, costing_options)
+    resp = json.loads(actor.trace_attributes(json.dumps(body)))
+    return _parse_matched_points(resp, points), _parse_way_ids(resp)
 
 
 def map_match_dataframe(
@@ -121,3 +148,28 @@ def map_match_dataframe(
         pl.Series("matched_lon", [m.lon for m in matched]),
         pl.Series("distance_from_trace", [m.distance_from_trace for m in matched]),
     )
+
+
+def map_match_dataframe_full(
+    df: pl.DataFrame,
+    tile_extract: str,
+    lat_col: str = "lat",
+    lon_col: str = "lon",
+    costing: str = "truck",
+    costing_options: dict[str, object] | None = None,
+) -> tuple[pl.DataFrame, list[int]]:
+    """Map-match a DataFrame and return both the augmented DataFrame and way IDs.
+
+    Single ``trace_attributes`` call — avoids the overhead of calling
+    :func:`map_match_dataframe` and :func:`map_match_ways` separately.
+    """
+    points = list(zip(df[lat_col].to_list(), df[lon_col].to_list(), strict=True))
+    matched, ways = map_match_full(
+        points, tile_extract, costing=costing, costing_options=costing_options
+    )
+    result = df.with_columns(
+        pl.Series("matched_lat", [m.lat for m in matched]),
+        pl.Series("matched_lon", [m.lon for m in matched]),
+        pl.Series("distance_from_trace", [m.distance_from_trace for m in matched]),
+    )
+    return result, ways

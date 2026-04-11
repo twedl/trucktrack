@@ -2,7 +2,7 @@
 
 End-to-end example: synthesize a GPS trace between two Ontario points,
 split it at observation gaps, partition into a hive layout, map-match
-each segment, and print the matched polyline.
+each segment, and print the OSM way IDs traversed.
 
 Requires pyvalhalla and a tile extract built by scripts/setup_valhalla.py.
 
@@ -20,7 +20,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import polars as pl
-
 from trucktrack import (
     generate_trace,
     partition_existing_parquet,
@@ -29,7 +28,7 @@ from trucktrack import (
     traces_to_parquet,
 )
 from trucktrack.generate import TripConfig
-from trucktrack.valhalla import map_match_dataframe
+from trucktrack.valhalla import map_match_ways
 
 TILE_EXTRACT = os.environ.get(
     "VALHALLA_TILE_EXTRACT", "valhalla_tiles/valhalla_tiles.tar"
@@ -77,30 +76,25 @@ def main() -> None:
         for tier, n in sorted(summary.items()):
             print(f"  {tier}: {n} partition(s)")
 
-        # 5. Map-match each segment.
+        # 5. Map-match each segment and collect OSM way IDs.
         print("Map-matching...")
-        matched_parts = []
+        all_ways: list[int] = []
         for pq in sorted(partition_dir.rglob("*.parquet")):
             chunk = pl.read_parquet(pq)
             for (seg_id,), seg in chunk.group_by("segment_id"):
-                matched = map_match_dataframe(seg, tile_extract=TILE_EXTRACT)
-                matched_parts.append(matched)
-                print(
-                    f"  segment {seg_id}: "
-                    f"{len(seg)} pts, "
-                    f"mean snap distance {matched['distance_from_trace'].mean():.1f} m"
-                )
+                lats = seg["lat"].to_list()
+                lons = seg["lon"].to_list()
+                coords = list(zip(lats, lons, strict=True))
+                ways = map_match_ways(coords, tile_extract=TILE_EXTRACT)
+                all_ways.extend(ways)
+                print(f"  segment {seg_id}: {len(seg)} pts, {len(ways)} OSM ways")
 
-        result = pl.concat(matched_parts)
-        print(f"\nResult: {result.shape[0]} matched points")
-        print(result.select("lat", "lon", "matched_lat", "matched_lon", "distance_from_trace").head(10))
-
-        # 6. Print the matched polyline.
-        print(f"\nMatched polyline ({len(result)} points):")
-        for row in result.select("matched_lat", "matched_lon").head(5).iter_rows():
-            print(f"  ({row[0]:.6f}, {row[1]:.6f})")
-        if len(result) > 5:
-            print(f"  ... ({len(result) - 5} more)")
+        # 6. Print the OSM way IDs.
+        print(f"\nOSM way IDs ({len(all_ways)} ways):")
+        for wid in all_ways[:10]:
+            print(f"  {wid}")
+        if len(all_ways) > 10:
+            print(f"  ... ({len(all_ways) - 10} more)")
 
 
 if __name__ == "__main__":
