@@ -8,7 +8,6 @@ from dataclasses import dataclass
 import polars as pl
 
 from trucktrack.valhalla._actor import DEFAULT_TRUCK_COSTING, get_actor
-from trucktrack.valhalla._parsing import decode_polyline6
 
 
 @dataclass
@@ -43,23 +42,12 @@ def map_match(
     }
     resp = json.loads(actor.trace_route(json.dumps(body)))
 
-    # Extract matched points from the response.
     matched_pts = resp.get("matched_points", [])
-
-    # Decode the snapped shape from the trip legs.
-    snapped_coords: list[tuple[float, float]] = []
-    for leg in resp.get("trip", {}).get("legs", []):
-        shape = decode_polyline6(leg["shape"])
-        if snapped_coords and shape:
-            shape = shape[1:]
-        snapped_coords.extend(shape)
 
     results: list[MatchedPoint] = []
     for i, mp in enumerate(matched_pts):
         edge_id = mp.get("edge_index")
         dist = mp.get("distance_from_trace_point", 0.0)
-        # Use the snapped coordinate if available via begin_route_discontinuity
-        # index, otherwise fall back to the matched_point lat/lon.
         lat = mp.get("lat", points[i][0])
         lon = mp.get("lon", points[i][1])
         results.append(

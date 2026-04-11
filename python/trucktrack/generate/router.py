@@ -5,6 +5,7 @@ from __future__ import annotations
 import requests
 
 from trucktrack.generate.models import DEFAULT_VALHALLA_URL, RouteSegment
+from trucktrack.valhalla._actor import DEFAULT_TRUCK_COSTING
 from trucktrack.valhalla._parsing import parse_valhalla_response
 
 
@@ -31,12 +32,7 @@ def fetch_route(
         ],
         "costing": "truck",
         "costing_options": {
-            "truck": {
-                "height": 4.11,
-                "width": 2.6,
-                "length": 22.0,
-                "weight": 36.287,
-            }
+            "truck": DEFAULT_TRUCK_COSTING,
         },
         "shape_match": "map_snap",
         "units": "km",
