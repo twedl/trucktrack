@@ -27,13 +27,14 @@ from pathlib import Path
 import polars as pl
 from tqdm import tqdm
 
+from trucktrack.valhalla import map_match_dataframe
+
+TILE_EXTRACT = os.environ.get("VALHALLA_TILE_EXTRACT", "valhalla_tiles.tar")
+
 
 def map_match_trip(trip: pl.DataFrame) -> pl.DataFrame:
-    """Map-match a single trip using Valhalla.
-
-    TODO: call Valhalla trace_route and snap points to road network.
-    """
-    return trip
+    """Map-match a single trip using local pyvalhalla."""
+    return map_match_dataframe(trip, tile_extract=TILE_EXTRACT)
 
 
 def _process_partition(

@@ -24,7 +24,9 @@ def generate_trace(config: TripConfig) -> list[TracePoint]:
     """Generate a complete GPS trace for a truck delivery trip."""
     rng = random.Random(config.seed)
 
-    route = fetch_route(config.origin, config.destination, config.valhalla_url)
+    route = fetch_route(
+        config.origin, config.destination, config.valhalla_url, config.tile_extract
+    )
 
     origin_heading = _route_start_heading(route)
     dest_heading = _route_end_heading(route)

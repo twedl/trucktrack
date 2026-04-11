@@ -491,6 +491,18 @@ wheels = [
 ]
 
 [[package]]
+name = "pyvalhalla"
+version = "3.6.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/04/67/f1fb5cb3df1fa19555acde4a99e8a7c97333fc2aa8e4077fdb191ddb0b60/pyvalhalla-3.6.3.tar.gz", hash = "sha256:daee61451072739414026ce4b6b642fc534dea7bbc792eb68a9dd0c3a5d78604", size = 35746107, upload-time = "2026-02-19T22:12:40.575Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cf/16/7b6f2c3e79a95613b950c0b2d9643278fa77b20b6ea0ff4710e9309d3d2e/pyvalhalla-3.6.3-cp312-abi3-macosx_14_0_arm64.whl", hash = "sha256:ebc46f6d53ed616b89a88c49787e478b941cd7cf2ccbeab0a1d25f1341cf4211", size = 23581417, upload-time = "2026-02-19T22:11:25.708Z" },
+    { url = "https://files.pythonhosted.org/packages/59/d2/c10fe5cdab114153c8270d45d6a1468efc548062183ed16750d2357c871d/pyvalhalla-3.6.3-cp312-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:b3e60b2b474c9e27e3303b964d54603a249ca952ae5100e3a8d361107d1c329d", size = 32612062, upload-time = "2026-02-19T22:11:50.369Z" },
+    { url = "https://files.pythonhosted.org/packages/d3/cc/78891758cd34dfdc9c8924a92cb1a9f48d594acc03d2b62d68d9933abaaf/pyvalhalla-3.6.3-cp312-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:e123720983ce570f340c3ef78289098bf647deba68d56143571384a5aa874868", size = 35154179, upload-time = "2026-02-19T22:12:21.639Z" },
+    { url = "https://files.pythonhosted.org/packages/df/fa/3f32f54e1c34207d47338c73d5982fcc1070e027c51f0430fdfb33f83060/pyvalhalla-3.6.3-cp312-abi3-win_amd64.whl", hash = "sha256:346683e30db8b33851721876e4c9b3e009f035b652e17b72c91c52b55d4eea36", size = 24179974, upload-time = "2026-02-19T22:12:37.938Z" },
+]
+
+[[package]]
 name = "requests"
 version = "2.33.1"
 source = { registry = "https://pypi.org/simple" }
@@ -559,7 +571,11 @@ dev = [
     { name = "mypy" },
     { name = "pytest" },
     { name = "pytest-benchmark" },
+    { name = "pyvalhalla" },
     { name = "ruff" },
+]
+valhalla = [
+    { name = "pyvalhalla" },
 ]
 
 [package.metadata]
@@ -570,11 +586,13 @@ requires-dist = [
     { name = "pyarrow", specifier = ">=15.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-benchmark", marker = "extra == 'dev'", specifier = ">=4.0" },
+    { name = "pyvalhalla", marker = "extra == 'dev'", specifier = ">=3.4" },
+    { name = "pyvalhalla", marker = "extra == 'valhalla'", specifier = ">=3.4" },
     { name = "requests", specifier = ">=2.31" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
     { name = "tqdm", specifier = ">=4.60" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["valhalla", "dev"]
 
 [[package]]
 name = "typing-extensions"

@@ -66,6 +66,7 @@ class TripConfig:
     origin_maneuver: str = "alley_dock"
     destination_maneuver: str = "alley_dock"
     valhalla_url: str = DEFAULT_VALHALLA_URL
+    tile_extract: str | None = None
     errors: list[ErrorConfig] = field(default_factory=default_error_profile)
 
 

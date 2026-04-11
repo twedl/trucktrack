@@ -38,11 +38,13 @@ Issues = "https://github.com/twedl/trucktrack/issues"
 trucktrack = "trucktrack.cli:main"
 
 [project.optional-dependencies]
+valhalla = ["pyvalhalla>=3.4"]
 dev = [
     "pytest>=8.0",
     "pytest-benchmark>=4.0",
     "mypy>=1.9",
     "ruff>=0.4",
+    "pyvalhalla>=3.4",
 ]
 
 [tool.maturin]
@@ -71,6 +73,7 @@ ignore_errors = true
 module = [
     "pyarrow.*",
     "requests.*",
+    "valhalla.*",
 ]
 ignore_missing_imports = true
 
