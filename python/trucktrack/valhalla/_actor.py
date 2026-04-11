@@ -42,11 +42,12 @@ def get_actor(tile_extract: str) -> Any:
             "Install it with: pip install trucktrack[valhalla]"
         ) from exc
 
-    if tile_extract not in _actors:
+    key = str(Path(tile_extract).resolve())
+    if key not in _actors:
         config_path = _find_config(tile_extract)
         if config_path is not None:
-            _actors[tile_extract] = valhalla.Actor(config_path)
+            _actors[key] = valhalla.Actor(config_path)
         else:
             config = valhalla.get_config(tile_extract=tile_extract)
-            _actors[tile_extract] = valhalla.Actor(config)
-    return _actors[tile_extract]
+            _actors[key] = valhalla.Actor(config)
+    return _actors[key]
