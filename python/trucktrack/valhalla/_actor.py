@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import json
+from pathlib import Path
 from typing import Any
 
 DEFAULT_TRUCK_COSTING: dict[str, float] = {
@@ -13,6 +13,23 @@ DEFAULT_TRUCK_COSTING: dict[str, float] = {
 }
 
 _actors: dict[str, Any] = {}
+
+CONFIG_FILENAME = "valhalla.json"
+
+
+def _find_config(tile_extract: str) -> Path | None:
+    """Look for an existing valhalla.json next to or inside *tile_extract*."""
+    p = Path(tile_extract)
+    if p.is_dir():
+        candidate = p / CONFIG_FILENAME
+        if candidate.is_file():
+            return candidate
+    # Sibling of a .tar / directory (e.g. valhalla_tiles/valhalla.json for
+    # valhalla_tiles.tar sitting in the same parent).
+    candidate = p.parent / CONFIG_FILENAME
+    if candidate.is_file():
+        return candidate
+    return None
 
 
 def get_actor(tile_extract: str) -> Any:
@@ -26,6 +43,10 @@ def get_actor(tile_extract: str) -> Any:
         ) from exc
 
     if tile_extract not in _actors:
-        config = valhalla.get_config(tile_extract=tile_extract)
-        _actors[tile_extract] = valhalla.Actor(json.dumps(config))
+        config_path = _find_config(tile_extract)
+        if config_path is not None:
+            _actors[tile_extract] = valhalla.Actor(config_path)
+        else:
+            config = valhalla.get_config(tile_extract=tile_extract)
+            _actors[tile_extract] = valhalla.Actor(config)
     return _actors[tile_extract]
