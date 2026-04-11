@@ -44,13 +44,11 @@ def _downsample(df: pl.DataFrame, max_points: int) -> pl.DataFrame:
     if df.height <= max_points:
         return df
     if "segment_id" in df.columns:
-        # Keep first and last row of each segment, sample in between.
         parts = []
         for _, seg in df.group_by("segment_id", maintain_order=True):
             if seg.height <= 2:
                 parts.append(seg)
                 continue
-            # Compute step for this segment's share of the budget.
             budget = max(2, int(max_points * seg.height / df.height))
             step = max(1, seg.height // budget)
             indices = list(range(0, seg.height, step))
@@ -88,13 +86,10 @@ def _add_polyline(
 
 def _add_colored_line(
     folium: Any,
-    cm: Any,
     fg: Any,
     lats: list[float],
     lons: list[float],
     values: list[float],
-    vmin: float,
-    vmax: float,
     colormap: Any,
     weight: int = 4,
 ) -> None:
@@ -106,6 +101,36 @@ def _add_colored_line(
             color=color,
             weight=weight,
         ).add_to(fg)
+
+
+def _make_colormap(
+    cm: Any,
+    values: list[float],
+    caption: str,
+) -> Any:
+    """Build a LinearColormap from a list of values."""
+    vmin = min(values)
+    raw_max = max(values)
+    vmax = raw_max if raw_max > vmin else vmin + 1
+    colormap = cm.LinearColormap(["green", "yellow", "red"], vmin=vmin, vmax=vmax)
+    colormap.caption = caption
+    return colormap
+
+
+def _add_colored_layer(
+    folium: Any,
+    cm: Any,
+    fg: Any,
+    m: Any,
+    lats: list[float],
+    lons: list[float],
+    values: list[float],
+    caption: str,
+) -> None:
+    """Build a colormap, draw colored segments, and add the legend to the map."""
+    colormap = _make_colormap(cm, values, caption)
+    _add_colored_line(folium, fg, lats, lons, values, colormap)
+    colormap.add_to(m)
 
 
 def _add_stop_markers(
@@ -123,11 +148,10 @@ def _add_stop_markers(
         lat = group["lat"].mean()
         lon = group["lon"].mean()
         n_pts = group.height
-        time_col = "time" if "time" in group.columns else None
         popup_text = f"Stop: {n_pts} points"
-        if time_col and group[time_col].dtype != pl.Null:
-            t_min = group[time_col].min()
-            t_max = group[time_col].max()
+        if "time" in group.columns and group["time"].dtype != pl.Null:
+            t_min = group["time"].min()
+            t_max = group["time"].max()
             if t_min is not None and t_max is not None:
                 duration = t_max - t_min
                 popup_text += f"<br>Duration: {duration}"
@@ -207,6 +231,10 @@ def plot_trace(
     else:
         df = data
 
+    if df.height == 0:
+        m = folium.Map(tiles=tile_layer, width=width, height=height)
+        return m
+
     if max_points is not None:
         df = _downsample(df, max_points)
 
@@ -225,7 +253,6 @@ def plot_trace(
         height=height,
     )
 
-    # Fit bounds.
     bounds = [
         [df["lat"].min(), df["lon"].min()],
         [df["lat"].max(), df["lon"].max()],
@@ -234,7 +261,6 @@ def plot_trace(
 
     # --- Map-matched mode ---
     if has_matched:
-        # Original trace as dashed line.
         trace_fg = folium.FeatureGroup(name="Original trace")
         _add_polyline(
             folium,
@@ -247,42 +273,22 @@ def plot_trace(
         )
         trace_fg.add_to(m)
 
-        # Matched trace.
         matched_fg = folium.FeatureGroup(name="Matched trace")
         m_lats = df["matched_lat"].to_list()
         m_lons = df["matched_lon"].to_list()
 
-        if color_by == "distance_from_trace" and "distance_from_trace" in df.columns:
-            vals = df["distance_from_trace"].to_list()
-            vmin = min(vals)
-            vmax = max(vals) if max(vals) > vmin else vmin + 1
-            colormap = cm.LinearColormap(
-                ["green", "yellow", "red"], vmin=vmin, vmax=vmax
-            )
-            colormap.caption = "distance_from_trace (m)"
-            _add_colored_line(
-                folium, cm, matched_fg, m_lats, m_lons, vals, vmin, vmax, colormap
-            )
-            colormap.add_to(m)
-        elif color_by is not None and color_by in df.columns:
+        if color_by is not None and color_by in df.columns:
             vals = df[color_by].cast(pl.Float64).to_list()
-            vmin = min(vals)
-            vmax = max(vals) if max(vals) > vmin else vmin + 1
-            colormap = cm.LinearColormap(
-                ["green", "yellow", "red"], vmin=vmin, vmax=vmax
+            caption = (
+                f"{color_by} (m)" if color_by == "distance_from_trace" else color_by
             )
-            colormap.caption = color_by
-            _add_colored_line(
-                folium, cm, matched_fg, m_lats, m_lons, vals, vmin, vmax, colormap
-            )
-            colormap.add_to(m)
+            _add_colored_layer(folium, cm, matched_fg, m, m_lats, m_lons, vals, caption)
         else:
             _add_polyline(
                 folium, matched_fg, m_lats, m_lons, color=matched_color, weight=4
             )
         matched_fg.add_to(m)
 
-        # Stops if present.
         if has_is_stop and has_segment_id:
             stop_fg = folium.FeatureGroup(name="Stops")
             _add_stop_markers(folium, stop_fg, df, stop_color, stop_radius)
@@ -295,7 +301,7 @@ def plot_trace(
     if has_is_stop and has_segment_id:
         movement = df.filter(~pl.col("is_stop"))
         move_fg = folium.FeatureGroup(name="Movement")
-        _render_segments(folium, cm, move_fg, movement, color_by, matched_color)
+        _render_segments(folium, cm, move_fg, m, movement, color_by, matched_color)
         move_fg.add_to(m)
 
         stop_fg = folium.FeatureGroup(name="Stops")
@@ -308,7 +314,7 @@ def plot_trace(
     # --- Gap-split mode ---
     if has_segment_id:
         seg_fg = folium.FeatureGroup(name="Segments")
-        _render_segments(folium, cm, seg_fg, df, color_by, matched_color)
+        _render_segments(folium, cm, seg_fg, m, df, color_by, matched_color)
         seg_fg.add_to(m)
         return m
 
@@ -316,22 +322,9 @@ def plot_trace(
     fg = folium.FeatureGroup(name="Trace")
     if color_by is not None and color_by in df.columns:
         vals = df[color_by].cast(pl.Float64).to_list()
-        vmin = min(vals)
-        vmax = max(vals) if max(vals) > vmin else vmin + 1
-        colormap = cm.LinearColormap(["green", "yellow", "red"], vmin=vmin, vmax=vmax)
-        colormap.caption = color_by
-        _add_colored_line(
-            folium,
-            cm,
-            fg,
-            df["lat"].to_list(),
-            df["lon"].to_list(),
-            vals,
-            vmin,
-            vmax,
-            colormap,
+        _add_colored_layer(
+            folium, cm, fg, m, df["lat"].to_list(), df["lon"].to_list(), vals, color_by
         )
-        colormap.add_to(m)
     else:
         _add_polyline(
             folium,
@@ -348,6 +341,7 @@ def _render_segments(
     folium: Any,
     cm: Any,
     fg: Any,
+    m: Any,
     df: pl.DataFrame,
     color_by: str | None,
     default_color: str,
@@ -355,28 +349,12 @@ def _render_segments(
     """Render segments as polylines, optionally colored by a column."""
     if color_by is not None and color_by in df.columns:
         vals = df[color_by].cast(pl.Float64).to_list()
-        vmin = min(vals)
-        vmax = max(vals) if max(vals) > vmin else vmin + 1
-        colormap = cm.LinearColormap(["green", "yellow", "red"], vmin=vmin, vmax=vmax)
-        colormap.caption = color_by
-        _add_colored_line(
-            folium,
-            cm,
-            fg,
-            df["lat"].to_list(),
-            df["lon"].to_list(),
-            vals,
-            vmin,
-            vmax,
-            colormap,
+        _add_colored_layer(
+            folium, cm, fg, m, df["lat"].to_list(), df["lon"].to_list(), vals, color_by
         )
-        # Attach colormap to parent map via fg — caller must add to map.
-        fg._colormap = colormap
         return
 
-    seg_ids = df["segment_id"].unique(maintain_order=True).to_list()
-    for i, sid in enumerate(seg_ids):
-        seg = df.filter(pl.col("segment_id") == sid)
+    for i, (_, seg) in enumerate(df.group_by("segment_id", maintain_order=True)):
         color = _SEGMENT_COLORS[i % len(_SEGMENT_COLORS)]
         _add_polyline(
             folium,
@@ -384,7 +362,7 @@ def _render_segments(
             seg["lat"].to_list(),
             seg["lon"].to_list(),
             color=color,
-            popup=f"Segment {sid}",
+            popup=f"Segment {seg['segment_id'][0]}",
         )
 
 
