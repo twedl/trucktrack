@@ -25,6 +25,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import polars as pl
+from tqdm import tqdm
 
 
 def map_match_trip(trip: pl.DataFrame) -> pl.DataFrame:
@@ -39,6 +40,7 @@ def _process_partition(
     partition_dir: Path,
     input_dir: Path,
     output_dir: Path,
+    progress: tqdm[None] | None = None,
 ) -> tuple[str, int, int, int]:
     """Read one partition chunk-by-chunk, map-match each trip, and write results.
 
@@ -58,6 +60,8 @@ def _process_partition(
         out_path = out_dir / chunk_path.name
         if out_path.exists():
             skipped += 1
+            if progress is not None:
+                progress.update(1)
             continue
 
         df = pl.read_parquet(chunk_path)
@@ -67,6 +71,8 @@ def _process_partition(
             total_trips += 1
 
         if not matched_trips:
+            if progress is not None:
+                progress.update(1)
             continue
 
         matched = pl.concat(matched_trips)
@@ -82,6 +88,9 @@ def _process_partition(
             Path(tmp).unlink(missing_ok=True)
             raise
 
+        if progress is not None:
+            progress.update(1)
+
     return str(rel), skipped, total_trips, total_rows
 
 
@@ -89,10 +98,11 @@ def _process_block(
     partition_dirs: list[Path],
     input_dir: Path,
     output_dir: Path,
+    progress: tqdm[None] | None = None,
 ) -> list[tuple[str, int, int, int]]:
     """Process a contiguous block of spatially adjacent partitions sequentially."""
     return [
-        _process_partition(pdir, input_dir, output_dir)
+        _process_partition(pdir, input_dir, output_dir, progress)
         for pdir in partition_dirs
     ]
 
@@ -154,9 +164,13 @@ def run_map_matching(
         blocks.append(partition_dirs[start:end])
         start = end
 
+    total_chunks = sum(
+        len(list(pdir.glob("*.parquet"))) for pdir in partition_dirs
+    )
+
     size_str = f"{block_size}–{block_size + 1}" if remainder else str(block_size)
     print(
-        f"Found {n} partition(s), "
+        f"Found {n} partition(s) ({total_chunks} chunks), "
         f"processing with {max_workers} worker(s) "
         f"({size_str} partitions per worker)"
     )
@@ -165,24 +179,22 @@ def run_map_matching(
     total_trips = 0
     total_rows = 0
 
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = [
-            pool.submit(_process_block, block, input_dir, output_dir)
-            for block in blocks
-        ]
+    with tqdm(total=total_chunks, unit="chunk", desc="Map matching") as progress:
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = [
+                pool.submit(_process_block, block, input_dir, output_dir, progress)
+                for block in blocks
+            ]
 
-        for future in as_completed(futures):
-            for key, skipped, trips, rows in future.result():
-                total_skipped += skipped
-                total_trips += trips
-                total_rows += rows
-                if skipped:
-                    print(f"  {key}: {skipped} chunk(s) skipped, {trips:,} matched")
-                elif trips:
-                    print(f"  {key}: {trips:,} trips, {rows:,} rows")
+            for future in as_completed(futures):
+                for key, skipped, trips, rows in future.result():
+                    total_skipped += skipped
+                    total_trips += trips
+                    total_rows += rows
 
     print("\n--- Map matching complete ---")
     print(f"  Partitions:  {n:>10,}")
+    print(f"  Chunks:      {total_chunks:>10,}")
     print(f"  Skipped:     {total_skipped:>10,} chunk(s)")
     print(f"  Matched:     {total_trips:>10,} trip(s)")
     print(f"  Rows out:    {total_rows:>10,}")
