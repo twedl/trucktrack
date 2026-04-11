@@ -97,9 +97,13 @@ def main(argv: list[str] | None = None) -> int:
     # Tar the tile hierarchy and remove loose tile directories.
     tile_subdirs = sorted(p for p in tile_dir.iterdir() if p.is_dir())
     print(f"Packing {len(tile_subdirs)} tile directories into {tar_path}", file=sys.stderr)
-    with tarfile.open(tar_path, "w") as tar:
-        for subdir in tile_subdirs:
-            tar.add(subdir, arcname=subdir.name)
+    try:
+        with tarfile.open(tar_path, "w") as tar:
+            for subdir in tile_subdirs:
+                tar.add(subdir, arcname=subdir.name)
+    except Exception:
+        tar_path.unlink(missing_ok=True)
+        raise
     for subdir in tile_subdirs:
         shutil.rmtree(subdir)
 
