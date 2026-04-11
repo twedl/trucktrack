@@ -63,6 +63,41 @@ def map_match(
     return results
 
 
+def map_match_ways(
+    points: list[tuple[float, float]],
+    tile_extract: str,
+    costing: str = "truck",
+    costing_options: dict[str, object] | None = None,
+) -> list[int]:
+    """Return the deduplicated sequence of OSM way IDs for a matched trace.
+
+    Uses trace_attributes with a minimal filter for efficiency.
+    Consecutive duplicate way IDs are collapsed (a single OSM way may
+    span multiple graph edges).
+    """
+    actor = get_actor(tile_extract)
+    body: dict[str, object] = {
+        "shape": [{"lat": lat, "lon": lon} for lat, lon in points],
+        "costing": costing,
+        "shape_match": "map_snap",
+        "costing_options": {
+            costing: costing_options or DEFAULT_TRUCK_COSTING,
+        },
+        "filters": {
+            "attributes": ["edge.way_id"],
+            "action": "include",
+        },
+    }
+    resp = json.loads(actor.trace_attributes(json.dumps(body)))
+    edges = resp.get("edges", [])
+    ways: list[int] = []
+    for edge in edges:
+        wid = edge.get("way_id")
+        if wid is not None and (not ways or ways[-1] != wid):
+            ways.append(wid)
+    return ways
+
+
 def map_match_dataframe(
     df: pl.DataFrame,
     tile_extract: str,

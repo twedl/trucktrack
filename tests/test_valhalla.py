@@ -71,6 +71,18 @@ class TestMapMatch:
         for mp in result:
             assert isinstance(mp, MatchedPoint)
 
+    def test_map_match_ways_returns_way_ids(self) -> None:
+        from trucktrack.valhalla import map_match_ways
+
+        points = [(43.65, -79.38), (43.651, -79.381), (43.652, -79.382)]
+        result = map_match_ways(points, tile_extract=_TILE_EXTRACT)
+        assert isinstance(result, list)
+        assert len(result) >= 1
+        assert all(isinstance(w, int) for w in result)
+        # Consecutive way IDs should be deduplicated
+        for i in range(1, len(result)):
+            assert result[i] != result[i - 1]
+
     def test_map_match_dataframe(self) -> None:
         import polars as pl
         from trucktrack.valhalla import map_match_dataframe

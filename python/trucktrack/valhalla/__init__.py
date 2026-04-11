@@ -6,6 +6,7 @@ from trucktrack.valhalla.map_matching import (
     MatchedPoint,
     map_match,
     map_match_dataframe,
+    map_match_ways,
 )
 from trucktrack.valhalla.routing import route
 
@@ -16,6 +17,7 @@ __all__ = [
     "get_actor",
     "map_match",
     "map_match_dataframe",
+    "map_match_ways",
     "parse_valhalla_response",
     "route",
 ]
