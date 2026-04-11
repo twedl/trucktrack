@@ -52,7 +52,7 @@ def map_match(
     """
     actor = get_actor(tile_extract)
     body = _build_trace_body(points, costing, costing_options)
-    resp = json.loads(actor.trace_route(json.dumps(body)))
+    resp = json.loads(actor.trace_attributes(json.dumps(body)))
 
     matched_pts = resp.get("matched_points", [])
 

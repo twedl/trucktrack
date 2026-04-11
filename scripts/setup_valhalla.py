@@ -12,8 +12,10 @@ tile builder. The resulting tile directory can be passed to trucktrack via
 from __future__ import annotations
 
 import argparse
+import shutil
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 
 CONFIG_OPTIONS: dict[str, bool | int | float] = {
@@ -41,7 +43,7 @@ def _run(cmd: list[str], description: str) -> None:
         raise SystemExit(result.returncode)
 
 
-def build_config(tile_dir: Path, config_path: Path) -> None:
+def build_config(tile_dir: Path, tar_path: Path, config_path: Path) -> None:
     """Generate a Valhalla config file with truck-optimised settings."""
     cmd = [
         sys.executable,
@@ -49,6 +51,8 @@ def build_config(tile_dir: Path, config_path: Path) -> None:
         "valhalla.valhalla_build_config",
         "--mjolnir-tile-dir",
         str(tile_dir),
+        "--mjolnir-tile-extract",
+        str(tar_path),
     ]
     for key, value in CONFIG_OPTIONS.items():
         cmd.extend([f"--{key}", str(value)])
@@ -81,15 +85,25 @@ def main(argv: list[str] | None = None) -> int:
     tile_dir: Path = args.tile_dir.resolve()
     tile_dir.mkdir(parents=True, exist_ok=True)
 
+    tar_path = (tile_dir / "valhalla_tiles.tar").resolve()
     config_path = (args.config_out or tile_dir / "valhalla.json").resolve()
-    build_config(tile_dir, config_path)
+    build_config(tile_dir, tar_path, config_path)
 
     _run(
         ["valhalla_build_tiles", "-c", str(config_path), str(args.pbf.resolve())],
         "Building tiles",
     )
 
-    print(f"Tiles built in {tile_dir}", file=sys.stderr)
+    # Tar the tile hierarchy and remove loose tile directories.
+    tile_subdirs = sorted(p for p in tile_dir.iterdir() if p.is_dir())
+    print(f"Packing {len(tile_subdirs)} tile directories into {tar_path}", file=sys.stderr)
+    with tarfile.open(tar_path, "w") as tar:
+        for subdir in tile_subdirs:
+            tar.add(subdir, arcname=subdir.name)
+    for subdir in tile_subdirs:
+        shutil.rmtree(subdir)
+
+    print(f"Done: {tar_path}", file=sys.stderr)
     return 0
 
 
