@@ -82,11 +82,11 @@ def main() -> None:
         matched_parts = []
         for pq in sorted(partition_dir.rglob("*.parquet")):
             chunk = pl.read_parquet(pq)
-            for seg_id, seg in chunk.group_by("segment_id"):
+            for (seg_id,), seg in chunk.group_by("segment_id"):
                 matched = map_match_dataframe(seg, tile_extract=TILE_EXTRACT)
                 matched_parts.append(matched)
                 print(
-                    f"  segment {seg_id[0]}: "
+                    f"  segment {seg_id}: "
                     f"{len(seg)} pts, "
                     f"mean snap distance {matched['distance_from_trace'].mean():.1f} m"
                 )
@@ -95,19 +95,12 @@ def main() -> None:
         print(f"\nResult: {result.shape[0]} matched points")
         print(result.select("lat", "lon", "matched_lat", "matched_lon", "distance_from_trace").head(10))
 
-        # 6. Print the matched polyline as a coordinate list.
-        coords = list(
-            zip(
-                result["matched_lat"].to_list(),
-                result["matched_lon"].to_list(),
-                strict=True,
-            )
-        )
-        print(f"\nMatched polyline ({len(coords)} points):")
-        for lat, lon in coords[:5]:
-            print(f"  ({lat:.6f}, {lon:.6f})")
-        if len(coords) > 5:
-            print(f"  ... ({len(coords) - 5} more)")
+        # 6. Print the matched polyline.
+        print(f"\nMatched polyline ({len(result)} points):")
+        for row in result.select("matched_lat", "matched_lon").head(5).iter_rows():
+            print(f"  ({row[0]:.6f}, {row[1]:.6f})")
+        if len(result) > 5:
+            print(f"  ... ({len(result) - 5} more)")
 
 
 if __name__ == "__main__":
