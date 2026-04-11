@@ -4,7 +4,12 @@ Reads the partitioned parquet dataset produced by
 ``pipeline_hive_to_partitioned``, iterates over partitions, and
 applies a map-matching function to each trip.
 
-Partitions are processed in parallel using threads.
+Resumable: the output directory mirrors the input hive layout. On
+restart, chunks whose output file already exists are skipped. Writes
+use atomic temp-file-then-rename to avoid partial output from crashes.
+
+Partitions are processed in parallel using threads, assigned in
+contiguous spatial blocks to keep Valhalla's tile cache warm.
 
 Usage::
 
@@ -15,6 +20,7 @@ Usage::
 from __future__ import annotations
 
 import os
+import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -31,23 +37,31 @@ def map_match_trip(trip: pl.DataFrame) -> pl.DataFrame:
 
 def _process_partition(
     partition_dir: Path,
+    input_dir: Path,
     output_dir: Path,
-) -> tuple[str, int, int]:
+) -> tuple[str, int, int, int]:
     """Read one partition chunk-by-chunk, map-match each trip, and write results.
 
     Processes one chunk at a time to keep memory free for Valhalla.
-    Returns (partition_key, trips_in, rows_out).
+    Skips chunks whose output file already exists.
+    Returns (partition_key, chunks_skipped, trips_matched, rows_out).
     """
-    tier = partition_dir.parent.name
-    pid = partition_dir.name
-    out_dir = output_dir / tier / pid
-    out_dir.mkdir(parents=True, exist_ok=True)
+    rel = partition_dir.relative_to(input_dir)
+    out_dir = output_dir / rel
 
     chunks = sorted(partition_dir.glob("*.parquet"))
+    skipped = 0
     total_trips = 0
     total_rows = 0
 
     for chunk_path in chunks:
+        out_path = out_dir / chunk_path.name
+        if out_path.exists():
+            skipped += 1
+            continue
+
+        out_dir.mkdir(parents=True, exist_ok=True)
+
         df = pl.read_parquet(chunk_path)
         matched_trips = []
         for _, trip in df.group_by("id"):
@@ -56,17 +70,30 @@ def _process_partition(
 
         matched = pl.concat(matched_trips)
         total_rows += len(matched)
-        matched.write_parquet(out_dir / f"{chunk_path.stem}.parquet")
 
-    return f"{tier}/{pid}", total_trips, total_rows
+        # Atomic write: temp file then rename.
+        fd, tmp = tempfile.mkstemp(dir=out_dir, suffix=".tmp.parquet")
+        os.close(fd)
+        try:
+            matched.write_parquet(tmp)
+            os.rename(tmp, out_path)
+        except BaseException:
+            Path(tmp).unlink(missing_ok=True)
+            raise
+
+    return f"{rel}", skipped, total_trips, total_rows
 
 
 def _process_block(
     partition_dirs: list[Path],
+    input_dir: Path,
     output_dir: Path,
-) -> list[tuple[str, int, int]]:
+) -> list[tuple[str, int, int, int]]:
     """Process a contiguous block of spatially adjacent partitions sequentially."""
-    return [_process_partition(pdir, output_dir) for pdir in partition_dirs]
+    return [
+        _process_partition(pdir, input_dir, output_dir)
+        for pdir in partition_dirs
+    ]
 
 
 def _partition_sort_key(path: Path) -> tuple[str, int]:
@@ -89,15 +116,18 @@ def run_map_matching(
 
         input_dir/tier=.../partition_id=.../chunk.parquet
 
+    *output_dir* mirrors the same hive layout. Re-running skips chunks
+    whose output file already exists.
+
     *max_workers* defaults to ``os.cpu_count()``.
     """
+    input_dir = Path(input_dir)
     output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     partition_dirs = sorted(
         {
             p.parent
-            for p in Path(input_dir).rglob("*.parquet")
+            for p in input_dir.rglob("*.parquet")
             if p.parent.name.startswith("partition_id=")
         },
         key=_partition_sort_key,
@@ -130,23 +160,28 @@ def run_map_matching(
         f"({size_str} partitions per worker)"
     )
 
+    total_skipped = 0
     total_trips = 0
     total_rows = 0
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = [
-            pool.submit(_process_block, block, output_dir)
+            pool.submit(_process_block, block, input_dir, output_dir)
             for block in blocks
         ]
 
         for future in as_completed(futures):
-            for key, trips_in, rows_out in future.result():
-                total_trips += trips_in
-                total_rows += rows_out
-                print(f"  {key}: {trips_in:,} trips, {rows_out:,} rows")
+            for key, skipped, trips, rows in future.result():
+                total_skipped += skipped
+                total_trips += trips
+                total_rows += rows
+                if skipped:
+                    print(f"  {key}: {skipped} chunk(s) skipped, {trips:,} matched")
+                elif trips:
+                    print(f"  {key}: {trips:,} trips, {rows:,} rows")
 
     print("\n--- Map matching complete ---")
-    print(f"  Partitions:  {len(partition_dirs):>10,}")
-    print(f"  Trips:       {total_trips:>10,}")
+    print(f"  Partitions:  {n:>10,}")
+    print(f"  Skipped:     {total_skipped:>10,} chunk(s)")
+    print(f"  Matched:     {total_trips:>10,} trip(s)")
     print(f"  Rows out:    {total_rows:>10,}")
-    print(f"  Output:      {output_dir}")
