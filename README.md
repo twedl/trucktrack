@@ -248,6 +248,67 @@ trucktrack partition tracks.parquet partitioned/
 | **Python <-> Rust** | `split_by_observation_gap()` / `split_by_stops()` share the Polars DataFrame with Rust via `pyo3-polars` (Arrow C Data Interface, zero-copy on column buffers). The Python `polars`, Rust `polars`, and `pyo3-polars` versions must be kept in sync. |
 | **Python only** | `read_parquet()` / `read_dataset()` use polars directly in Python. The `generate` and `partition` subpackages are also pure Python on top of Polars / PyArrow. |
 
+## Module interactions
+
+Submodules split along a clear dependency gradient: `_core` (Rust) sits
+at the bottom, pure-Python subpackages layer on top of it, and the CLI
+composes everything. Two types from `generate.models`
+(`TracePoint`, `RouteSegment`) act as the shared data contract between
+`generate`, `valhalla`, `partition`, and `visualize`.
+
+```mermaid
+flowchart TD
+    subgraph rust["Rust extension (src/)"]
+        core["_core<br/>gap / stop / traffic splitters<br/>partition keys · Hilbert index<br/>add_speed_mps"]
+    end
+
+    subgraph pythin["Thin Python wrappers"]
+        splitters["splitters.py"]
+        io["io.py"]
+    end
+
+    subgraph subpkgs["Pure-Python subpackages"]
+        models["generate.models<br/>TracePoint · RouteSegment · TripConfig"]
+        generate["generate<br/>router · interpolator · speed_profile<br/>parking · noise · trace · *_errors"]
+        valhalla["valhalla<br/>_actor (pyvalhalla singleton)<br/>routing · map_matching · _parsing"]
+        partition["partition<br/>tiles · classify · writer"]
+        visualize["visualize<br/>_convert · _map (folium)"]
+    end
+
+    cli["cli.py<br/>(argparse subcommands)"]
+
+    splitters --> core
+    io --> core
+
+    generate --> models
+    valhalla --> models
+    generate -->|router uses Actor| valhalla
+    partition -->|reads TracePoint| models
+    visualize -->|reads TracePoint| models
+
+    cli --> splitters
+    cli --> io
+    cli --> generate
+    cli --> partition
+```
+
+Notes:
+
+- `generate.router` calls `valhalla._actor` / `valhalla._parsing`
+  directly, so a trip synthesized through `generate_trace` and a route
+  fetched through `valhalla.route` go through the same pyvalhalla
+  singleton.
+- `valhalla._parsing` and `valhalla.routing` import `RouteSegment` from
+  `generate.models`, keeping one shared route representation across both
+  subpackages.
+- `partition.classify` / `partition.writer` and `visualize._map` both
+  accept `list[TracePoint]` in addition to Polars DataFrames, so traces
+  produced by `generate` flow straight into partitioning or plotting
+  without an intermediate schema.
+- Only `splitters.py` and `io.py` touch the compiled `_core` extension;
+  every other subpackage is pure Python on top of Polars / PyArrow /
+  folium.
+
 ## Project layout
 
 ```
@@ -283,6 +344,16 @@ python/trucktrack/
     classify.py       # Tier assignment + Hilbert-curve indexing (Polars)
     writer.py         # write_partitions, write_trips_partitioned,
                       #   partition_existing_parquet
+  valhalla/
+    __init__.py       # Re-exports route, map_match*, get_actor, DEFAULT_TRUCK_COSTING
+    _actor.py         # pyvalhalla Actor singleton keyed by tile extract
+    _parsing.py       # decode_polyline6, parse_valhalla_response -> RouteSegment
+    routing.py        # route() — high-level truck routing
+    map_matching.py   # map_match, map_match_ways, map_match_dataframe
+  visualize/
+    __init__.py       # Re-exports plot_trace, save_map
+    _convert.py       # TracePoint/list -> Polars DataFrame adapters
+    _map.py           # Folium map builder with per-segment coloring
 data/
   example_tracks.parquet          # 10-row single vehicle example
   splitter_test_tracks.parquet    # 83-row, 3-vehicle test dataset
