@@ -39,12 +39,15 @@ trucktrack = "trucktrack.cli:main"
 
 [project.optional-dependencies]
 valhalla = ["pyvalhalla>=3.4"]
+viz = ["folium>=0.15", "branca>=0.7"]
 dev = [
     "pytest>=8.0",
     "pytest-benchmark>=4.0",
     "mypy>=1.9",
     "ruff>=0.4",
     "pyvalhalla>=3.4",
+    "folium>=0.15",
+    "branca>=0.7",
 ]
 
 [tool.maturin]
@@ -66,6 +69,7 @@ packages = ["trucktrack"]
 [[tool.mypy.overrides]]
 module = [
     "trucktrack.partition.*",
+    "trucktrack.visualize.*",
 ]
 ignore_errors = true
 
@@ -74,6 +78,8 @@ module = [
     "pyarrow.*",
     "requests.*",
     "valhalla.*",
+    "folium.*",
+    "branca.*",
 ]
 ignore_missing_imports = true
 
