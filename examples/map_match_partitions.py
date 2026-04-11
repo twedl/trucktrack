@@ -60,18 +60,19 @@ def _process_partition(
             skipped += 1
             continue
 
-        out_dir.mkdir(parents=True, exist_ok=True)
-
         df = pl.read_parquet(chunk_path)
         matched_trips = []
         for _, trip in df.group_by("id"):
             matched_trips.append(map_match_trip(trip))
             total_trips += 1
 
+        if not matched_trips:
+            continue
+
         matched = pl.concat(matched_trips)
         total_rows += len(matched)
 
-        # Atomic write: temp file then rename.
+        out_dir.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=out_dir, suffix=".tmp.parquet")
         os.close(fd)
         try:
@@ -81,7 +82,7 @@ def _process_partition(
             Path(tmp).unlink(missing_ok=True)
             raise
 
-    return f"{rel}", skipped, total_trips, total_rows
+    return str(rel), skipped, total_trips, total_rows
 
 
 def _process_block(
