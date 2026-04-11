@@ -21,6 +21,25 @@ class MatchedPoint:
     distance_from_trace: float  # meters
 
 
+def _build_trace_body(
+    points: list[tuple[float, float]],
+    costing: str,
+    costing_options: dict[str, object] | None,
+    filters: dict[str, object] | None = None,
+) -> dict[str, object]:
+    body: dict[str, object] = {
+        "shape": [{"lat": lat, "lon": lon} for lat, lon in points],
+        "costing": costing,
+        "shape_match": "map_snap",
+        "costing_options": {
+            costing: costing_options or DEFAULT_TRUCK_COSTING,
+        },
+    }
+    if filters is not None:
+        body["filters"] = filters
+    return body
+
+
 def map_match(
     points: list[tuple[float, float]],
     tile_extract: str,
@@ -32,14 +51,7 @@ def map_match(
     Returns one MatchedPoint per input point.
     """
     actor = get_actor(tile_extract)
-    body: dict[str, object] = {
-        "shape": [{"lat": lat, "lon": lon} for lat, lon in points],
-        "costing": costing,
-        "shape_match": "map_snap",
-        "costing_options": {
-            costing: costing_options or DEFAULT_TRUCK_COSTING,
-        },
-    }
+    body = _build_trace_body(points, costing, costing_options)
     resp = json.loads(actor.trace_route(json.dumps(body)))
 
     matched_pts = resp.get("matched_points", [])
@@ -71,23 +83,16 @@ def map_match_ways(
 ) -> list[int]:
     """Return the deduplicated sequence of OSM way IDs for a matched trace.
 
-    Uses trace_attributes with a minimal filter for efficiency.
     Consecutive duplicate way IDs are collapsed (a single OSM way may
     span multiple graph edges).
     """
     actor = get_actor(tile_extract)
-    body: dict[str, object] = {
-        "shape": [{"lat": lat, "lon": lon} for lat, lon in points],
-        "costing": costing,
-        "shape_match": "map_snap",
-        "costing_options": {
-            costing: costing_options or DEFAULT_TRUCK_COSTING,
-        },
-        "filters": {
-            "attributes": ["edge.way_id"],
-            "action": "include",
-        },
-    }
+    body = _build_trace_body(
+        points,
+        costing,
+        costing_options,
+        filters={"attributes": ["edge.way_id"], "action": "include"},
+    )
     resp = json.loads(actor.trace_attributes(json.dumps(body)))
     edges = resp.get("edges", [])
     ways: list[int] = []
