@@ -49,13 +49,14 @@ def _process_partition(
 
     for chunk_path in chunks:
         df = pl.read_parquet(chunk_path)
+        matched_trips = []
         for _, trip in df.group_by("id"):
-            matched = map_match_trip(trip)
+            matched_trips.append(map_match_trip(trip))
             total_trips += 1
-            total_rows += len(matched)
 
-            out_path = out_dir / f"{chunk_path.stem}_{total_trips}.parquet"
-            matched.write_parquet(out_path)
+        matched = pl.concat(matched_trips)
+        total_rows += len(matched)
+        matched.write_parquet(out_dir / f"{chunk_path.stem}.parquet")
 
     return f"{tier}/{pid}", total_trips, total_rows
 
@@ -64,16 +65,8 @@ def _process_block(
     partition_dirs: list[Path],
     output_dir: Path,
 ) -> list[tuple[str, int, int]]:
-    """Process a contiguous block of partitions sequentially.
-
-    Partitions within a block are spatially adjacent (sorted by tier
-    and Hilbert-curve partition_id), so Valhalla's tile cache stays
-    warm across partition boundaries.
-    """
-    results = []
-    for pdir in partition_dirs:
-        results.append(_process_partition(pdir, output_dir))
-    return results
+    """Process a contiguous block of spatially adjacent partitions sequentially."""
+    return [_process_partition(pdir, output_dir) for pdir in partition_dirs]
 
 
 def _partition_sort_key(path: Path) -> tuple[str, int]:
@@ -130,10 +123,11 @@ def run_map_matching(
         blocks.append(partition_dirs[start:end])
         start = end
 
+    size_str = f"{block_size}–{block_size + 1}" if remainder else str(block_size)
     print(
         f"Found {n} partition(s), "
         f"processing with {max_workers} worker(s) "
-        f"({block_size}–{block_size + 1} partitions per worker)"
+        f"({size_str} partitions per worker)"
     )
 
     total_trips = 0
