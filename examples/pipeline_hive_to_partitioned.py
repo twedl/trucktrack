@@ -140,9 +140,10 @@ def _process_and_write(
     )
 
     n_out = len(df)
-    _write_chunk(df, output_dir, chunk_path.stem)
-
     rel = chunk_path.relative_to(input_dir)
+    chunk_name = rel.with_suffix("").as_posix().replace("/", "_")
+    _write_chunk(df, output_dir, chunk_name)
+
     print(f"  {rel}: {n_in:,} rows in -> {n_out:,} rows out")
 
     return n_in, n_out
