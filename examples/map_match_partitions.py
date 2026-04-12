@@ -31,6 +31,8 @@ from trucktrack.valhalla import map_match_ways
 
 TILE_EXTRACT = os.environ.get("VALHALLA_TILE_EXTRACT", "valhalla_tiles.tar")
 
+_WAY_SCHEMA = {"id": pl.Utf8, "date": pl.Date, "way_id": pl.Int64}
+
 
 def map_match_trip(trip: pl.DataFrame) -> pl.DataFrame:
     """Map-match a single trip and return id, date, way_id rows.
@@ -48,11 +50,11 @@ def map_match_trip(trip: pl.DataFrame) -> pl.DataFrame:
         print(f"  [WARN] {trip_id[:24]}: {e}")
         return pl.DataFrame(
             {"id": [trip_id], "date": [date], "way_id": [None]},
-            schema={"id": pl.Utf8, "date": pl.Date, "way_id": pl.Int64},
+            schema=_WAY_SCHEMA,
         )
     return pl.DataFrame(
         {"id": [trip_id] * len(ways), "date": [date] * len(ways), "way_id": ways},
-        schema={"id": pl.Utf8, "date": pl.Date, "way_id": pl.Int64},
+        schema=_WAY_SCHEMA,
     )
 
 
