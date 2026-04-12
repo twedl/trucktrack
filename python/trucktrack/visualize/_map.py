@@ -511,3 +511,38 @@ def plot_trace_layers(
 def save_map(m: Any, path: str | Path) -> None:
     """Save a folium Map to an HTML file."""
     m.save(str(Path(path)))
+
+
+def serve_map(m: Any, *, host: str = "127.0.0.1", port: int = 5000) -> None:
+    """Serve a folium Map via Flask.
+
+    Useful inside k8s notebooks or other environments where static HTML
+    files cannot be opened directly in a browser.
+
+    Parameters
+    ----------
+    m
+        A folium Map (returned by :func:`plot_trace` or
+        :func:`plot_trace_layers`).
+    host
+        Bind address.  Use ``"0.0.0.0"`` to make the server reachable
+        from outside the container.
+    port
+        Port to listen on.
+    """
+    try:
+        from flask import Flask
+    except ImportError as exc:
+        raise ImportError(
+            "flask is required to serve maps. Install it with: pip install flask"
+        ) from exc
+
+    app = Flask(__name__)
+    html = m.get_root().render()
+
+    @app.route("/")
+    def index() -> str:
+        return html
+
+    print(f"Serving map at http://{host}:{port}/")
+    app.run(host=host, port=port)

@@ -2,19 +2,24 @@
 
 End-to-end example: synthesize a GPS trace between two Ontario points,
 split it at observation gaps, partition into a hive layout, map-match
-each segment, and save a single HTML map with all three stages as
-togglable layers.
+each segment, and visualize all three stages on an interactive map.
 
 Requires pyvalhalla and a tile extract built by scripts/setup_valhalla.py.
 
 Usage::
 
+    # Save to HTML file:
     VALHALLA_TILE_EXTRACT=valhalla_tiles/valhalla_tiles.tar \
         uv run python examples/generate_and_match.py
+
+    # Serve via Flask (useful inside k8s notebooks):
+    VALHALLA_TILE_EXTRACT=valhalla_tiles/valhalla_tiles.tar \
+        uv run python examples/generate_and_match.py --serve
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import tempfile
 from datetime import UTC, datetime, timedelta
@@ -30,7 +35,7 @@ from trucktrack import (
 )
 from trucktrack.generate import TripConfig
 from trucktrack.valhalla import map_match_dataframe_full
-from trucktrack.visualize import plot_trace_layers, save_map
+from trucktrack.visualize import plot_trace_layers, save_map, serve_map
 
 TILE_EXTRACT = os.environ.get(
     "VALHALLA_TILE_EXTRACT", "valhalla_tiles/valhalla_tiles.tar"
@@ -42,7 +47,7 @@ ORIGIN = (43.65, -79.38)
 DESTINATION = (42.98, -81.25)
 
 
-def main() -> None:
+def main(args: argparse.Namespace) -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -98,9 +103,6 @@ def main() -> None:
         # 6. Visualize all stages on one map.
         print("Building map...")
         m = plot_trace_layers(raw=df, segments=split, matched=result)
-        out_path = OUTPUT_DIR / "trace.html"
-        save_map(m, out_path)
-        print(f"  Saved {out_path}")
 
         # 7. Print the OSM way IDs.
         print(f"\nOSM way IDs ({len(all_ways)} ways):")
@@ -109,6 +111,27 @@ def main() -> None:
         if len(all_ways) > 10:
             print(f"  ... ({len(all_ways) - 10} more)")
 
+        # 8. Save or serve the map (serve_map blocks until killed).
+        if args.serve:
+            serve_map(m, host="0.0.0.0", port=args.port)
+        else:
+            out_path = OUTPUT_DIR / "trace.html"
+            save_map(m, out_path)
+            print(f"  Saved {out_path}")
+
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--serve",
+        action="store_true",
+        help="Serve the map via Flask instead of saving to HTML",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=5000,
+        help="Port for Flask server (default: 5000)",
+    )
+    args = parser.parse_args()
+    main(args)
