@@ -27,6 +27,21 @@ _SEGMENT_COLORS = [
 ]
 
 
+def _normalize_input(
+    data: pl.DataFrame | list[Any],
+    param_name: str = "data",
+) -> pl.DataFrame:
+    """Convert list[TracePoint] to DataFrame, or pass through a DataFrame."""
+    if isinstance(data, list):
+        from trucktrack.generate.models import TracePoint as TP
+
+        if data and isinstance(data[0], TP):
+            return tracepoints_to_dataframe(data)
+        msg = f"{param_name} must be a Polars DataFrame or list[TracePoint]"
+        raise TypeError(msg)
+    return data
+
+
 def _import_folium() -> tuple[Any, Any]:
     try:
         import branca.colormap as cm
@@ -219,17 +234,7 @@ def plot_trace(
     """
     folium, cm = _import_folium()
 
-    # Normalize input.
-    if isinstance(data, list):
-        from trucktrack.generate.models import TracePoint as TP
-
-        if data and isinstance(data[0], TP):
-            df = tracepoints_to_dataframe(data)
-        else:
-            msg = "data must be a Polars DataFrame or list[TracePoint]"
-            raise TypeError(msg)
-    else:
-        df = data
+    df = _normalize_input(data)
 
     if df.height == 0:
         m = folium.Map(tiles=tile_layer, width=width, height=height)
@@ -364,6 +369,143 @@ def _render_segments(
             color=color,
             popup=f"Segment {seg['segment_id'][0]}",
         )
+
+
+def plot_trace_layers(
+    *,
+    raw: pl.DataFrame | list[TracePoint] | None = None,
+    segments: pl.DataFrame | None = None,
+    matched: pl.DataFrame | None = None,
+    tile_layer: str = "OpenStreetMap",
+    width: str | int = "100%",
+    height: str | int = 600,
+    max_points: int | None = 5000,
+    raw_color: str = "gray",
+    matched_color: str = "#e31a1c",
+    stop_color: str = "red",
+    stop_radius: int = 8,
+) -> Any:
+    """Plot multiple pipeline stages on a single map with togglable layers.
+
+    Each non-``None`` argument becomes a ``FeatureGroup`` that can be
+    toggled on or off via the layer control.
+
+    Parameters
+    ----------
+    raw
+        Raw trace as a DataFrame or ``list[TracePoint]``.
+        Rendered as a dashed polyline.
+    segments
+        Gap-split or stop-split DataFrame (must have ``segment_id``).
+        Each segment is drawn in a distinct color; stops (if ``is_stop``
+        is present) are shown as circle markers.
+    matched
+        Map-matched DataFrame (must have ``matched_lat``, ``matched_lon``).
+        Rendered as a solid polyline.
+    tile_layer
+        Folium tile layer name.
+    width, height
+        Map dimensions.
+    max_points
+        Downsample each layer independently.  ``None`` to disable.
+    raw_color
+        Color for the raw trace polyline.
+    matched_color
+        Color for the map-matched polyline.
+    stop_color
+        Color for stop circle markers.
+    stop_radius
+        Radius of stop circle markers in pixels.
+
+    Returns
+    -------
+    folium.Map
+        An interactive map with a layer control.
+    """
+    folium, cm = _import_folium()
+
+    raw_df = _normalize_input(raw, "raw") if raw is not None else None
+
+    # Compute bounds using Polars-native aggregations (no list materialization).
+    lat_min = float("inf")
+    lat_max = float("-inf")
+    lon_min = float("inf")
+    lon_max = float("-inf")
+    has_data = False
+    for df in (raw_df, segments, matched):
+        if df is not None and df.height > 0:
+            lat_min = min(lat_min, df["lat"].min())  # type: ignore[arg-type]
+            lat_max = max(lat_max, df["lat"].max())  # type: ignore[arg-type]
+            lon_min = min(lon_min, df["lon"].min())  # type: ignore[arg-type]
+            lon_max = max(lon_max, df["lon"].max())  # type: ignore[arg-type]
+            has_data = True
+
+    if not has_data:
+        return folium.Map(tiles=tile_layer, width=width, height=height)
+
+    center_lat = (lat_min + lat_max) / 2
+    center_lon = (lon_min + lon_max) / 2
+    m = folium.Map(
+        location=(center_lat, center_lon),
+        tiles=tile_layer,
+        width=width,
+        height=height,
+    )
+    m.fit_bounds([[lat_min, lon_min], [lat_max, lon_max]])
+
+    # Layer: raw trace.
+    if raw_df is not None and raw_df.height > 0:
+        df = raw_df
+        if max_points is not None:
+            df = _downsample(df, max_points)
+        fg = folium.FeatureGroup(name="Raw trace")
+        _add_polyline(
+            folium,
+            fg,
+            df["lat"].to_list(),
+            df["lon"].to_list(),
+            color=raw_color,
+            weight=3,
+            dash_array="6 4",
+        )
+        fg.add_to(m)
+
+    # Layer: segments.
+    if segments is not None and segments.height > 0:
+        seg_df = segments
+        if max_points is not None:
+            seg_df = _downsample(seg_df, max_points)
+
+        has_is_stop = "is_stop" in seg_df.columns
+        movement = seg_df.filter(~pl.col("is_stop")) if has_is_stop else seg_df
+
+        seg_fg = folium.FeatureGroup(name="Segments")
+        _render_segments(folium, cm, seg_fg, m, movement, None, raw_color)
+        seg_fg.add_to(m)
+
+        if has_is_stop:
+            stop_fg = folium.FeatureGroup(name="Stops")
+            _add_stop_markers(folium, stop_fg, seg_df, stop_color, stop_radius)
+            stop_fg.add_to(m)
+
+    # Layer: map-matched trace.
+    if matched is not None and matched.height > 0:
+        m_df = matched
+        if max_points is not None:
+            m_df = _downsample(m_df, max_points)
+        fg = folium.FeatureGroup(name="Map-matched")
+        _add_polyline(
+            folium,
+            fg,
+            m_df["matched_lat"].to_list(),
+            m_df["matched_lon"].to_list(),
+            color=matched_color,
+            weight=4,
+        )
+        fg.add_to(m)
+
+    folium.LayerControl().add_to(m)
+    return m
 
 
 def save_map(m: Any, path: str | Path) -> None:

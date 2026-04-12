@@ -1,8 +1,9 @@
-"""Generate a fake truck trip, split, partition, and map-match it.
+"""Generate a fake truck trip, split, partition, map-match, and visualize it.
 
 End-to-end example: synthesize a GPS trace between two Ontario points,
 split it at observation gaps, partition into a hive layout, map-match
-each segment, and print the OSM way IDs traversed.
+each segment, and save a single HTML map with all three stages as
+togglable layers.
 
 Requires pyvalhalla and a tile extract built by scripts/setup_valhalla.py.
 
@@ -28,11 +29,13 @@ from trucktrack import (
     traces_to_parquet,
 )
 from trucktrack.generate import TripConfig
-from trucktrack.valhalla import map_match_ways
+from trucktrack.valhalla import map_match_dataframe_full
+from trucktrack.visualize import plot_trace_layers, save_map
 
 TILE_EXTRACT = os.environ.get(
     "VALHALLA_TILE_EXTRACT", "valhalla_tiles/valhalla_tiles.tar"
 )
+OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", "examples/output"))
 
 # Toronto → London, Ontario
 ORIGIN = (43.65, -79.38)
@@ -40,6 +43,8 @@ DESTINATION = (42.98, -81.25)
 
 
 def main() -> None:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
 
@@ -78,18 +83,26 @@ def main() -> None:
 
         # 5. Map-match each segment and collect OSM way IDs.
         print("Map-matching...")
+        matched_parts = []
         all_ways: list[int] = []
         for pq in sorted(partition_dir.rglob("*.parquet")):
             chunk = pl.read_parquet(pq)
             for (seg_id,), seg in chunk.group_by("segment_id"):
-                lats = seg["lat"].to_list()
-                lons = seg["lon"].to_list()
-                coords = list(zip(lats, lons, strict=True))
-                ways = map_match_ways(coords, tile_extract=TILE_EXTRACT)
+                matched, ways = map_match_dataframe_full(seg, tile_extract=TILE_EXTRACT)
+                matched_parts.append(matched)
                 all_ways.extend(ways)
                 print(f"  segment {seg_id}: {len(seg)} pts, {len(ways)} OSM ways")
 
-        # 6. Print the OSM way IDs.
+        result = pl.concat(matched_parts)
+
+        # 6. Visualize all stages on one map.
+        print("Building map...")
+        m = plot_trace_layers(raw=df, segments=split, matched=result)
+        out_path = OUTPUT_DIR / "trace.html"
+        save_map(m, out_path)
+        print(f"  Saved {out_path}")
+
+        # 7. Print the OSM way IDs.
         print(f"\nOSM way IDs ({len(all_ways)} ways):")
         for wid in all_ways[:10]:
             print(f"  {wid}")

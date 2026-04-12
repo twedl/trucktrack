@@ -12,7 +12,7 @@ import pytest
 folium = pytest.importorskip("folium")
 
 from trucktrack.generate.models import TracePoint  # noqa: E402
-from trucktrack.visualize import plot_trace, save_map  # noqa: E402
+from trucktrack.visualize import plot_trace, plot_trace_layers, save_map  # noqa: E402
 
 
 def _make_tracepoints(n: int = 10) -> list[TracePoint]:
@@ -112,6 +112,37 @@ class TestPlotTraceMatched:
         m = plot_trace(df, color_by="distance_from_trace")
         html = m._repr_html_()
         assert "distance_from_trace" in html
+
+
+class TestPlotTraceLayers:
+    def test_all_layers(self) -> None:
+        raw = _make_raw_df()
+        segments = _make_gap_split_df()
+        matched = _make_matched_df()
+        m = plot_trace_layers(raw=raw, segments=segments, matched=matched)
+        assert isinstance(m, folium.Map)
+        html = m._repr_html_()
+        assert "Raw trace" in html
+        assert "Segments" in html
+        assert "Map-matched" in html
+
+    def test_raw_only(self) -> None:
+        m = plot_trace_layers(raw=_make_raw_df())
+        assert isinstance(m, folium.Map)
+
+    def test_segments_with_stops(self) -> None:
+        m = plot_trace_layers(segments=_make_stop_split_df())
+        assert isinstance(m, folium.Map)
+        html = m._repr_html_()
+        assert "Stop" in html
+
+    def test_from_tracepoints(self) -> None:
+        m = plot_trace_layers(raw=_make_tracepoints())
+        assert isinstance(m, folium.Map)
+
+    def test_empty_returns_map(self) -> None:
+        m = plot_trace_layers()
+        assert isinstance(m, folium.Map)
 
 
 class TestSaveMap:
