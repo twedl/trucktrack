@@ -31,6 +31,15 @@ from trucktrack.partition import (
     write_partitions,
     write_trips_partitioned,
 )
+from trucktrack.pipeline import run_pipeline
+from trucktrack.query import (
+    ChunkIndex,
+    scan_matched_trip,
+    scan_matched_truck,
+    scan_partitioned_trip,
+    scan_partitioned_truck,
+    scan_raw_truck,
+)
 from trucktrack.splitters import (
     filter_traffic_stops,
     filter_traffic_stops_file,
@@ -68,4 +77,13 @@ __all__ = [
     "partition_points",
     "write_partitions",
     "write_trips_partitioned",
+    # pipeline
+    "run_pipeline",
+    # query
+    "ChunkIndex",
+    "scan_raw_truck",
+    "scan_partitioned_truck",
+    "scan_partitioned_trip",
+    "scan_matched_truck",
+    "scan_matched_trip",
 ]

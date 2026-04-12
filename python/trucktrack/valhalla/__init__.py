@@ -11,6 +11,7 @@ from trucktrack.valhalla.map_matching import (
     map_match_route_shape,
     map_match_ways,
 )
+from trucktrack.valhalla.pipeline import map_match_trip, run_map_matching
 from trucktrack.valhalla.routing import route
 
 __all__ = [
@@ -24,6 +25,8 @@ __all__ = [
     "map_match_full",
     "map_match_route_shape",
     "map_match_ways",
+    "map_match_trip",
     "parse_valhalla_response",
     "route",
+    "run_map_matching",
 ]
