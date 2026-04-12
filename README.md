@@ -298,6 +298,33 @@ data/
   splitter_test_tracks.parquet    # 83-row, 3-vehicle test dataset
 ```
 
+## End-to-end: trip splitting + map-matching
+
+The `examples/end_to_end/` scripts form a three-stage pipeline: generate
+synthetic GPS data (or skip to use your own), split and spatially
+partition it, then map-match each trip to extract OSM way IDs. Set `DATA`
+to the directory containing your tile extract and outputs. The final
+result is a hive-partitioned parquet dataset with columns `id`, `date`,
+and `way_id` (null for trips that fail matching).
+
+```bash
+DATA=/home/jovyan/bmp-datavol-1
+
+# Stage 1: generate synthetic GPS traces (skip if you have real data)
+VALHALLA_TILE_EXTRACT=$DATA/valhalla_tiles.tar \
+OUTPUT_DIR=$DATA/raw N_TRUCKS=10 K_TRIPS=10 \
+    uv run python examples/end_to_end/stage1_generate.py
+
+# Stage 2: gap-split, stop-split, traffic-filter, spatially partition
+INPUT_DIR=$DATA/raw OUTPUT_DIR=$DATA/atri-trips \
+    uv run python examples/end_to_end/stage2_split_partition.py
+
+# Stage 3: map-match each trip → id, date, way_id
+VALHALLA_TILE_EXTRACT=$DATA/valhalla_tiles.tar \
+INPUT_DIR=$DATA/atri-trips OUTPUT_DIR=$DATA/atri-match \
+    uv run python examples/end_to_end/stage3_map_match.py
+```
+
 ## Dev workflow
 
 | Task | Command |
