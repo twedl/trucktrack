@@ -14,7 +14,7 @@ from trucktrack.query import (
     scan_partitioned_truck,
     scan_raw_truck,
 )
-from trucktrack.visualize._map import plot_trace, serve_map
+from trucktrack.visualize._map import plot_trace, plot_trace_layers, serve_map
 
 Stage = Literal["raw", "partitioned", "matched"]
 
@@ -183,3 +183,96 @@ def inspect_trip(
     else:
         df = _resolve_data(data_dir, index, None, None, trip_id, None, stage)
     return _plot_and_serve(df, serve, host, port, plot_kwargs)
+
+
+def inspect_pipeline(
+    truck_id: str,
+    *,
+    raw_dir: str | Path | None = None,
+    partitioned_dir: str | Path | None = None,
+    matched_dir: str | Path | None = None,
+    date_range: tuple[date, date] | None = None,
+    raw_index: ChunkIndex | None = None,
+    partitioned_index: ChunkIndex | None = None,
+    matched_index: ChunkIndex | None = None,
+    host: str = "127.0.0.1",
+    port: int = 5000,
+    serve: bool = True,
+    **plot_kwargs: Any,
+) -> Any:
+    """Overlay raw, segmented, and map-matched layers for one truck.
+
+    Loads data from up to three pipeline stages and plots them on a
+    single map with togglable layers via
+    :func:`~trucktrack.visualize.plot_trace_layers`.
+
+    Provide at least one of *raw_dir*, *partitioned_dir*, or
+    *matched_dir*. Each layer is skipped if its directory is not given.
+
+    Parameters
+    ----------
+    truck_id
+        Full truck UUID.
+    raw_dir
+        Root of the raw hive-partitioned dataset.
+    partitioned_dir
+        Root of the split+partitioned dataset.
+    matched_dir
+        Root of the map-matched dataset.
+    date_range
+        Optional ``(start, end)`` date range to filter all layers.
+    raw_index, partitioned_index, matched_index
+        Optional :class:`~trucktrack.ChunkIndex` instances for fast
+        file lookups on each stage.
+    host, port
+        Passed to :func:`~trucktrack.visualize.serve_map`.
+    serve
+        If ``True`` (default), start a Flask server. If ``False``,
+        return the folium Map without serving.
+    **plot_kwargs
+        Extra keyword arguments forwarded to
+        :func:`~trucktrack.visualize.plot_trace_layers`.
+
+    Returns
+    -------
+    folium.Map
+    """
+    raw_df = None
+    if raw_dir is not None:
+        raw_df = _resolve_data(
+            raw_dir, raw_index, truck_id, None, None, date_range, "raw"
+        )
+
+    segments_df = None
+    if partitioned_dir is not None:
+        segments_df = _resolve_data(
+            partitioned_dir,
+            partitioned_index,
+            truck_id,
+            None,
+            None,
+            date_range,
+            "partitioned",
+        )
+
+    matched_df = None
+    if matched_dir is not None:
+        matched_df = _resolve_data(
+            matched_dir,
+            matched_index,
+            truck_id,
+            None,
+            None,
+            date_range,
+            "matched",
+        )
+
+    m = plot_trace_layers(
+        raw=raw_df,
+        segments=segments_df,
+        matched=matched_df,
+        **plot_kwargs,
+    )
+    if serve:
+        serve_map(m, host=host, port=port)
+    return m
