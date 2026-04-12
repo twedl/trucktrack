@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from trucktrack.generate.models import RouteSegment
 from trucktrack.valhalla._actor import DEFAULT_TRUCK_COSTING, get_actor
@@ -12,11 +13,12 @@ from trucktrack.valhalla._parsing import parse_valhalla_response
 def route(
     origin: tuple[float, float],
     destination: tuple[float, float],
-    tile_extract: str,
+    tile_extract: str | None = None,
     costing_options: dict[str, object] | None = None,
+    config: str | Path | None = None,
 ) -> RouteSegment:
     """Fetch a truck route using local pyvalhalla bindings."""
-    actor = get_actor(tile_extract)
+    actor = get_actor(tile_extract, config=config)
     body = {
         "locations": [
             {"lat": origin[0], "lon": origin[1]},

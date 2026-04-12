@@ -18,7 +18,15 @@ CONFIG_FILENAME = "valhalla.json"
 
 
 def _find_config(tile_extract: str) -> Path | None:
-    """Look for an existing valhalla.json next to or inside *tile_extract*."""
+    """Look for an existing valhalla.json next to, inside, or in the cwd.
+
+    Search order:
+
+    1. Inside *tile_extract* (when it is a directory).
+    2. Sibling of *tile_extract* (e.g. ``valhalla_tiles/valhalla.json``
+       next to ``valhalla_tiles.tar``).
+    3. Current working directory.
+    """
     p = Path(tile_extract)
     if p.is_dir():
         candidate = p / CONFIG_FILENAME
@@ -29,11 +37,30 @@ def _find_config(tile_extract: str) -> Path | None:
     candidate = p.parent / CONFIG_FILENAME
     if candidate.is_file():
         return candidate
+    candidate = Path.cwd() / CONFIG_FILENAME
+    if candidate.is_file():
+        return candidate
     return None
 
 
-def get_actor(tile_extract: str) -> Any:
-    """Return a cached Valhalla Actor for the given tile extract path."""
+def get_actor(
+    tile_extract: str | None = None,
+    config: str | Path | None = None,
+) -> Any:
+    """Return a cached Valhalla Actor for the given tile extract or config.
+
+    At least one of *tile_extract* or *config* must be provided.
+
+    Parameters
+    ----------
+    tile_extract
+        Path to the Valhalla tile extract (``.tar`` file or directory).
+        Optional when *config* is provided (the config already contains
+        the tile path).
+    config
+        Explicit path to a ``valhalla.json`` config file.  When provided
+        this takes priority over automatic discovery.
+    """
     try:
         import valhalla
     except ImportError as exc:
@@ -42,12 +69,20 @@ def get_actor(tile_extract: str) -> Any:
             "Install it with: pip install trucktrack[valhalla]"
         ) from exc
 
-    key = str(Path(tile_extract).resolve())
-    if key not in _actors:
-        config_path = _find_config(tile_extract)
-        if config_path is not None:
-            _actors[key] = valhalla.Actor(config_path)
-        else:
-            config = valhalla.get_config(tile_extract=tile_extract)
-            _actors[key] = valhalla.Actor(config)
+    if config is not None:
+        key = str(Path(config).resolve())
+        if key not in _actors:
+            _actors[key] = valhalla.Actor(Path(config))
+    elif tile_extract is not None:
+        key = str(Path(tile_extract).resolve())
+        if key not in _actors:
+            found = _find_config(tile_extract)
+            if found is not None:
+                _actors[key] = valhalla.Actor(found)
+            else:
+                _actors[key] = valhalla.Actor(
+                    valhalla.get_config(tile_extract=tile_extract)
+                )
+    else:
+        raise ValueError("At least one of tile_extract or config must be provided.")
     return _actors[key]
