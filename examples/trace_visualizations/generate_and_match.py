@@ -10,11 +10,11 @@ Usage::
 
     # Save to HTML file:
     VALHALLA_TILE_EXTRACT=valhalla_tiles/valhalla_tiles.tar \
-        uv run python examples/generate_and_match.py
+        uv run python examples/trace_visualizations/generate_and_match.py
 
     # Serve via Flask (useful inside k8s notebooks):
     VALHALLA_TILE_EXTRACT=valhalla_tiles/valhalla_tiles.tar \
-        uv run python examples/generate_and_match.py --serve
+        uv run python examples/trace_visualizations/generate_and_match.py --serve
 """
 
 from __future__ import annotations
@@ -31,6 +31,7 @@ from trucktrack import (
     partition_existing_parquet,
     read_parquet,
     split_by_observation_gap,
+    split_by_stops,
     traces_to_parquet,
 )
 from trucktrack.generate import TripConfig
@@ -40,11 +41,11 @@ from trucktrack.visualize import plot_trace_layers, save_map, serve_map
 TILE_EXTRACT = os.environ.get(
     "VALHALLA_TILE_EXTRACT", "valhalla_tiles/valhalla_tiles.tar"
 )
-OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", "examples/output"))
+OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", "examples/trace_visualizations/output"))
 
-# Toronto → London, Ontario
-ORIGIN = (43.65, -79.38)
-DESTINATION = (42.98, -81.25)
+# FCA Brampton Assembly Plant → Comber Petro-Canada
+ORIGIN = (43.7387, -79.7271)
+DESTINATION = (42.2383, -82.5506)
 
 
 def main(args: argparse.Namespace) -> None:
@@ -71,11 +72,17 @@ def main(args: argparse.Namespace) -> None:
         df = read_parquet(str(parquet_path))
         print(f"  DataFrame: {df.shape[0]} rows, columns: {df.columns}")
 
-        # 3. Split at 5-minute observation gaps.
-        print("Splitting at observation gaps...")
-        split = split_by_observation_gap(df, timedelta(minutes=5), min_length=3)
+        # 3. Split at 5-minute observation gaps, then detect stops.
+        print("Splitting...")
+        gap_split = split_by_observation_gap(df, timedelta(minutes=5), min_length=3)
+        split = split_by_stops(
+            gap_split,
+            max_diameter=50.0,
+            min_duration=timedelta(minutes=2),
+        )
         n_segments = split["segment_id"].n_unique()
-        print(f"  {n_segments} segment(s)")
+        n_stops = split.filter(pl.col("is_stop"))["segment_id"].n_unique()
+        print(f"  {n_segments} segment(s), {n_stops} stop(s)")
 
         # 4. Partition into a hive layout.
         print("Partitioning...")
@@ -90,19 +97,26 @@ def main(args: argparse.Namespace) -> None:
         print("Map-matching...")
         matched_parts = []
         all_ways: list[int] = []
+        all_shapes: list[list[tuple[float, float]]] = []
         for pq in sorted(partition_dir.rglob("*.parquet")):
             chunk = pl.read_parquet(pq)
             for (seg_id,), seg in chunk.group_by("segment_id"):
-                matched, ways = map_match_dataframe_full(seg, tile_extract=TILE_EXTRACT)
+                matched, ways, shape = map_match_dataframe_full(
+                    seg, tile_extract=TILE_EXTRACT
+                )
                 matched_parts.append(matched)
                 all_ways.extend(ways)
+                if shape:
+                    all_shapes.append(shape)
                 print(f"  segment {seg_id}: {len(seg)} pts, {len(ways)} OSM ways")
 
         result = pl.concat(matched_parts)
 
         # 6. Visualize all stages on one map.
         print("Building map...")
-        m = plot_trace_layers(raw=df, segments=split, matched=result)
+        m = plot_trace_layers(
+            raw=df, segments=split, matched=result, matched_shape=all_shapes or None
+        )
 
         # 7. Print the OSM way IDs.
         print(f"\nOSM way IDs ({len(all_ways)} ways):")

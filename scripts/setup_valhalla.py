@@ -31,6 +31,18 @@ CONFIG_OPTIONS: dict[str, bool | int | float] = {
     "mjolnir-include-driving": True,
     "mjolnir-data-processing-use-direction-on-ways": True,
     "service-limits-trace-max-distance": 2_000_000.0,
+    "service-limits-trace-max-alternates": 10,
+    "service-limits-trace-max-alternates-shape": 1000,
+    "service-limits-trace-max-search-radius": 200.0,
+    # Meili map-matching defaults tuned for sparse truck GPS (~60s intervals).
+    "meili-default-breakage-distance": 3000,
+    "meili-default-search-radius": 50,
+    "meili-default-gps-accuracy": 15.0,
+    "meili-default-max-search-radius": 200,
+    "meili-default-max-route-distance-factor": 10,
+    "meili-default-max-route-time-factor": 10,
+    "meili-default-beta": 5,
+    "meili-default-interpolation-distance": 20,
 }
 
 

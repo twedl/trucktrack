@@ -185,9 +185,9 @@ def plot_trace(
     data: pl.DataFrame | list[TracePoint],
     *,
     color_by: str | None = None,
-    tile_layer: str = "OpenStreetMap",
+    tile_layer: str = "CartoDB Positron",
     width: str | int = "100%",
-    height: str | int = 600,
+    height: str | int = "100%",
     max_points: int | None = 5000,
     stop_color: str = "red",
     stop_radius: int = 8,
@@ -376,11 +376,12 @@ def plot_trace_layers(
     raw: pl.DataFrame | list[TracePoint] | None = None,
     segments: pl.DataFrame | None = None,
     matched: pl.DataFrame | None = None,
-    tile_layer: str = "OpenStreetMap",
+    matched_shape: list[list[tuple[float, float]]] | None = None,
+    tile_layer: str = "CartoDB Positron",
     width: str | int = "100%",
-    height: str | int = 600,
+    height: str | int = "100%",
     max_points: int | None = 5000,
-    raw_color: str = "gray",
+    raw_color: str = "black",
     matched_color: str = "#e31a1c",
     stop_color: str = "red",
     stop_radius: int = 8,
@@ -401,7 +402,12 @@ def plot_trace_layers(
         is present) are shown as circle markers.
     matched
         Map-matched DataFrame (must have ``matched_lat``, ``matched_lon``).
-        Rendered as a solid polyline.
+        Used for bounds calculation.  Ignored for rendering when
+        ``matched_shape`` is provided.
+    matched_shape
+        Road-snapped polyline as ``(lat, lon)`` tuples, e.g. from
+        :func:`~trucktrack.valhalla.map_match_full`.  When provided,
+        this is drawn instead of straight lines between matched points.
     tile_layer
         Folium tile layer name.
     width, height
@@ -459,15 +465,16 @@ def plot_trace_layers(
         if max_points is not None:
             df = _downsample(df, max_points)
         fg = folium.FeatureGroup(name="Raw trace")
-        _add_polyline(
-            folium,
-            fg,
-            df["lat"].to_list(),
-            df["lon"].to_list(),
-            color=raw_color,
-            weight=3,
-            dash_array="6 4",
-        )
+        for lat, lon in zip(df["lat"].to_list(), df["lon"].to_list(), strict=True):
+            folium.CircleMarker(
+                location=(lat, lon),
+                radius=5,
+                color=raw_color,
+                fill=True,
+                fill_color=raw_color,
+                fill_opacity=0.7,
+                weight=1,
+            ).add_to(fg)
         fg.add_to(m)
 
     # Layer: segments.
@@ -489,7 +496,14 @@ def plot_trace_layers(
             stop_fg.add_to(m)
 
     # Layer: map-matched trace.
-    if matched is not None and matched.height > 0:
+    if matched_shape:
+        fg = folium.FeatureGroup(name="Map-matched")
+        for shape in matched_shape:
+            lats = [p[0] for p in shape]
+            lons = [p[1] for p in shape]
+            _add_polyline(folium, fg, lats, lons, color=matched_color, weight=4)
+        fg.add_to(m)
+    elif matched is not None and matched.height > 0:
         m_df = matched
         if max_points is not None:
             m_df = _downsample(m_df, max_points)

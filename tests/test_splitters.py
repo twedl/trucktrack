@@ -72,6 +72,15 @@ class TestObservationGapSplitter:
         # Every row except the first becomes its own segment boundary
         assert result["segment_id"].n_unique() == len(truck_a)
 
+    def test_tz_aware_datetimes(self, truck_a: pl.DataFrame) -> None:
+        """tz-aware datetime columns should not panic the Rust splitter."""
+        tz_df = truck_a.with_columns(pl.col("time").dt.replace_time_zone("UTC"))
+        result = trucktrack.split_by_observation_gap(tz_df, timedelta(minutes=2))
+        naive_result = trucktrack.split_by_observation_gap(
+            truck_a, timedelta(minutes=2)
+        )
+        assert result["segment_id"].n_unique() == naive_result["segment_id"].n_unique()
+
     def test_min_length_filters_short_segments(self, truck_a: pl.DataFrame) -> None:
         """With min_length=20, segments < 20 rows should be dropped."""
         result = trucktrack.split_by_observation_gap(

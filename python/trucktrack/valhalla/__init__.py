@@ -8,6 +8,7 @@ from trucktrack.valhalla.map_matching import (
     map_match_dataframe,
     map_match_dataframe_full,
     map_match_full,
+    map_match_route_shape,
     map_match_ways,
 )
 from trucktrack.valhalla.routing import route
@@ -21,6 +22,7 @@ __all__ = [
     "map_match_dataframe",
     "map_match_dataframe_full",
     "map_match_full",
+    "map_match_route_shape",
     "map_match_ways",
     "parse_valhalla_response",
     "route",

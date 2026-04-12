@@ -40,21 +40,27 @@ def decode_polyline6(encoded: str) -> list[tuple[float, float]]:
     return coords
 
 
+def concat_leg_shapes(legs: list[dict[str, Any]]) -> list[tuple[float, float]]:
+    """Decode and concatenate shape polylines from a list of route legs."""
+    coords: list[tuple[float, float]] = []
+    for leg in legs:
+        shape = decode_polyline6(leg.get("shape", ""))
+        if coords and shape:
+            shape = shape[1:]
+        coords.extend(shape)
+    return coords
+
+
 def parse_valhalla_response(data: dict[str, Any]) -> RouteSegment:
     """Parse a Valhalla route response into a RouteSegment."""
     trip = data["trip"]
     legs = trip["legs"]
 
-    all_coords: list[tuple[float, float]] = []
+    all_coords = concat_leg_shapes(legs)
     all_speeds: list[float] = []
     all_distances: list[float] = []
 
     for leg in legs:
-        shape = decode_polyline6(leg["shape"])
-        if all_coords and shape:
-            shape = shape[1:]
-        all_coords.extend(shape)
-
         for maneuver in leg["maneuvers"]:
             length_m = maneuver["length"] * 1000
             time_s = maneuver["time"]
