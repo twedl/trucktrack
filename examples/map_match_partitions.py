@@ -27,14 +27,33 @@ from pathlib import Path
 import polars as pl
 from tqdm import tqdm
 
-from trucktrack.valhalla import map_match_dataframe
+from trucktrack.valhalla import map_match_ways
 
 TILE_EXTRACT = os.environ.get("VALHALLA_TILE_EXTRACT", "valhalla_tiles.tar")
 
 
 def map_match_trip(trip: pl.DataFrame) -> pl.DataFrame:
-    """Map-match a single trip using local pyvalhalla."""
-    return map_match_dataframe(trip, tile_extract=TILE_EXTRACT)
+    """Map-match a single trip and return id, date, way_id rows.
+
+    If matching fails (e.g. corrupted GPS data exceeding Valhalla's
+    distance limit), returns a single row with null way_id so no
+    trips are dropped.
+    """
+    trip_id = trip["id"][0]
+    date = trip["time"].min().date()
+    try:
+        points = list(zip(trip["lat"].to_list(), trip["lon"].to_list(), strict=True))
+        ways = map_match_ways(points, tile_extract=TILE_EXTRACT)
+    except Exception as e:
+        print(f"  [WARN] {trip_id[:24]}: {e}")
+        return pl.DataFrame(
+            {"id": [trip_id], "date": [date], "way_id": [None]},
+            schema={"id": pl.Utf8, "date": pl.Date, "way_id": pl.Int64},
+        )
+    return pl.DataFrame(
+        {"id": [trip_id] * len(ways), "date": [date] * len(ways), "way_id": ways},
+        schema={"id": pl.Utf8, "date": pl.Date, "way_id": pl.Int64},
+    )
 
 
 def _process_partition(
