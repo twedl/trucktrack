@@ -13,6 +13,7 @@ from trucktrack.query import (
     scan_partitioned_trip,
     scan_partitioned_truck,
     scan_raw_truck,
+    truck_id_from_trip,
 )
 from trucktrack.visualize._map import plot_trace, plot_trace_layers, serve_map
 
@@ -186,8 +187,9 @@ def inspect_trip(
 
 
 def inspect_pipeline(
-    truck_id: str,
+    truck_id: str | None = None,
     *,
+    trip_id: str | list[str] | None = None,
     raw_dir: str | Path | None = None,
     partitioned_dir: str | Path | None = None,
     matched_dir: str | Path | None = None,
@@ -212,7 +214,12 @@ def inspect_pipeline(
     Parameters
     ----------
     truck_id
-        Full truck UUID.
+        Full truck UUID.  Inferred from *trip_id* when not provided.
+    trip_id
+        Optional trip ID or list of trip IDs.  When provided, the
+        partitioned and matched layers are scoped to these trips
+        only.  The raw layer is filtered to the time range covered
+        by the trips so only the relevant GPS points appear.
     raw_dir
         Root of the raw hive-partitioned dataset.
     partitioned_dir
@@ -237,34 +244,63 @@ def inspect_pipeline(
     -------
     folium.Map
     """
-    raw_df = None
-    if raw_dir is not None:
-        raw_df = _resolve_data(
-            raw_dir, raw_index, truck_id, None, None, date_range, "raw"
-        )
+    # Normalise trip_id into a list (or None).
+    trip_ids: list[str] | None = None
+    if isinstance(trip_id, str):
+        trip_ids = [trip_id]
+    elif trip_id is not None:
+        trip_ids = list(trip_id)
 
-    segments_df = None
-    if partitioned_dir is not None:
-        segments_df = _resolve_data(
+    # Derive truck_id from trip_ids when not provided explicitly.
+    if truck_id is None:
+        if trip_ids is None:
+            raise ValueError("Provide at least one of truck_id or trip_id")
+        truck_id = truck_id_from_trip(trip_ids[0])
+
+    # --- partitioned / matched: scope to trips when given ----------------
+    tid = truck_id if trip_ids is None else None
+    segments_df = (
+        _resolve_data(
             partitioned_dir,
             partitioned_index,
-            truck_id,
+            tid,
             None,
-            None,
+            trip_ids,
             date_range,
             "partitioned",
         )
-
-    matched_df = None
-    if matched_dir is not None:
-        matched_df = _resolve_data(
+        if partitioned_dir is not None
+        else None
+    )
+    matched_df = (
+        _resolve_data(
             matched_dir,
             matched_index,
-            truck_id,
+            tid,
             None,
-            None,
+            trip_ids,
             date_range,
             "matched",
+        )
+        if matched_dir is not None
+        else None
+    )
+
+    # --- raw: auto-derive date range from trip data ----------------------
+    raw_date_range = date_range
+    if raw_date_range is None and trip_ids is not None:
+        # Use the time span of the loaded trip data to filter raw points.
+        ref = segments_df if segments_df is not None else matched_df
+        if ref is not None and len(ref) > 0:
+            raw_date_range = (
+                ref["time"].min().date(),  # type: ignore[union-attr]
+                ref["time"].max().date(),  # type: ignore[union-attr]
+            )
+
+    raw_df = None
+    if raw_dir is not None:
+        raw_df = _resolve_data(
+            raw_dir, raw_index, truck_id, None, None, raw_date_range, "raw"
         )
 
     m = plot_trace_layers(

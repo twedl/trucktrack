@@ -41,7 +41,7 @@ def _chunk_id(truck_id: str) -> str:
     return truck_id[-3:]
 
 
-def _truck_id_from_trip(trip_id: str) -> str:
+def truck_id_from_trip(trip_id: str) -> str:
     """Extract the truck UUID from a composite trip ID.
 
     Trip IDs have the form ``{truck_id}_gap{N}_trip{M}``.
@@ -129,7 +129,7 @@ class ChunkIndex:
 
     def scan_trip(self, trip_id: str) -> pl.LazyFrame:
         """Scan files for a single trip by composite trip ID."""
-        cid = _chunk_id(_truck_id_from_trip(trip_id))
+        cid = _chunk_id(truck_id_from_trip(trip_id))
         files = self._files_for_chunk(cid)
         if not files:
             raise FileNotFoundError(f"No files for chunk_id={cid} in index")
@@ -212,7 +212,7 @@ def scan_partitioned_trip(
     ``abc123..._gap0_trip1``).  The truck UUID is extracted to
     narrow the file glob via chunk_id.
     """
-    cid = _chunk_id(_truck_id_from_trip(trip_id))
+    cid = _chunk_id(truck_id_from_trip(trip_id))
     return _scan_chunk_glob(
         data_dir, f"**/*chunk_id={cid}*.parquet", pl.col("id") == trip_id
     )
@@ -239,7 +239,7 @@ def scan_matched_trip(
     trip_id: str,
 ) -> pl.LazyFrame:
     """Lazily scan map-matched results for a single trip."""
-    cid = _chunk_id(_truck_id_from_trip(trip_id))
+    cid = _chunk_id(truck_id_from_trip(trip_id))
     return _scan_chunk_glob(
         data_dir, f"**/*chunk_id={cid}*.parquet", pl.col("id") == trip_id
     )

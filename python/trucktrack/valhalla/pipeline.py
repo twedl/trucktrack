@@ -48,6 +48,7 @@ def map_match_trip(
     distance limit), returns a single row with null way_id so no
     trips are dropped.
     """
+    trip = trip.sort("time")
     trip_id = trip["id"][0]
     date = cast(datetime, trip["time"].min()).date()
     try:

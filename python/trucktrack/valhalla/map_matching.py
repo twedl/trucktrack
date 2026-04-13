@@ -239,6 +239,7 @@ def map_match_dataframe(
     config: str | Path | None = None,
 ) -> pl.DataFrame:
     """Map-match a DataFrame and add matched_lat / matched_lon columns."""
+    df = df.sort("time")
     points = list(zip(df[lat_col].to_list(), df[lon_col].to_list(), strict=True))
     matched = map_match(
         points,
@@ -269,6 +270,7 @@ def map_match_dataframe_full(
     :func:`map_match_dataframe` and :func:`map_match_ways` separately.
     The shape is the full road-snapped polyline decoded from the response.
     """
+    df = df.sort("time")
     points = list(zip(df[lat_col].to_list(), df[lon_col].to_list(), strict=True))
     matched, ways, shape = map_match_full(
         points,

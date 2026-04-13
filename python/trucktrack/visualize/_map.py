@@ -27,6 +27,14 @@ _SEGMENT_COLORS = [
 ]
 
 
+def _sort_by_time(df: pl.DataFrame | None) -> pl.DataFrame | None:
+    """Sort a DataFrame by (id, time) if a time column is present."""
+    if df is None or "time" not in df.columns:
+        return df
+    sort_cols = ["id", "time"] if "id" in df.columns else ["time"]
+    return df.sort(sort_cols)
+
+
 def _normalize_input(
     data: pl.DataFrame | list[Any],
     param_name: str = "data",
@@ -240,6 +248,10 @@ def plot_trace(
         m = folium.Map(tiles=tile_layer, width=width, height=height)
         return m
 
+    if "time" in df.columns:
+        sort_cols = ["id", "time"] if "id" in df.columns else ["time"]
+        df = df.sort(sort_cols)
+
     if max_points is not None:
         df = _downsample(df, max_points)
 
@@ -431,6 +443,11 @@ def plot_trace_layers(
     folium, cm = _import_folium()
 
     raw_df = _normalize_input(raw, "raw") if raw is not None else None
+
+    # Sort each layer by time so polylines render in chronological order.
+    raw_df = _sort_by_time(raw_df)
+    segments = _sort_by_time(segments)
+    matched = _sort_by_time(matched)
 
     # Compute bounds using Polars-native aggregations (no list materialization).
     lat_min = float("inf")
