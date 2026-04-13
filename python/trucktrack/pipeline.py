@@ -31,6 +31,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import polars as pl
+from tqdm import tqdm
 
 import trucktrack
 
@@ -139,9 +140,6 @@ def _process_and_write(
     n_out = len(df)
     _write_chunk(df, output_dir, group_name)
 
-    n_files = len(chunk_paths)
-    print(f"  {group_name} ({n_files} files): {n_in:,} -> {n_out:,} rows")
-
     return n_in, n_out
 
 
@@ -151,15 +149,13 @@ def _group_chunks(
 ) -> list[tuple[str, list[Path]]]:
     """Group chunk files for batched processing.
 
-    Groups up to *group_size* files together. The group name is derived
-    from the first and last chunk in the group for traceability.
+    Groups up to *group_size* files together with index-based names
+    (``batch_0000``, ``batch_0001``, ...) to ensure unique output filenames.
     """
     groups: list[tuple[str, list[Path]]] = []
     for i in range(0, len(chunks), group_size):
         batch = chunks[i : i + group_size]
-        first = batch[0].stem
-        last = batch[-1].stem
-        name = first if len(batch) == 1 else f"{first}__to__{last}"
+        name = f"batch_{i // group_size:04d}"
         groups.append((name, batch))
     return groups
 
@@ -254,7 +250,10 @@ def run_pipeline(
     total_rows_in = 0
     total_rows_out = 0
 
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+    with (
+        tqdm(total=len(groups), unit="batch", desc="Processing") as progress,
+        ThreadPoolExecutor(max_workers=max_workers) as pool,
+    ):
         futures = {
             pool.submit(
                 _process_and_write,
@@ -274,6 +273,8 @@ def run_pipeline(
             n_in, n_out = future.result()
             total_rows_in += n_in
             total_rows_out += n_out
+            progress.update(1)
+            progress.set_postfix_str(f"{n_in:,} -> {n_out:,} rows")
 
     if compact:
         print("\nCompacting partitions...")

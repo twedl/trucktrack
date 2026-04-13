@@ -27,6 +27,64 @@ _SEGMENT_COLORS = [
 ]
 
 
+_TOOLTIP_FIELDS = ["id", "time", "speed", "heading"]
+
+
+def _tooltip_rows(df: pl.DataFrame) -> list[dict[str, Any]]:
+    """Select only tooltip-relevant columns and convert to dicts."""
+    cols = [c for c in _TOOLTIP_FIELDS if c in df.columns]
+    return df.select(cols).to_dicts() if cols else [{} for _ in range(df.height)]
+
+
+def _raw_tooltip(row: dict[str, Any]) -> str:
+    """Build a tooltip string for a raw data point."""
+    parts = []
+    if row.get("id") is not None:
+        parts.append(f"id: {row['id']}")
+    if row.get("time") is not None:
+        parts.append(f"time: {row['time']}")
+    if row.get("speed") is not None:
+        parts.append(f"speed: {row['speed']:.1f}")
+    if row.get("heading") is not None:
+        parts.append(f"heading: {row['heading']:.1f}")
+    return "<br>".join(parts)
+
+
+def _add_raw_marker(
+    folium: Any,
+    fg: Any,
+    lat: float,
+    lon: float,
+    color: str,
+    row: dict[str, Any],
+) -> None:
+    """Add a single raw-data circle marker with tooltip."""
+    folium.CircleMarker(
+        location=(lat, lon),
+        radius=8,
+        color=color,
+        fill=True,
+        fill_color=color,
+        fill_opacity=0.7,
+        weight=1,
+        tooltip=_raw_tooltip(row),
+    ).add_to(fg)
+
+
+def _time_range_html(group: pl.DataFrame, *, include_duration: bool = False) -> str:
+    """Format start/end timestamps (and optionally duration) as HTML."""
+    if "time" not in group.columns or group["time"].dtype == pl.Null:
+        return ""
+    t_min = group["time"].min()
+    t_max = group["time"].max()
+    if t_min is None or t_max is None:
+        return ""
+    html = f"<br>start: {t_min}<br>end: {t_max}"
+    if include_duration:
+        html += f"<br>duration: {t_max - t_min}"
+    return html
+
+
 def _sort_by_time(df: pl.DataFrame | None) -> pl.DataFrame | None:
     """Sort a DataFrame by (id, time) if a time column is present."""
     if df is None or "time" not in df.columns:
@@ -156,6 +214,18 @@ def _add_colored_layer(
     colormap.add_to(m)
 
 
+def _full_segment_id(group: pl.DataFrame) -> str:
+    """Build a composite ID from available columns."""
+    parts: list[str] = []
+    if "id" in group.columns:
+        parts.append(str(group["id"][0]))
+    if "gap_segment_id" in group.columns:
+        parts.append(f"gap{group['gap_segment_id'][0]}")
+    if "segment_id" in group.columns:
+        parts.append(f"seg{group['segment_id'][0]}")
+    return "_".join(parts) if parts else "unknown"
+
+
 def _add_stop_markers(
     folium: Any,
     fg: Any,
@@ -171,13 +241,9 @@ def _add_stop_markers(
         lat = group["lat"].mean()
         lon = group["lon"].mean()
         n_pts = group.height
-        popup_text = f"Stop: {n_pts} points"
-        if "time" in group.columns and group["time"].dtype != pl.Null:
-            t_min = group["time"].min()
-            t_max = group["time"].max()
-            if t_min is not None and t_max is not None:
-                duration = t_max - t_min
-                popup_text += f"<br>Duration: {duration}"
+        full_id = _full_segment_id(group)
+        popup_text = f"Stop: {full_id}<br>{n_pts} points"
+        popup_text += _time_range_html(group, include_duration=True)
         folium.CircleMarker(
             location=(lat, lon),
             radius=stop_radius,
@@ -248,9 +314,9 @@ def plot_trace(
         m = folium.Map(tiles=tile_layer, width=width, height=height)
         return m
 
-    if "time" in df.columns:
-        sort_cols = ["id", "time"] if "id" in df.columns else ["time"]
-        df = df.sort(sort_cols)
+    sorted_df = _sort_by_time(df)
+    if sorted_df is not None:
+        df = sorted_df
 
     if max_points is not None:
         df = _downsample(df, max_points)
@@ -337,19 +403,19 @@ def plot_trace(
 
     # --- Raw mode ---
     fg = folium.FeatureGroup(name="Trace")
+    lats = df["lat"].to_list()
+    lons = df["lon"].to_list()
+    rows = _tooltip_rows(df)
     if color_by is not None and color_by in df.columns:
         vals = df[color_by].cast(pl.Float64).to_list()
-        _add_colored_layer(
-            folium, cm, fg, m, df["lat"].to_list(), df["lon"].to_list(), vals, color_by
-        )
+        colormap = _make_colormap(cm, vals, color_by)
+        for row, lat, lon, val in zip(rows, lats, lons, vals, strict=True):
+            c = colormap(val)
+            _add_raw_marker(folium, fg, lat, lon, c, row)
+        colormap.add_to(m)
     else:
-        _add_polyline(
-            folium,
-            fg,
-            df["lat"].to_list(),
-            df["lon"].to_list(),
-            color=matched_color,
-        )
+        for row, lat, lon in zip(rows, lats, lons, strict=True):
+            _add_raw_marker(folium, fg, lat, lon, matched_color, row)
     fg.add_to(m)
     return m
 
@@ -373,13 +439,16 @@ def _render_segments(
 
     for i, (_, seg) in enumerate(df.group_by("segment_id", maintain_order=True)):
         color = _SEGMENT_COLORS[i % len(_SEGMENT_COLORS)]
+        full_id = _full_segment_id(seg)
+        popup_text = f"Segment: {full_id}"
+        popup_text += _time_range_html(seg)
         _add_polyline(
             folium,
             fg,
             seg["lat"].to_list(),
             seg["lon"].to_list(),
             color=color,
-            popup=f"Segment {seg['segment_id'][0]}",
+            popup=popup_text,
         )
 
 
@@ -482,16 +551,11 @@ def plot_trace_layers(
         if max_points is not None:
             df = _downsample(df, max_points)
         fg = folium.FeatureGroup(name="Raw trace")
-        for lat, lon in zip(df["lat"].to_list(), df["lon"].to_list(), strict=True):
-            folium.CircleMarker(
-                location=(lat, lon),
-                radius=5,
-                color=raw_color,
-                fill=True,
-                fill_color=raw_color,
-                fill_opacity=0.7,
-                weight=1,
-            ).add_to(fg)
+        rows = _tooltip_rows(df)
+        for row, lat, lon in zip(
+            rows, df["lat"].to_list(), df["lon"].to_list(), strict=True
+        ):
+            _add_raw_marker(folium, fg, lat, lon, raw_color, row)
         fg.add_to(m)
 
     # Layer: segments.
