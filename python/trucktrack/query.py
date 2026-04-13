@@ -92,13 +92,16 @@ class ChunkIndex:
         """
         data_dir = Path(data_dir)
         index: dict[str, list[str]] = {}
+        chunk_id_expr = (
+            pl.col("id")
+            .str.split("_gap")
+            .list.first()
+            .str.slice(-_CHUNK_ID_LEN)
+            .unique()
+        )
         for p in sorted(data_dir.rglob("*.parquet")):
             rel = str(p.relative_to(data_dir))
-            ids = pl.read_parquet(p, columns=["id"])
-            cids = {
-                _chunk_id(truck_id_from_trip(tid))
-                for tid in ids["id"].unique().to_list()
-            }
+            cids = pl.read_parquet(p, columns=["id"]).select(chunk_id_expr)["id"]
             for cid in cids:
                 index.setdefault(cid, []).append(rel)
         return cls(data_dir, index)
