@@ -670,7 +670,7 @@ wheels = [
 
 [[package]]
 name = "trucktrack"
-version = "0.1.9"
+version = "0.1.10"
 source = { editable = "." }
 dependencies = [
     { name = "numpy" },
@@ -710,8 +710,8 @@ requires-dist = [
     { name = "pyarrow", specifier = ">=15.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-benchmark", marker = "extra == 'dev'", specifier = ">=4.0" },
-    { name = "pyvalhalla", marker = "extra == 'dev'", specifier = ">=3.4" },
-    { name = "pyvalhalla", marker = "extra == 'valhalla'", specifier = ">=3.4" },
+    { name = "pyvalhalla", marker = "extra == 'dev'", specifier = ">=3.6" },
+    { name = "pyvalhalla", marker = "extra == 'valhalla'", specifier = ">=3.6" },
     { name = "requests", specifier = ">=2.31" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
     { name = "tqdm", specifier = ">=4.60" },

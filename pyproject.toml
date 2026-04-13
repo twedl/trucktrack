@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "trucktrack"
-version = "0.1.9"
+version = "0.1.10"
 description = "High-performance trajectory splitting and analysis, powered by Rust"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -38,14 +38,14 @@ Issues = "https://github.com/twedl/trucktrack/issues"
 trucktrack = "trucktrack.cli:main"
 
 [project.optional-dependencies]
-valhalla = ["pyvalhalla>=3.4"]
+valhalla = ["pyvalhalla>=3.6"]
 viz = ["folium>=0.15", "branca>=0.7"]
 dev = [
     "pytest>=8.0",
     "pytest-benchmark>=4.0",
     "mypy>=1.9",
     "ruff>=0.4",
-    "pyvalhalla>=3.4",
+    "pyvalhalla>=3.6",
     "folium>=0.15",
     "branca>=0.7",
 ]
