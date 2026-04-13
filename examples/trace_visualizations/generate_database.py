@@ -27,6 +27,7 @@ from trucktrack import generate_trace
 from trucktrack.generate.gps_errors import GPS_ERRORS
 from trucktrack.generate.models import ErrorConfig, TripConfig, default_error_profile
 from trucktrack.generate.operational_errors import OPERATIONAL_ERRORS
+from trucktrack.query import _CHUNK_ID_LEN, _chunk_id
 
 TILE_EXTRACT = os.environ.get(
     "VALHALLA_TILE_EXTRACT", "valhalla_tiles/valhalla_tiles.tar"
@@ -142,7 +143,7 @@ def main() -> None:
         }
 
         configs = _make_trip_configs(truck_id, K_TRIPS, start_time, rng, overrides)
-        chunk_id = truck_id[-2:]
+        chunk_id = _chunk_id(truck_id)
 
         truck_points = 0
         for trip_num, config in enumerate(configs, 1):
@@ -189,7 +190,7 @@ def main() -> None:
     # Derive partition columns.
     full = full.with_columns(
         pl.col("time").dt.year().alias("year"),
-        pl.col("id").str.slice(-2).alias("chunk_id"),
+        pl.col("id").str.slice(-_CHUNK_ID_LEN).alias("chunk_id"),
     )
 
     # Write hive-partitioned parquet and collect stats.

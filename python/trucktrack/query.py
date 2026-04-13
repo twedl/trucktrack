@@ -32,13 +32,14 @@ from pathlib import Path
 
 import polars as pl
 
-_CHUNK_ID_RE = re.compile(r"chunk_id=([0-9a-f]{2})")
+_CHUNK_ID_LEN = 2
+_CHUNK_ID_RE = re.compile(rf"chunk_id=([0-9a-f]{{{_CHUNK_ID_LEN}}})")
 _INDEX_FILENAME = ".chunk_index.json"
 
 
 def _chunk_id(truck_id: str) -> str:
     """Derive the chunk_id (last 2 hex chars) from a truck UUID."""
-    return truck_id[-2:]
+    return truck_id[-_CHUNK_ID_LEN:]
 
 
 def truck_id_from_trip(trip_id: str) -> str:
