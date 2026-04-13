@@ -5,19 +5,18 @@ Each stage of the pipeline uses a different layout:
 - **Raw traces**: ``year=YYYY/chunk_id=XX/part-0.parquet``
   The ``chunk_id`` hive column is the last 2 hex chars of the truck UUID.
 
-- **Partitioned trips**: ``tier=.../partition_id=.../chunk.parquet``
-  The chunk_id is embedded in the *filename* (e.g.
-  ``year=2025_chunk_id=f4_part-0.parquet``), not as a hive column.
+- **Partitioned trips**: ``tier=.../partition_id=.../data.parquet``
   The ``id`` column contains composite trip IDs like
   ``{truck_id}_gap{N}_trip{M}``.
 
 - **Map-matched results**: same hive layout as partitioned trips, with
   columns ``id``, ``date``, ``way_id``.
 
-The standalone ``scan_*`` functions use filename globs to narrow reads.
-For repeated queries, :class:`ChunkIndex` builds a persistent index
-that maps each chunk_id to its file paths — avoiding the recursive
-glob on every call.
+The standalone ``scan_*`` functions scan all files with predicate
+pushdown on the ``id`` column.  For repeated queries,
+:class:`ChunkIndex` builds a persistent index that maps each chunk_id
+to its file paths — reading only the ``id`` column once, then
+saving the mapping for instant reloads.
 
 All functions use :func:`polars.scan_parquet` for lazy evaluation so
 that predicate pushdown avoids reading the full dataset.
@@ -27,13 +26,11 @@ from __future__ import annotations
 
 import functools
 import json
-import re
 from pathlib import Path
 
 import polars as pl
 
 _CHUNK_ID_LEN = 2
-_CHUNK_ID_RE = re.compile(rf"chunk_id=([0-9a-f]{{{_CHUNK_ID_LEN}}})")
 _INDEX_FILENAME = ".chunk_index.json"
 
 
@@ -89,14 +86,20 @@ class ChunkIndex:
 
     @classmethod
     def build(cls, data_dir: str | Path) -> ChunkIndex:
-        """Scan *data_dir* and build the chunk_id → file path mapping."""
+        """Scan *data_dir* and build the chunk_id → file path mapping.
+
+        Reads only the ``id`` column from each file to extract chunk_ids.
+        """
         data_dir = Path(data_dir)
         index: dict[str, list[str]] = {}
         for p in sorted(data_dir.rglob("*.parquet")):
-            m = _CHUNK_ID_RE.search(p.name)
-            if m:
-                cid = m.group(1)
-                rel = str(p.relative_to(data_dir))
+            rel = str(p.relative_to(data_dir))
+            ids = pl.read_parquet(p, columns=["id"])
+            cids = {
+                _chunk_id(truck_id_from_trip(tid))
+                for tid in ids["id"].unique().to_list()
+            }
+            for cid in cids:
                 index.setdefault(cid, []).append(rel)
         return cls(data_dir, index)
 
@@ -193,13 +196,11 @@ def scan_partitioned_truck(
 ) -> pl.LazyFrame:
     """Lazily scan partitioned trips for all trips of a truck.
 
-    Narrows the file glob to chunks containing this truck's
-    ``chunk_id``, then filters composite trip IDs that start with
-    *truck_id*.
+    Scans all parquet files with predicate pushdown on the ``id``
+    column.  For repeated queries, prefer :class:`ChunkIndex`.
     """
-    cid = _chunk_id(truck_id)
     return _scan_chunk_glob(
-        data_dir, f"**/*chunk_id={cid}*.parquet", pl.col("id").str.starts_with(truck_id)
+        data_dir, "**/*.parquet", pl.col("id").str.starts_with(truck_id)
     )
 
 
@@ -210,13 +211,11 @@ def scan_partitioned_trip(
     """Lazily scan partitioned trips for a single trip.
 
     *trip_id* is the full composite ID (e.g.
-    ``abc123..._gap0_trip1``).  The truck UUID is extracted to
-    narrow the file glob via chunk_id.
+    ``abc123..._gap0_trip1``).  Scans all parquet files with
+    predicate pushdown.  For repeated queries, prefer
+    :class:`ChunkIndex`.
     """
-    cid = _chunk_id(truck_id_from_trip(trip_id))
-    return _scan_chunk_glob(
-        data_dir, f"**/*chunk_id={cid}*.parquet", pl.col("id") == trip_id
-    )
+    return _scan_chunk_glob(data_dir, "**/*.parquet", pl.col("id") == trip_id)
 
 
 # ---------------------------------------------------------------------------
@@ -228,10 +227,12 @@ def scan_matched_truck(
     data_dir: str | Path,
     truck_id: str,
 ) -> pl.LazyFrame:
-    """Lazily scan map-matched results for all trips of a truck."""
-    cid = _chunk_id(truck_id)
+    """Lazily scan map-matched results for all trips of a truck.
+
+    For repeated queries, prefer :class:`ChunkIndex`.
+    """
     return _scan_chunk_glob(
-        data_dir, f"**/*chunk_id={cid}*.parquet", pl.col("id").str.starts_with(truck_id)
+        data_dir, "**/*.parquet", pl.col("id").str.starts_with(truck_id)
     )
 
 
@@ -239,8 +240,8 @@ def scan_matched_trip(
     data_dir: str | Path,
     trip_id: str,
 ) -> pl.LazyFrame:
-    """Lazily scan map-matched results for a single trip."""
-    cid = _chunk_id(truck_id_from_trip(trip_id))
-    return _scan_chunk_glob(
-        data_dir, f"**/*chunk_id={cid}*.parquet", pl.col("id") == trip_id
-    )
+    """Lazily scan map-matched results for a single trip.
+
+    For repeated queries, prefer :class:`ChunkIndex`.
+    """
+    return _scan_chunk_glob(data_dir, "**/*.parquet", pl.col("id") == trip_id)
