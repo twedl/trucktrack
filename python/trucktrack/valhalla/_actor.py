@@ -70,8 +70,9 @@ def get_actor(
             "Install it with: pip install trucktrack[valhalla]"
         ) from exc
 
-    actors: dict[str, Any] = getattr(_local, "actors", None) or {}
-    _local.actors = actors
+    if not hasattr(_local, "actors"):
+        _local.actors = {}
+    actors: dict[str, Any] = _local.actors
 
     if config is not None:
         key = str(Path(config).resolve())

@@ -34,6 +34,14 @@ from trucktrack.valhalla.map_matching import map_match_ways
 _WAY_SCHEMA = {"id": pl.Utf8, "date": pl.Date, "way_id": pl.Int64}
 
 
+def _null_way_result(trip_id: str, date: object) -> pl.DataFrame:
+    """Single row with null way_id — used for skipped or failed trips."""
+    return pl.DataFrame(
+        {"id": [trip_id], "date": [date], "way_id": [None]},
+        schema=_WAY_SCHEMA,
+    )
+
+
 def map_match_trip(
     trip: pl.DataFrame,
     *,
@@ -52,19 +60,13 @@ def map_match_trip(
     trip_id = trip["id"][0]
     date = cast(datetime, trip["time"].min()).date()
     if len(trip) < 2:
-        return pl.DataFrame(
-            {"id": [trip_id], "date": [date], "way_id": [None]},
-            schema=_WAY_SCHEMA,
-        )
+        return _null_way_result(trip_id, date)
     try:
         points = list(zip(trip["lat"].to_list(), trip["lon"].to_list(), strict=True))
         ways = map_match_ways(points, tile_extract=tile_extract, config=config)
     except Exception as e:
         print(f"  [WARN] {trip_id[:24]}: {e}")
-        return pl.DataFrame(
-            {"id": [trip_id], "date": [date], "way_id": [None]},
-            schema=_WAY_SCHEMA,
-        )
+        return _null_way_result(trip_id, date)
     return pl.DataFrame(
         {"id": [trip_id] * len(ways), "date": [date] * len(ways), "way_id": ways},
         schema=_WAY_SCHEMA,
@@ -105,6 +107,10 @@ def _process_partition(
         df = pl.read_parquet(chunk_path)
         if "is_stop" in df.columns:
             df = df.filter(~pl.col("is_stop"))
+        if df.is_empty():
+            if progress is not None:
+                progress.update(1)
+            continue
         matched_trips = []
         for _, trip in df.group_by("id"):
             matched_trips.append(
