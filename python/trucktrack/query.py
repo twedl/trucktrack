@@ -2,12 +2,12 @@
 
 Each stage of the pipeline uses a different layout:
 
-- **Raw traces**: ``year=YYYY/chunk_id=XXX/part-0.parquet``
-  The ``chunk_id`` hive column is the last 3 hex chars of the truck UUID.
+- **Raw traces**: ``year=YYYY/chunk_id=XX/part-0.parquet``
+  The ``chunk_id`` hive column is the last 2 hex chars of the truck UUID.
 
 - **Partitioned trips**: ``tier=.../partition_id=.../chunk.parquet``
   The chunk_id is embedded in the *filename* (e.g.
-  ``year=2025_chunk_id=0f4_part-0.parquet``), not as a hive column.
+  ``year=2025_chunk_id=f4_part-0.parquet``), not as a hive column.
   The ``id`` column contains composite trip IDs like
   ``{truck_id}_gap{N}_trip{M}``.
 
@@ -32,13 +32,13 @@ from pathlib import Path
 
 import polars as pl
 
-_CHUNK_ID_RE = re.compile(r"chunk_id=([0-9a-f]{3})")
+_CHUNK_ID_RE = re.compile(r"chunk_id=([0-9a-f]{2})")
 _INDEX_FILENAME = ".chunk_index.json"
 
 
 def _chunk_id(truck_id: str) -> str:
-    """Derive the chunk_id (last 3 hex chars) from a truck UUID."""
-    return truck_id[-3:]
+    """Derive the chunk_id (last 2 hex chars) from a truck UUID."""
+    return truck_id[-2:]
 
 
 def truck_id_from_trip(trip_id: str) -> str:

@@ -82,7 +82,7 @@ run_map_matching(
 ## Querying
 
 Pull individual trucks or trips without scanning the full dataset.
-Each function filters by `chunk_id` (last 3 hex chars of the truck UUID)
+Each function filters by `chunk_id` (last 2 hex chars of the truck UUID)
 to read only the relevant files:
 
 ```python

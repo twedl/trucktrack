@@ -218,8 +218,8 @@ def run_pipeline(
     group_size
         Number of input chunks to read and process together.
         Higher values produce fewer output files but use more memory.
-        With 4096 chunks of ~17 MB each, ``group_size=256`` uses
-        ~4 GB per worker.
+        With 256 chunks of ~272 MB each, ``group_size=4`` uses
+        ~1 GB per worker.
     compact
         If ``True``, run :func:`compact_partitions` after processing
         to merge any remaining multi-file partitions into single files.

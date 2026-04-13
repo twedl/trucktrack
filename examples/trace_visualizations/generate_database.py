@@ -2,10 +2,10 @@
 
 Creates a hive-partitioned parquet dataset at::
 
-    trucks/year=YYYY/chunk_id=XXX/part-0.parquet
+    trucks/year=YYYY/chunk_id=XX/part-0.parquet
 
 where *year* comes from the trip timestamp and *chunk_id* is the last
-three hex characters of the truck UUID.  Every error type appears at
+two hex characters of the truck UUID.  Every error type appears at
 least once; remaining trips use the default error profile.
 
 Usage::
@@ -142,7 +142,7 @@ def main() -> None:
         }
 
         configs = _make_trip_configs(truck_id, K_TRIPS, start_time, rng, overrides)
-        chunk_id = truck_id[-3:]
+        chunk_id = truck_id[-2:]
 
         truck_points = 0
         for trip_num, config in enumerate(configs, 1):
@@ -189,7 +189,7 @@ def main() -> None:
     # Derive partition columns.
     full = full.with_columns(
         pl.col("time").dt.year().alias("year"),
-        pl.col("id").str.slice(-3).alias("chunk_id"),
+        pl.col("id").str.slice(-2).alias("chunk_id"),
     )
 
     # Write hive-partitioned parquet and collect stats.
