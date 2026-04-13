@@ -1,7 +1,8 @@
-"""Singleton pyvalhalla Actor wrapper."""
+"""Thread-local pyvalhalla Actor wrapper."""
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +13,7 @@ DEFAULT_TRUCK_COSTING: dict[str, float] = {
     "weight": 36.287,
 }
 
-_actors: dict[str, Any] = {}
+_local = threading.local()
 
 CONFIG_FILENAME = "valhalla.json"
 
@@ -69,20 +70,23 @@ def get_actor(
             "Install it with: pip install trucktrack[valhalla]"
         ) from exc
 
+    actors: dict[str, Any] = getattr(_local, "actors", None) or {}
+    _local.actors = actors
+
     if config is not None:
         key = str(Path(config).resolve())
-        if key not in _actors:
-            _actors[key] = valhalla.Actor(Path(config))
+        if key not in actors:
+            actors[key] = valhalla.Actor(Path(config))
     elif tile_extract is not None:
         key = str(Path(tile_extract).resolve())
-        if key not in _actors:
+        if key not in actors:
             found = _find_config(tile_extract)
             if found is not None:
-                _actors[key] = valhalla.Actor(found)
+                actors[key] = valhalla.Actor(found)
             else:
-                _actors[key] = valhalla.Actor(
+                actors[key] = valhalla.Actor(
                     valhalla.get_config(tile_extract=tile_extract)
                 )
     else:
         raise ValueError("At least one of tile_extract or config must be provided.")
-    return _actors[key]
+    return actors[key]

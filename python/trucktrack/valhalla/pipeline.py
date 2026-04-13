@@ -51,6 +51,11 @@ def map_match_trip(
     trip = trip.sort("time")
     trip_id = trip["id"][0]
     date = cast(datetime, trip["time"].min()).date()
+    if len(trip) < 2:
+        return pl.DataFrame(
+            {"id": [trip_id], "date": [date], "way_id": [None]},
+            schema=_WAY_SCHEMA,
+        )
     try:
         points = list(zip(trip["lat"].to_list(), trip["lon"].to_list(), strict=True))
         ways = map_match_ways(points, tile_extract=tile_extract, config=config)
@@ -98,6 +103,8 @@ def _process_partition(
             continue
 
         df = pl.read_parquet(chunk_path)
+        if "is_stop" in df.columns:
+            df = df.filter(~pl.col("is_stop"))
         matched_trips = []
         for _, trip in df.group_by("id"):
             matched_trips.append(
