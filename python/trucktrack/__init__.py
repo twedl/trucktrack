@@ -31,7 +31,7 @@ from trucktrack.partition import (
     write_partitions,
     write_trips_partitioned,
 )
-from trucktrack.pipeline import run_pipeline
+from trucktrack.pipeline import compact_partitions, run_pipeline
 from trucktrack.query import (
     ChunkIndex,
     scan_matched_trip,
@@ -78,6 +78,7 @@ __all__ = [
     "write_partitions",
     "write_trips_partitioned",
     # pipeline
+    "compact_partitions",
     "run_pipeline",
     # query
     "ChunkIndex",
