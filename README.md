@@ -48,6 +48,20 @@ from pathlib import Path
 from trucktrack import run_pipeline
 
 run_pipeline(Path("data/raw"), Path("data/partitioned"))
+
+# Group input chunks for fewer output files (uses more memory per worker)
+run_pipeline(Path("data/raw"), Path("data/partitioned"), group_size=256)
+
+# Compact multi-file partitions into single files after processing
+run_pipeline(Path("data/raw"), Path("data/partitioned"), compact=True)
+```
+
+To compact an existing dataset without re-running the pipeline:
+
+```python
+from trucktrack import compact_partitions
+
+compact_partitions("data/partitioned")
 ```
 
 ### Map-match
@@ -134,6 +148,30 @@ m = inspect_trip("data/partitioned", trip_id, serve=False)
 
 # Forward kwargs to plot_trace
 inspect_trip("data/partitioned", trip_id, color_by="speed")
+```
+
+### Multi-stage overlay
+
+Compare raw GPS, trip segments, and map-matched results on one map:
+
+```python
+from trucktrack.visualize import inspect_pipeline
+
+# All stages for one truck
+inspect_pipeline(
+    truck_id,
+    raw_dir="data/raw",
+    partitioned_dir="data/partitioned",
+    matched_dir="data/matched",
+)
+
+# Scope to specific trips (raw layer auto-filtered to matching dates)
+inspect_pipeline(
+    trip_id=[trip_id_1, trip_id_2],
+    raw_dir="data/raw",
+    partitioned_dir="data/partitioned",
+    partitioned_index=idx,
+)
 ```
 
 For more control, use the lower-level `plot_trace`, `plot_trace_layers`,
