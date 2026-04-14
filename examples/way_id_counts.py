@@ -32,12 +32,26 @@ def aggregate_way_counts(matched_dir: Path) -> pl.LazyFrame:
     )
 
 
-def join_osm(counts: pl.LazyFrame, osm_parquet: Path) -> pl.LazyFrame:
+def join_osm(
+    counts: pl.LazyFrame,
+    osm_parquet: Path,
+    tag_columns: list[str] | None = None,
+) -> pl.LazyFrame:
     # quackosm writes feature_id as "way/<id>"; strip and cast to match
-    # Valhalla's int64 way_id.
-    osm = pl.scan_parquet(osm_parquet).with_columns(
-        pl.col("feature_id").str.strip_prefix("way/").cast(pl.Int64).alias("way_id")
-    ).drop("feature_id")
+    # Valhalla's int64 way_id. Select only the columns we need so polars
+    # never decodes MAP-typed columns (e.g. an unfiltered "tags") that
+    # currently trip a polars-arrow assertion.
+    osm = (
+        pl.scan_parquet(osm_parquet)
+        .select(["feature_id", "geometry", *(tag_columns or [])])
+        .with_columns(
+            pl.col("feature_id")
+            .str.strip_prefix("way/")
+            .cast(pl.Int64)
+            .alias("way_id")
+        )
+        .drop("feature_id")
+    )
     return counts.join(osm, on="way_id", how="left").sort(
         "trip_count", descending=True
     )
