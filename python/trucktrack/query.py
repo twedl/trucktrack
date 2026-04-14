@@ -26,9 +26,12 @@ from __future__ import annotations
 
 import functools
 import json
+import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import polars as pl
+from tqdm import tqdm
 
 _CHUNK_ID_LEN = 2
 _INDEX_FILENAME = ".chunk_index.json"
@@ -85,13 +88,27 @@ class ChunkIndex:
         self._index = index
 
     @classmethod
-    def build(cls, data_dir: str | Path) -> ChunkIndex:
+    def build(
+        cls,
+        data_dir: str | Path,
+        *,
+        max_workers: int | None = None,
+        show_progress: bool = True,
+    ) -> ChunkIndex:
         """Scan *data_dir* and build the chunk_id → file path mapping.
 
         Reads only the ``id`` column from each file to extract chunk_ids.
+        Files are read in parallel with a thread pool; the Rust Parquet
+        reader releases the GIL so threads achieve real parallelism.
+
+        Parameters
+        ----------
+        max_workers
+            Thread pool size. Defaults to ``os.cpu_count()``.
+        show_progress
+            Display a tqdm progress bar. Defaults to True.
         """
         data_dir = Path(data_dir)
-        index: dict[str, list[str]] = {}
         chunk_id_expr = (
             pl.col("id")
             .str.split("_gap")
@@ -99,11 +116,28 @@ class ChunkIndex:
             .str.slice(-_CHUNK_ID_LEN)
             .unique()
         )
-        for p in sorted(data_dir.rglob("*.parquet")):
+
+        def _extract(p: Path) -> tuple[str, list[str]]:
             rel = str(p.relative_to(data_dir))
-            cids = pl.read_parquet(p, columns=["id"]).select(chunk_id_expr)["id"]
-            for cid in cids:
-                index.setdefault(cid, []).append(rel)
+            cids = (
+                pl.read_parquet(p, columns=["id"]).select(chunk_id_expr)["id"].to_list()
+            )
+            return rel, cids
+
+        files = sorted(data_dir.rglob("*.parquet"))
+        if max_workers is None:
+            max_workers = os.cpu_count() or 1
+        max_workers = min(max_workers, len(files) or 1)
+
+        index: dict[str, list[str]] = {}
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            iterator = pool.map(_extract, files)
+            if show_progress:
+                iterator = tqdm(iterator, total=len(files), unit="file", desc="Indexing")
+            for rel, cids in iterator:
+                for cid in cids:
+                    index.setdefault(cid, []).append(rel)
+
         return cls(data_dir, index)
 
     def save(self, path: str | Path | None = None) -> Path:
