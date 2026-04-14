@@ -20,8 +20,11 @@ Usage::
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager, nullcontext
 from datetime import datetime
 from pathlib import Path
 from typing import cast
@@ -32,6 +35,26 @@ from tqdm import tqdm
 from trucktrack.valhalla.map_matching import map_match_ways
 
 _WAY_SCHEMA = {"id": pl.Utf8, "date": pl.Date, "way_id": pl.Int64}
+
+
+@contextmanager
+def _silence_stdout() -> Iterator[None]:
+    """Redirect fd 1 to /dev/null so Valhalla's C++ log output is hidden.
+
+    Python prints in this module go to stderr, so they survive this
+    redirect. tqdm also writes to stderr by default.
+    """
+    sys.stdout.flush()
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    saved = os.dup(1)
+    try:
+        os.dup2(devnull, 1)
+        yield
+    finally:
+        sys.stdout.flush()
+        os.dup2(saved, 1)
+        os.close(devnull)
+        os.close(saved)
 
 
 def _null_way_result(trip_id: str, date: object) -> pl.DataFrame:
@@ -65,7 +88,7 @@ def map_match_trip(
         points = list(zip(trip["lat"].to_list(), trip["lon"].to_list(), strict=True))
         ways = map_match_ways(points, tile_extract=tile_extract, config=config)
     except Exception as e:
-        print(f"  [WARN] {trip_id[:24]}: {e}")
+        print(f"  [WARN] {trip_id}: {e}", file=sys.stderr)
         return _null_way_result(trip_id, date)
     return pl.DataFrame(
         {"id": [trip_id] * len(ways), "date": [date] * len(ways), "way_id": ways},
@@ -170,6 +193,7 @@ def run_map_matching(
     tile_extract: str | None = None,
     config: str | Path | None = None,
     max_workers: int | None = None,
+    quiet: bool = False,
 ) -> None:
     """Map-match all trips across partitions in parallel.
 
@@ -185,6 +209,9 @@ def run_map_matching(
     whose output file already exists.
 
     *max_workers* defaults to ``os.cpu_count()``.
+
+    *quiet* suppresses Valhalla's C++ log output. Progress (tqdm) and
+    trip-level warnings still print to stderr.
     """
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
@@ -197,7 +224,7 @@ def run_map_matching(
     partition_dirs = sorted(chunks_per_partition, key=_partition_sort_key)
 
     if not partition_dirs:
-        print(f"No partitions found under {input_dir}")
+        print(f"No partitions found under {input_dir}", file=sys.stderr)
         return
 
     if max_workers is None:
@@ -222,7 +249,8 @@ def run_map_matching(
     print(
         f"Found {n} partition(s) ({total_chunks} chunks), "
         f"processing with {max_workers} worker(s) "
-        f"({size_str} partitions per worker)"
+        f"({size_str} partitions per worker)",
+        file=sys.stderr,
     )
 
     total_skipped = 0
@@ -230,6 +258,7 @@ def run_map_matching(
     total_rows = 0
 
     with (
+        _silence_stdout() if quiet else nullcontext(),
         tqdm(total=total_chunks, unit="chunk", desc="Map matching") as progress,
         ThreadPoolExecutor(max_workers=max_workers) as pool,
     ):
@@ -252,9 +281,9 @@ def run_map_matching(
                 total_trips += trips
                 total_rows += rows
 
-    print("\n--- Map matching complete ---")
-    print(f"  Partitions:  {n:>10,}")
-    print(f"  Chunks:      {total_chunks:>10,}")
-    print(f"  Skipped:     {total_skipped:>10,} chunk(s)")
-    print(f"  Matched:     {total_trips:>10,} trip(s)")
-    print(f"  Rows out:    {total_rows:>10,}")
+    print("\n--- Map matching complete ---", file=sys.stderr)
+    print(f"  Partitions:  {n:>10,}", file=sys.stderr)
+    print(f"  Chunks:      {total_chunks:>10,}", file=sys.stderr)
+    print(f"  Skipped:     {total_skipped:>10,} chunk(s)", file=sys.stderr)
+    print(f"  Matched:     {total_trips:>10,} trip(s)", file=sys.stderr)
+    print(f"  Rows out:    {total_rows:>10,}", file=sys.stderr)

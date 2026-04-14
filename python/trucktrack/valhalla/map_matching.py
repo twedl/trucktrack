@@ -10,7 +10,7 @@ from typing import Any
 import polars as pl
 
 from trucktrack.generate.interpolator import haversine_m
-from trucktrack.valhalla._actor import DEFAULT_TRUCK_COSTING, get_actor
+from trucktrack.valhalla._actor import get_actor
 from trucktrack.valhalla._parsing import concat_leg_shapes, decode_polyline6
 
 # Base breakage distance for typical 60-second GPS intervals.  The adaptive
@@ -64,11 +64,10 @@ def _build_trace_body(
         "shape": [{"lat": lat, "lon": lon} for lat, lon in points],
         "costing": costing,
         "shape_match": "map_snap",
-        "costing_options": {
-            costing: costing_options or DEFAULT_TRUCK_COSTING,
-        },
         "trace_options": _build_trace_options(points, trace_options),
     }
+    if costing_options is not None:
+        body["costing_options"] = {costing: costing_options}
     if filters is not None:
         body["filters"] = filters
     return body
