@@ -34,7 +34,10 @@
       "Bash(cargo fmt:*)",
       "Bash(git add:*)",
       "Bash(git commit -m ':*)",
-      "Bash(gh run:*)"
+      "Bash(gh run:*)",
+      "Bash(cp .git/hooks/pre-push scripts/pre-push)",
+      "Bash(rm .git/hooks/pre-push)",
+      "Bash(ln -s ../../scripts/pre-push .git/hooks/pre-push)"
     ]
   }
 }
