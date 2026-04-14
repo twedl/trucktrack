@@ -42,6 +42,7 @@ def join_osm(counts: pl.LazyFrame, osm_parquet: Path) -> pl.LazyFrame:
     osm = (
         pl.scan_parquet(osm_parquet)
         .select(["feature_id", "geometry"])
+        .filter(pl.col("feature_id").str.starts_with("way/"))
         .with_columns(
             pl.col("feature_id")
             .str.strip_prefix("way/")
