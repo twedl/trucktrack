@@ -134,14 +134,22 @@ def map_match(
     costing: str = "auto",
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
+    trace_options: dict[str, object] | None = None,
 ) -> list[MatchedPoint]:
     """Snap a sequence of (lat, lon) points to the road network.
 
     Returns one MatchedPoint per input point.  At least one of
     *tile_extract* or *config* must be provided.
+
+    ``trace_options`` overrides Meili defaults (see
+    :data:`DEFAULT_TRACE_OPTIONS`).  Any key not supplied falls back
+    to the default; ``breakage_distance`` additionally falls back to
+    an adaptive per-call value when not supplied.
     """
     actor = get_actor(tile_extract, config=config)
-    body = _build_trace_body(points, costing, costing_options)
+    body = _build_trace_body(
+        points, costing, costing_options, trace_options=trace_options
+    )
     resp = json.loads(actor.trace_attributes(json.dumps(body)))
     return _parse_matched_points(resp, points)
 
@@ -152,6 +160,7 @@ def map_match_ways(
     costing: str = "auto",
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
+    trace_options: dict[str, object] | None = None,
 ) -> list[int]:
     """Return the deduplicated sequence of OSM way IDs for a matched trace.
 
@@ -164,6 +173,7 @@ def map_match_ways(
         costing,
         costing_options,
         filters={"attributes": ["edge.way_id"], "action": "include"},
+        trace_options=trace_options,
     )
     resp = json.loads(actor.trace_attributes(json.dumps(body)))
     return _parse_way_ids(resp)
@@ -175,6 +185,7 @@ def map_match_full(
     costing: str = "auto",
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
+    trace_options: dict[str, object] | None = None,
 ) -> tuple[list[MatchedPoint], list[int], list[tuple[float, float]]]:
     """Snap points and return matched points, OSM way IDs, and road geometry.
 
@@ -183,7 +194,9 @@ def map_match_full(
     route shape from the response.
     """
     actor = get_actor(tile_extract, config=config)
-    body = _build_trace_body(points, costing, costing_options)
+    body = _build_trace_body(
+        points, costing, costing_options, trace_options=trace_options
+    )
     resp = json.loads(actor.trace_attributes(json.dumps(body)))
     return (
         _parse_matched_points(resp, points),
@@ -198,6 +211,7 @@ def map_match_route_shape(
     costing: str = "auto",
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
+    trace_options: dict[str, object] | None = None,
 ) -> list[list[tuple[float, float]]]:
     """Return road-snapped polylines for a GPS trace.
 
@@ -211,7 +225,9 @@ def map_match_route_shape(
     in ``alternates``.  Each is returned as a separate polyline.
     """
     actor = get_actor(tile_extract, config=config)
-    body = _build_trace_body(points, costing, costing_options)
+    body = _build_trace_body(
+        points, costing, costing_options, trace_options=trace_options
+    )
     resp = json.loads(actor.trace_route(json.dumps(body)))
 
     shapes: list[list[tuple[float, float]]] = []
@@ -236,6 +252,7 @@ def map_match_dataframe(
     costing: str = "auto",
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
+    trace_options: dict[str, object] | None = None,
 ) -> pl.DataFrame:
     """Map-match a DataFrame and add matched_lat / matched_lon columns."""
     df = df.sort("time")
@@ -246,6 +263,7 @@ def map_match_dataframe(
         costing=costing,
         costing_options=costing_options,
         config=config,
+        trace_options=trace_options,
     )
     return df.with_columns(
         pl.Series("matched_lat", [m.lat for m in matched]),
@@ -262,6 +280,7 @@ def map_match_dataframe_full(
     costing: str = "auto",
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
+    trace_options: dict[str, object] | None = None,
 ) -> tuple[pl.DataFrame, list[int], list[tuple[float, float]]]:
     """Map-match a DataFrame and return the augmented DataFrame, way IDs, and shape.
 
@@ -277,6 +296,7 @@ def map_match_dataframe_full(
         costing=costing,
         costing_options=costing_options,
         config=config,
+        trace_options=trace_options,
     )
     result = df.with_columns(
         pl.Series("matched_lat", [m.lat for m in matched]),
