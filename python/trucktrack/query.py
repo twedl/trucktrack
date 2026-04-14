@@ -135,7 +135,9 @@ class ChunkIndex:
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             iterator = pool.map(_extract, files)
             if show_progress:
-                iterator = tqdm(iterator, total=len(files), unit="file", desc="Indexing")
+                iterator = tqdm(
+                    iterator, total=len(files), unit="file", desc="Indexing"
+                )
             for rel, cids in iterator:
                 for cid in cids:
                     index.setdefault(cid, []).append(rel)
