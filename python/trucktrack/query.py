@@ -97,9 +97,8 @@ class ChunkIndex:
     ) -> ChunkIndex:
         """Scan *data_dir* and build the chunk_id → file path mapping.
 
-        Reads only the ``id`` column from each file to extract chunk_ids.
-        Files are read in parallel with a thread pool; the Rust Parquet
-        reader releases the GIL so threads achieve real parallelism.
+        Reads only the ``id`` column from each file. Files are read in
+        parallel since the Rust parquet reader releases the GIL.
 
         Parameters
         ----------
@@ -109,6 +108,11 @@ class ChunkIndex:
             Display a tqdm progress bar. Defaults to True.
         """
         data_dir = Path(data_dir)
+        files = sorted(data_dir.rglob("*.parquet"))
+        index: dict[str, list[str]] = {}
+        if not files:
+            return cls(data_dir, index)
+
         chunk_id_expr = (
             pl.col("id")
             .str.split("_gap")
@@ -124,12 +128,10 @@ class ChunkIndex:
             )
             return rel, cids
 
-        files = sorted(data_dir.rglob("*.parquet"))
         if max_workers is None:
             max_workers = os.cpu_count() or 1
-        max_workers = min(max_workers, len(files) or 1)
+        max_workers = min(max_workers, len(files))
 
-        index: dict[str, list[str]] = {}
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             iterator = pool.map(_extract, files)
             if show_progress:
