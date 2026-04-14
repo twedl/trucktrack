@@ -215,10 +215,19 @@ def _add_colored_layer(
 
 
 def _full_segment_id(group: pl.DataFrame) -> str:
-    """Build a composite ID from available columns."""
+    """Build a composite ID from available columns.
+
+    If ``id`` is already a pipeline composite (contains ``_gap``), use it
+    verbatim — the gap/segment info is already encoded.  Otherwise append
+    ``gap{gap_segment_id}`` and ``seg{segment_id}`` when those columns are
+    present (pre-composite frames from intermediate split stages).
+    """
     parts: list[str] = []
     if "id" in group.columns:
-        parts.append(str(group["id"][0]))
+        raw = str(group["id"][0])
+        if "_gap" in raw:
+            return raw
+        parts.append(raw)
     if "gap_segment_id" in group.columns:
         parts.append(f"gap{group['gap_segment_id'][0]}")
     if "segment_id" in group.columns:
