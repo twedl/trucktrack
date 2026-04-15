@@ -20,7 +20,7 @@ callers can iterate on parameters cheaply::
     trips = tt.inspect.map_match_trips(split, tile_extract=TILE)
     quality = tt.inspect.evaluate_quality(split, trips=trips)
     m = tt.inspect.plot_inspection(raw, split, trips)
-    tt.inspect.serve_inspection(m)
+    tt.visualize.serve_map(m)
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ from trucktrack.valhalla.quality import (
     evaluate_map_match,
     path_quality,
 )
-from trucktrack.visualize import plot_trace_layers, save_map, serve_map
+from trucktrack.visualize import plot_trace_layers
 
 __all__ = [
     "TripMatch",
@@ -52,8 +52,6 @@ __all__ = [
     "load_truck_trace",
     "map_match_trips",
     "plot_inspection",
-    "save_map",
-    "serve_inspection",
     "split_trips",
 ]
 
@@ -72,11 +70,6 @@ class TripMatch:
     matched_df: pl.DataFrame
     way_ids: list[int]
     shape: list[tuple[float, float]]
-
-
-# ---------------------------------------------------------------------------
-# 1. Load
-# ---------------------------------------------------------------------------
 
 
 def load_truck_trace(
@@ -134,11 +127,6 @@ def _coerce_datetime(value: datetime | str) -> datetime:
     return datetime.fromisoformat(value)
 
 
-# ---------------------------------------------------------------------------
-# 2. Split
-# ---------------------------------------------------------------------------
-
-
 def split_trips(
     df: pl.DataFrame,
     *,
@@ -166,11 +154,6 @@ def split_trips(
         max_angle_change=traffic_max_angle_change,
         min_distance=traffic_min_distance,
     )
-
-
-# ---------------------------------------------------------------------------
-# 3. Map-match
-# ---------------------------------------------------------------------------
 
 
 def map_match_trips(
@@ -210,11 +193,6 @@ def map_match_trips(
             shape=shape,
         )
     return out
-
-
-# ---------------------------------------------------------------------------
-# 4. Evaluate
-# ---------------------------------------------------------------------------
 
 
 _QUALITY_SCHEMA: dict[str, pl.DataType] = {
@@ -280,13 +258,12 @@ def evaluate_quality(
 def _cached_quality_row(
     sid: int, sub_df: pl.DataFrame, tm: TripMatch
 ) -> dict[str, Any]:
-    """Derive a quality row from a cached TripMatch, no Valhalla call."""
     pts = list(zip(sub_df["lat"].to_list(), sub_df["lon"].to_list(), strict=True))
     shapes = [tm.shape] if tm.shape else []
     ratio, reversals = path_quality(pts, shapes)
     q = MapMatchQuality(
         trip_id=str(sid),
-        ok=False,
+        ok=True,
         n_points=len(pts),
         path_length_ratio=ratio,
         heading_reversals=reversals,
@@ -305,11 +282,6 @@ def _row_from_quality(sid: int, q: MapMatchQuality) -> dict[str, Any]:
         "heading_reversals": q.heading_reversals,
         "has_issues": q.has_issues,
     }
-
-
-# ---------------------------------------------------------------------------
-# 5 / 6. Plot & serve
-# ---------------------------------------------------------------------------
 
 
 def plot_inspection(
@@ -334,16 +306,6 @@ def plot_inspection(
         matched_shape=matched_shape,
         **plot_kwargs,
     )
-
-
-def serve_inspection(m: Any, *, host: str = "127.0.0.1", port: int = 5000) -> None:
-    """Serve a folium map (thin wrapper over :func:`serve_map`)."""
-    serve_map(m, host=host, port=port)
-
-
-# ---------------------------------------------------------------------------
-# Internals
-# ---------------------------------------------------------------------------
 
 
 def _non_stop(split_df: pl.DataFrame, skip_stops: bool) -> pl.DataFrame:

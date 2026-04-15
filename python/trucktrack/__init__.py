@@ -49,9 +49,8 @@ from trucktrack.splitters import (
     split_by_stops_file,
 )
 
-# Note: ``trucktrack.inspect`` is available as a submodule (``from trucktrack
-# import inspect``) but is not re-exported into the top-level namespace to
-# avoid shadowing the stdlib ``inspect`` module for users of ``trucktrack.*``.
+# ``trucktrack.inspect`` is intentionally not re-exported — it would shadow
+# stdlib ``inspect``. Import explicitly: ``from trucktrack import inspect``.
 
 __all__ = [
     "__version__",

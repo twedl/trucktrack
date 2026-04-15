@@ -30,9 +30,8 @@ from datetime import timedelta
 from pathlib import Path
 
 from trucktrack import inspect as tt
-from trucktrack.visualize import save_map
+from trucktrack.visualize import save_map, serve_map
 
-# Tune these to iterate — each helper is a single call with named args.
 CONFIG = {
     "gap": timedelta(minutes=5),
     "stop_max_diameter": 50.0,
@@ -45,34 +44,29 @@ CONFIG = {
 def main(args: argparse.Namespace) -> None:
     tile_extract = os.environ["VALHALLA_TILE_EXTRACT"]
 
-    # 1. Load.
     raw = tt.load_truck_trace(
         args.truck_id, args.start, args.end, data_dir=args.data_dir
     )
     print(f"loaded {raw.height} points")
 
-    # 2. Split.
     split = tt.split_trips(raw, **CONFIG)
     n_trips = split.filter(~split["is_stop"])["segment_id"].n_unique()
     n_stops = split.filter(split["is_stop"])["segment_id"].n_unique()
     print(f"{n_trips} trip(s), {n_stops} stop(s)")
 
-    # 3. Map-match.
     trips = tt.map_match_trips(split, tile_extract=tile_extract)
     for sid, tm in trips.items():
         print(f"  trip {sid}: {tm.matched_df.height} pts, {len(tm.way_ids)} ways")
 
-    # 4. Evaluate (cached — no second Valhalla call).
+    # Cached path — reuses trips so Valhalla isn't called a second time.
     quality = tt.evaluate_quality(split, trips=trips)
     print("\nquality:")
     print(quality)
 
-    # 5. Plot.
     m = tt.plot_inspection(raw, split, trips)
 
-    # 6. Save or serve.
     if args.serve:
-        tt.serve_inspection(m, host=args.host, port=args.port)
+        serve_map(m, host=args.host, port=args.port)
     else:
         out = Path(args.output)
         out.parent.mkdir(parents=True, exist_ok=True)

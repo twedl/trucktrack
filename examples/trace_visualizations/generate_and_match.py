@@ -35,7 +35,7 @@ from trucktrack import (
     inspect as tt_inspect,
 )
 from trucktrack.generate import TripConfig
-from trucktrack.visualize import save_map
+from trucktrack.visualize import save_map, serve_map
 
 TILE_EXTRACT = os.environ.get(
     "VALHALLA_TILE_EXTRACT", "valhalla_tiles/valhalla_tiles.tar"
@@ -53,7 +53,6 @@ def main(args: argparse.Namespace) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
 
-        # 1. Generate a synthetic truck trip.
         print("Generating trace...")
         config = TripConfig(
             origin=ORIGIN,
@@ -65,13 +64,11 @@ def main(args: argparse.Namespace) -> None:
         points = generate_trace(config)
         print(f"  {len(points)} trace points generated")
 
-        # 2. Write to parquet so we can use the DataFrame pipeline.
         parquet_path = tmp_dir / "trace.parquet"
         traces_to_parquet([(points, config.trip_id)], str(parquet_path))
         df = read_parquet(str(parquet_path))
         print(f"  DataFrame: {df.shape[0]} rows, columns: {df.columns}")
 
-        # 3. Split at observation gaps, detect stops, filter traffic-jam stops.
         print("Splitting...")
         split = tt_inspect.split_trips(
             df,
@@ -83,7 +80,6 @@ def main(args: argparse.Namespace) -> None:
         n_stops = split.filter(split["is_stop"])["segment_id"].n_unique()
         print(f"  {n_trips} trip(s), {n_stops} stop(s)")
 
-        # 4. Map-match each non-stop trip.
         print("Map-matching...")
         trips = tt_inspect.map_match_trips(split, tile_extract=TILE_EXTRACT)
         for sid, tm in trips.items():
@@ -92,16 +88,13 @@ def main(args: argparse.Namespace) -> None:
                 f"{len(tm.way_ids)} OSM ways"
             )
 
-        # 5. Evaluate match quality per trip (reuses cached shapes).
         quality = tt_inspect.evaluate_quality(split, trips=trips)
         print("\nQuality report:")
         print(quality)
 
-        # 6. Build the inspection map.
         print("Building map...")
         m = tt_inspect.plot_inspection(df, split, trips)
 
-        # 7. Print a sampling of OSM way IDs.
         all_ways = [w for tm in trips.values() for w in tm.way_ids]
         print(f"\nOSM way IDs ({len(all_ways)} total):")
         for wid in all_ways[:10]:
@@ -109,9 +102,8 @@ def main(args: argparse.Namespace) -> None:
         if len(all_ways) > 10:
             print(f"  ... ({len(all_ways) - 10} more)")
 
-        # 8. Save or serve the map (serve blocks until killed).
         if args.serve:
-            tt_inspect.serve_inspection(m, host="0.0.0.0", port=args.port)
+            serve_map(m, host="0.0.0.0", port=args.port)
         else:
             out_path = OUTPUT_DIR / "trace.html"
             save_map(m, out_path)
