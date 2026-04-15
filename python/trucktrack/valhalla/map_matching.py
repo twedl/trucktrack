@@ -76,14 +76,21 @@ def _build_trace_body(
 # Meili defaults tuned for sparse truck GPS (~60 s intervals at highway
 # speed ≈ 1.7 km spacing).  breakage_distance is computed adaptively per
 # call; the value here serves as the base when no large gaps are detected.
+#
+# gps_accuracy widens the emission Gaussian so stop-jitter and lane-drift
+# don't strongly prefer the wrong candidate.  turn_penalty_factor makes
+# spurious U-turns and cross-street detours structurally expensive —
+# without it, Meili will happily thread jitter through a series of
+# impossible maneuvers rather than stay on the main road.
 DEFAULT_TRACE_OPTIONS: dict[str, object] = {
     "search_radius": 50,
-    "gps_accuracy": 15,
+    "gps_accuracy": 25,
     "breakage_distance": _BASE_BREAKAGE_DISTANCE,
     "interpolation_distance": 20,
     "max_route_distance_factor": 10,
     "max_route_time_factor": 10,
     "beta": 5,
+    "turn_penalty_factor": 500,
 }
 
 
