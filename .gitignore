@@ -31,3 +31,10 @@ Cargo.lock
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+
+# Valhalla tiles / OSM data (built locally by scripts/setup_valhalla.py)
+valhalla_tiles/
+data/osm/
+duplicateways.txt
+*.osm.pbf
+*.pbf

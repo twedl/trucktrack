@@ -1,12 +1,23 @@
 #!/usr/bin/env python3
-"""Build Valhalla routing tiles from an OSM PBF extract.
+"""Build local Valhalla routing tiles via the bundled pyvalhalla binaries.
 
-Usage:
-    uv run python scripts/setup_valhalla.py planet.osm.pbf [--tile-dir valhalla_tiles]
+Running with no arguments downloads the Ontario OSM extract from Geofabrik
+(~250 MB) and runs the full build pipeline:
 
-This creates a valhalla.json config via valhalla_build_config and runs the
-tile builder. The resulting tile directory can be passed to trucktrack via
---tile-extract.
+1. Download ``ontario-latest.osm.pbf`` into ``data/osm/`` (skipped if present).
+2. Write ``valhalla_tiles/valhalla.json`` with truck-tuned Meili defaults
+   via ``python -m valhalla.valhalla_build_config``.
+3. Build ``valhalla_tiles/admin.sqlite`` via ``valhalla_build_admins``.
+4. Build the tile hierarchy via ``valhalla_build_tiles`` and pack it into
+   ``valhalla_tiles/valhalla_tiles.tar``.
+
+All outputs live under ``valhalla_tiles/`` (gitignored).  trucktrack's
+``trucktrack.valhalla.find_config()`` then discovers the json automatically.
+
+Usage::
+
+    uv run python scripts/setup_valhalla.py                      # Ontario default
+    uv run python scripts/setup_valhalla.py --pbf my-region.osm.pbf
 """
 
 from __future__ import annotations
@@ -18,14 +29,19 @@ import sys
 import tarfile
 from pathlib import Path
 
+import valhalla
+
+GEOFABRIK_URL = (
+    "https://download.geofabrik.de/north-america/canada/ontario-latest.osm.pbf"
+)
+DEFAULT_PBF_PATH = Path("data/osm/ontario-latest.osm.pbf")
+
 CONFIG_OPTIONS: dict[str, bool | int | float] = {
     "mjolnir-max-cache-size": 1_000_000_000,
     "mjolnir-id-table-size": 13_000_000_000,
     "mjolnir-use-lru-mem-cache": True,
     "mjolnir-lru-mem-cache-hard-control": True,
     "mjolnir-use-simple-mem-cache": False,
-    "mjolnir-keep-all-osm-node-ids": False,
-    "mjolnir-keep-osm-node-ids": True,
     "mjolnir-include-bicycle": False,
     "mjolnir-include-pedestrian": False,
     "mjolnir-include-driving": True,
@@ -55,8 +71,49 @@ def _run(cmd: list[str], description: str) -> None:
         raise SystemExit(result.returncode)
 
 
-def build_config(tile_dir: Path, tar_path: Path, config_path: Path) -> None:
-    """Generate a Valhalla config file with truck-optimised settings."""
+def _valhalla_bin(name: str) -> Path:
+    """Locate a pyvalhalla-bundled binary (valhalla_build_tiles, ...)."""
+    path = Path(valhalla.__file__).parent / "bin" / name
+    if not path.is_file():
+        raise SystemExit(
+            f"{name} not found at {path}. Install pyvalhalla: uv sync --extra valhalla"
+        )
+    return path
+
+
+def _download_pbf(dest: Path) -> None:
+    """Download the Ontario OSM extract from Geofabrik with a progress bar."""
+    import requests
+    from tqdm import tqdm
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    print(f"Downloading {GEOFABRIK_URL} -> {dest}", file=sys.stderr)
+    with requests.get(GEOFABRIK_URL, stream=True, timeout=60) as resp:
+        resp.raise_for_status()
+        total = int(resp.headers.get("content-length") or 0)
+        with (
+            dest.open("wb") as fh,
+            tqdm(
+                total=total,
+                unit="B",
+                unit_scale=True,
+                unit_divisor=1024,
+                desc=dest.name,
+            ) as bar,
+        ):
+            for chunk in resp.iter_content(chunk_size=1 << 20):
+                fh.write(chunk)
+                bar.update(len(chunk))
+
+
+def build_config(
+    tile_dir: Path, tar_path: Path, admin_path: Path, config_path: Path
+) -> None:
+    """Generate a Valhalla config file with truck-optimised settings.
+
+    ``valhalla_build_config`` prints the JSON config to stdout; we capture
+    it into *config_path*.
+    """
     cmd = [
         sys.executable,
         "-m",
@@ -65,18 +122,30 @@ def build_config(tile_dir: Path, tar_path: Path, config_path: Path) -> None:
         str(tile_dir),
         "--mjolnir-tile-extract",
         str(tar_path),
+        "--mjolnir-admin",
+        str(admin_path),
     ]
     for key, value in CONFIG_OPTIONS.items():
         cmd.extend([f"--{key}", str(value)])
-    cmd.extend(["-o", str(config_path)])
-    _run(cmd, f"Generating config: {config_path}")
+    print(f"Generating config: {config_path}", file=sys.stderr)
+    with config_path.open("w") as fh:
+        result = subprocess.run(cmd, stdout=fh, check=False)
+    if result.returncode != 0:
+        config_path.unlink(missing_ok=True)
+        raise SystemExit(result.returncode)
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Build Valhalla routing tiles from an OSM PBF file.",
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--pbf",
+        type=Path,
+        default=None,
+        help=(
+            "Path to an OSM PBF extract.  If omitted, "
+            f"{DEFAULT_PBF_PATH} is downloaded from Geofabrik."
+        ),
     )
-    parser.add_argument("pbf", type=Path, help="Path to an OSM PBF extract.")
     parser.add_argument(
         "--tile-dir",
         type=Path,
@@ -91,24 +160,47 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    if not args.pbf.exists():
-        parser.error(f"PBF file not found: {args.pbf}")
+    pbf_path: Path = args.pbf if args.pbf is not None else DEFAULT_PBF_PATH
+    if not pbf_path.exists():
+        if args.pbf is not None:
+            parser.error(f"PBF file not found: {pbf_path}")
+        _download_pbf(pbf_path)
 
     tile_dir: Path = args.tile_dir.resolve()
     tile_dir.mkdir(parents=True, exist_ok=True)
 
     tar_path = (tile_dir / "valhalla_tiles.tar").resolve()
+    admin_path = (tile_dir / "admin.sqlite").resolve()
     config_path = (args.config_out or tile_dir / "valhalla.json").resolve()
-    build_config(tile_dir, tar_path, config_path)
+    build_config(tile_dir, tar_path, admin_path, config_path)
 
     _run(
-        ["valhalla_build_tiles", "-c", str(config_path), str(args.pbf.resolve())],
+        [
+            str(_valhalla_bin("valhalla_build_admins")),
+            "-c",
+            str(config_path),
+            str(pbf_path.resolve()),
+        ],
+        "Building admins",
+    )
+
+    _run(
+        [
+            str(_valhalla_bin("valhalla_build_tiles")),
+            "-c",
+            str(config_path),
+            str(pbf_path.resolve()),
+        ],
         "Building tiles",
     )
 
-    # Tar the tile hierarchy and remove loose tile directories.
-    tile_subdirs = sorted(p for p in tile_dir.iterdir() if p.is_dir())
-    print(f"Packing {len(tile_subdirs)} tile directories into {tar_path}", file=sys.stderr)
+    tile_subdirs = sorted(
+        p for p in tile_dir.iterdir() if p.is_dir() and p.name.isdigit()
+    )
+    print(
+        f"Packing {len(tile_subdirs)} tile directories into {tar_path}",
+        file=sys.stderr,
+    )
     try:
         with tarfile.open(tar_path, "w") as tar:
             for subdir in tile_subdirs:

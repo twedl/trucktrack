@@ -64,6 +64,20 @@ from trucktrack import compact_partitions
 compact_partitions("data/partitioned")
 ```
 
+### Building Valhalla tiles
+
+Map-matching and route generation need a local Valhalla install.  One-time
+setup (downloads Ontario from Geofabrik, builds config + admins + tiles):
+
+```bash
+uv run python scripts/setup_valhalla.py
+```
+
+Produces `valhalla_tiles/valhalla.json`, `valhalla_tiles/admin.sqlite`, and
+`valhalla_tiles/valhalla_tiles.tar` — all gitignored.  `find_config()`
+discovers the json automatically.  Pass `--pbf path.osm.pbf` to reuse an
+existing OSM extract.
+
 ### Map-match
 
 Map-match all trips against a local Valhalla instance:
