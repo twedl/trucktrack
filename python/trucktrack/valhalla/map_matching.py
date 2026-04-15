@@ -11,7 +11,7 @@ import polars as pl
 
 from trucktrack.generate.interpolator import haversine_m
 from trucktrack.valhalla._actor import get_actor
-from trucktrack.valhalla._parsing import concat_leg_shapes, decode_polyline6
+from trucktrack.valhalla._parsing import concat_leg_shapes
 
 # Base breakage distance for typical 60-second GPS intervals.  The adaptive
 # pre-scan bumps this up when it detects large spatial gaps between points.
@@ -117,12 +117,21 @@ def _parse_matched_points(
     return results
 
 
-def _parse_shape(resp: dict[str, Any]) -> list[tuple[float, float]]:
-    """Decode the matched route shape from the trace_attributes response."""
-    encoded = resp.get("shape", "")
-    if not encoded:
-        return []
-    return decode_polyline6(encoded)
+def _parse_route_shape(resp: dict[str, Any]) -> list[tuple[float, float]]:
+    """Flatten a ``trace_route`` response into one road-following polyline.
+
+    Concatenates the primary trip's legs with any alternates.  Used to
+    replace ``trace_attributes.shape`` (which is just the snapped input
+    points and draws straight chords between sparse GPS fixes) with the
+    full edge geometry Valhalla traversed.
+    """
+    shape: list[tuple[float, float]] = []
+    primary = concat_leg_shapes(resp.get("trip", {}).get("legs", []))
+    shape.extend(primary)
+    for alt in resp.get("alternates", []):
+        alt_shape = concat_leg_shapes(alt.get("trip", {}).get("legs", []))
+        shape.extend(alt_shape)
+    return shape
 
 
 def _parse_way_ids(resp: dict[str, Any]) -> list[int]:
@@ -195,19 +204,24 @@ def map_match_full(
 ) -> tuple[list[MatchedPoint], list[int], list[tuple[float, float]]]:
     """Snap points and return matched points, OSM way IDs, and road geometry.
 
-    Makes a single ``trace_attributes`` call and extracts the snapped
-    coordinates, deduplicated way-ID sequence, and the full matched
-    route shape from the response.
+    Makes two Valhalla calls: ``trace_attributes`` for the snapped
+    points and deduplicated way-ID sequence, and ``trace_route`` for
+    the full road-following shape.  Two calls are intentional —
+    ``trace_attributes.shape`` is just the snapped input polyline and
+    draws straight chords across sparse GPS fixes, whereas
+    ``trace_route`` returns the edge geometry Valhalla traversed
+    between them.
     """
     actor = get_actor(config=config)
     body = _build_trace_body(
         points, costing, costing_options, trace_options=trace_options
     )
-    resp = json.loads(actor.trace_attributes(json.dumps(body)))
+    attrs_resp = json.loads(actor.trace_attributes(json.dumps(body)))
+    route_resp = json.loads(actor.trace_route(json.dumps(body)))
     return (
-        _parse_matched_points(resp, points),
-        _parse_way_ids(resp),
-        _parse_shape(resp),
+        _parse_matched_points(attrs_resp, points),
+        _parse_way_ids(attrs_resp),
+        _parse_route_shape(route_resp),
     )
 
 
