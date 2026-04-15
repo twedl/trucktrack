@@ -75,7 +75,7 @@ Many filenames and partitions key off `chunk_id` = last 2 hex chars of the truck
 
 - `generate/` — pure-Python synthetic GPS trace generator (router, speed profile, noise, parking, operational errors). Entry point: `generate_trace`. Does not emit idle points at origin/destination, so endpoint stops aren't detected downstream.
 - `partition/` — `classify.py` (tier assignment + Hilbert), `tiles.py` (Valhalla L0/L1 tile math), `writer.py` (hive writers). Mirrors Rust `partition.rs` for DataFrames that stay in Python.
-- `valhalla/` — `_actor.py` wraps pyvalhalla; `map_matching.py` / `routing.py` are the callable surfaces; `pipeline.py` is the batch driver; `quality.py` scores matches.
+- `valhalla/` — `_actor.py` wraps pyvalhalla; `map_matching.py` / `routing.py` are the callable surfaces; `pipeline.py` is the batch driver; `quality.py` scores matches. `valhalla.json` is the canonical entry point for Valhalla configuration — do **not** read `VALHALLA_TILE_EXTRACT` (or other Valhalla env vars) directly; load `valhalla.json` and resolve the tile directory from its config.
 - `visualize/` — folium-based. `_inspect.py` = one-call `inspect_truck`/`inspect_trip`/`inspect_pipeline` helpers; `_map.py` = lower-level `plot_trace`, `plot_trace_layers`, `save_map`, `serve_map`; `_convert.py` = DataFrame → GeoJSON.
 
 ### Gotchas when editing
