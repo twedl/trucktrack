@@ -92,6 +92,33 @@ def filter_traffic_stops_file(
     """File-based variant of filter_traffic_stops_df."""
     ...
 
+def filter_stale_pings_df(
+    df: pl.DataFrame,
+    id_col: str,
+    time_col: str,
+    lat_col: str,
+    lon_col: str,
+    speed_col: str,
+    heading_col: str,
+    window: int,
+) -> pl.DataFrame:
+    """Drop stale (verbatim-re-emitted) GPS pings within a lookback window."""
+    ...
+
+def filter_stale_pings_file(
+    input_path: str,
+    output_path: str,
+    id_col: str,
+    time_col: str,
+    lat_col: str,
+    lon_col: str,
+    speed_col: str,
+    heading_col: str,
+    window: int,
+) -> int:
+    """File-based variant of filter_stale_pings_df."""
+    ...
+
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Haversine distance in kilometers between two (lat, lon) points."""
     ...

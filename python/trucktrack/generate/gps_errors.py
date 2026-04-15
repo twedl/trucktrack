@@ -220,6 +220,54 @@ def jitter_at_rest(
     return result
 
 
+def stale_reemission(
+    points: list[TracePoint],
+    rng: random.Random,
+    *,
+    count: int = 2,
+    lag_min: int = 1,
+    lag_max: int = 4,
+) -> list[TracePoint]:
+    """Device re-emits an earlier ping verbatim a few rows later.
+
+    Picks ``count`` source rows, and for each one inserts a copy of that
+    row (same ``lat``/``lon``/``speed_mph``/``heading``) a few positions
+    later in the trace with a timestamp slotted just after the row it
+    displaces.  The result is the ``T1 → T2 → T3=T1`` pattern that
+    :func:`trucktrack.filter_stale_pings` is designed to detect.
+
+    Only moving rows (``speed_mph > 0``) are chosen as sources, since the
+    stale-ping filter exempts zero-speed rows and an injection there would
+    be invisible to downstream checks.
+    """
+    n = len(points)
+    if n < 10 or lag_min < 1 or lag_max < lag_min:
+        return points
+
+    moving = [i for i in range(2, n - lag_max - 2) if points[i].speed_mph > 0]
+    if not moving:
+        return points
+
+    sources = rng.sample(moving, min(count, len(moving)))
+    # Insert back-to-front so earlier insert positions don't shift.
+    ops: list[tuple[int, TracePoint]] = []
+    for src in sources:
+        lag = rng.randint(lag_min, lag_max)
+        # Insert just after the row that actually occurred at src+lag.
+        insert_at = src + lag + 1
+        anchor = points[src + lag]
+        # Offset by a fraction of the sampling interval so the re-emitted
+        # row still sorts after the anchor.
+        ts = anchor.timestamp + timedelta(seconds=INTERVAL_S * rng.uniform(0.1, 0.9))
+        stale = replace(points[src], timestamp=ts)
+        ops.append((insert_at, stale))
+
+    result = list(points)
+    for insert_at, stale in sorted(ops, key=lambda x: x[0], reverse=True):
+        result.insert(min(insert_at, len(result)), stale)
+    return result
+
+
 GPS_ERRORS: dict[str, ErrorFn] = {
     "signal_dropout": signal_dropout,
     "cold_start_drift": cold_start_drift,
@@ -229,4 +277,5 @@ GPS_ERRORS: dict[str, ErrorFn] = {
     "coordinate_corruption": coordinate_corruption,
     "speed_heading_desync": speed_heading_desync,
     "jitter_at_rest": jitter_at_rest,
+    "stale_reemission": stale_reemission,
 }

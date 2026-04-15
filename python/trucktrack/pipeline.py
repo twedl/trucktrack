@@ -1,6 +1,7 @@
 """Hive-partitioned GPS trace pipeline.
 
-Gap splitting, stop splitting, traffic filtering, and partitioned output.
+Stale-ping filter, gap splitting, stop splitting, traffic filtering, and
+partitioned output.
 
 Processes input chunks in parallel using threads (the Rust backend
 releases the GIL). Each chunk is written with a unique filename so
@@ -8,12 +9,13 @@ tiles shared across chunks accumulate rather than overwrite.
 
     1. Discover input parquet files.
     2. For each chunk (in parallel):
-       a. Gap-split into discrete trip segments.
-       b. Stop-split into movement and stop sub-segments.
-       c. Reclassify traffic stops as movement (bearing filter).
-       d. Assign composite trip IDs ({id}_gap{gap}_trip{seg}).
-       e. Compute spatial partition metadata.
-       f. Write to hive-partitioned output with chunk-unique
+       a. Drop stale GPS pings (verbatim re-emissions of earlier records).
+       b. Gap-split into discrete trip segments.
+       c. Stop-split into movement and stop sub-segments.
+       d. Reclassify traffic stops as movement (bearing filter).
+       e. Assign composite trip IDs ({id}_gap{gap}_trip{seg}).
+       f. Compute spatial partition metadata.
+       g. Write to hive-partitioned output with chunk-unique
           filenames.
     3. Print summary.
 
@@ -65,10 +67,20 @@ def _process_chunk(
     traffic_max_angle: float,
     min_segment_length: int,
 ) -> pl.DataFrame:
-    """Run gap split, stop split, filter, and partition on one chunk.
+    """Run stale-ping filter, gap split, stop split, filter, and partition on one chunk.
 
     Returns a DataFrame with tier/partition_id/hilbert_idx columns.
     """
+    df = trucktrack.filter_stale_pings(
+        df,
+        id_col="id",
+        time_col="time",
+        lat_col="lat",
+        lon_col="lon",
+        speed_col="speed",
+        heading_col="heading",
+    )
+
     df = trucktrack.split_by_observation_gap(
         df,
         gap,

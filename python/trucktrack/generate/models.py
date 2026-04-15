@@ -35,6 +35,7 @@ def default_error_profile() -> list[ErrorConfig]:
         ErrorConfig("frozen_fix", probability=0.03),
         ErrorConfig("timestamp_glitch", probability=0.01, params={"count": 1}),
         ErrorConfig("coordinate_corruption", probability=0.01, params={"count": 1}),
+        ErrorConfig("stale_reemission", probability=0.04, params={"count": 2}),
         # --- Operational patterns ---
         ErrorConfig("fuel_rest_stop", probability=0.20),
         ErrorConfig("loading_dwell", probability=0.15),

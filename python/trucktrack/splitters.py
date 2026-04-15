@@ -102,6 +102,73 @@ def split_by_stops_file(
     )
 
 
+# ── StalePingFilter ─────────────────────────────────────────────────────
+
+
+def filter_stale_pings(
+    df: pl.DataFrame,
+    *,
+    window: int = 5,
+    id_col: str = "id",
+    time_col: str = "time",
+    lat_col: str = "lat",
+    lon_col: str = "lon",
+    speed_col: str = "speed",
+    heading_col: str = "heading",
+) -> pl.DataFrame:
+    """Drop stale GPS pings — verbatim re-emissions of an earlier record.
+
+    Some devices buffer readings and occasionally re-emit an older record
+    later in the stream with only the timestamp advanced, producing a
+    sequence like ``T1 → T2 → T3`` where ``T3`` has the same
+    ``(lat, lon, speed, heading)`` as ``T1`` but a later time.
+
+    Per truck, each row is compared bit-exactly against the last ``window``
+    distinct rows; matches are dropped.  Rows with a null in any of the four
+    compared fields never match and pass through.  Rows with ``speed == 0``
+    are also exempt — a stopped truck legitimately emits many repeated
+    identical pings.  Output is sorted by ``(id, time)``.
+
+    Parameters
+    ----------
+    window
+        Lookback size in rows per truck.  Larger windows catch re-emissions
+        of older records but risk dropping legitimate revisits that happen
+        within the window.  Default 5.
+    id_col, time_col, lat_col, lon_col, speed_col, heading_col
+        Column names.
+    """
+    return _core.filter_stale_pings_df(
+        df, id_col, time_col, lat_col, lon_col, speed_col, heading_col, window
+    )
+
+
+def filter_stale_pings_file(
+    input_path: str | Path,
+    output_path: str | Path,
+    *,
+    window: int = 5,
+    id_col: str = "id",
+    time_col: str = "time",
+    lat_col: str = "lat",
+    lon_col: str = "lon",
+    speed_col: str = "speed",
+    heading_col: str = "heading",
+) -> int:
+    """File-based variant of :func:`filter_stale_pings`."""
+    return _core.filter_stale_pings_file(
+        str(input_path),
+        str(output_path),
+        id_col,
+        time_col,
+        lat_col,
+        lon_col,
+        speed_col,
+        heading_col,
+        window,
+    )
+
+
 # ── TrafficFilter ───────────────────────────────────────────────────────
 
 

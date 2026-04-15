@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, timedelta
 from pathlib import Path
 
 import polars as pl
@@ -255,3 +255,127 @@ class TestFilterTrafficStops:
 
         # All movement now, single segment
         assert result["segment_id"].n_unique() == 1
+
+
+# ── StalePingFilter ──────────────────────────────────────────────────────
+
+
+def _make_raw(
+    rows: list[tuple[str, int, float, float, float, float]],
+) -> pl.DataFrame:
+    """Build a raw-schema DataFrame: (id, time, lat, lon, speed, heading).
+
+    ``time`` is given as seconds-since-epoch for readability.
+    """
+    from datetime import datetime
+
+    return pl.DataFrame(
+        {
+            "id": [r[0] for r in rows],
+            "time": [
+                datetime.fromtimestamp(r[1], tz=UTC).replace(tzinfo=None) for r in rows
+            ],
+            "lat": [r[2] for r in rows],
+            "lon": [r[3] for r in rows],
+            "speed": [r[4] for r in rows],
+            "heading": [r[5] for r in rows],
+        }
+    )
+
+
+class TestStalePingFilter:
+    def test_drops_verbatim_reemission(self) -> None:
+        """T1 → T2 → T3 where T3 has identical fields to T1."""
+        df = _make_raw(
+            [
+                ("a", 0, 43.0, -79.0, 55.0, 90.0),
+                ("a", 60, 43.001, -79.0, 56.0, 91.0),
+                ("a", 63, 43.0, -79.0, 55.0, 90.0),  # stale copy of row 0
+            ]
+        )
+        out = trucktrack.filter_stale_pings(df)
+        assert out.height == 2
+        # The stale copy at t=63 is dropped; rows at t=0 and t=60 remain.
+        lats = sorted(out["lat"].to_list())
+        assert lats == [43.0, 43.001]
+
+    def test_clean_data_passes_through(self) -> None:
+        df = _make_raw(
+            [
+                ("a", 0, 43.0, -79.0, 55.0, 90.0),
+                ("a", 60, 43.001, -79.0, 56.0, 91.0),
+                ("a", 120, 43.002, -79.0, 57.0, 92.0),
+            ]
+        )
+        out = trucktrack.filter_stale_pings(df)
+        assert out.height == 3
+
+    def test_trucks_are_independent(self) -> None:
+        """Truck b's fresh ping must not match truck a's buffer."""
+        df = _make_raw(
+            [
+                ("a", 0, 43.0, -79.0, 55.0, 90.0),
+                ("b", 0, 43.0, -79.0, 55.0, 90.0),  # same coords, different truck
+                ("a", 60, 43.0, -79.0, 55.0, 90.0),  # stale re-emission for a
+            ]
+        )
+        out = trucktrack.filter_stale_pings(df)
+        assert out.height == 2
+        assert set(out["id"].to_list()) == {"a", "b"}
+
+    def test_outside_window_kept(self) -> None:
+        """A repeat outside the lookback window is not dropped."""
+        df = _make_raw(
+            [
+                ("a", 0, 43.0, -79.0, 55.0, 90.0),
+                ("a", 1, 43.1, -79.0, 50.0, 90.0),
+                ("a", 2, 43.2, -79.0, 50.0, 90.0),
+                ("a", 3, 43.3, -79.0, 50.0, 90.0),
+                ("a", 4, 43.4, -79.0, 50.0, 90.0),
+                # matches row 0 but window=3 has evicted it
+                ("a", 5, 43.0, -79.0, 55.0, 90.0),
+            ]
+        )
+        out = trucktrack.filter_stale_pings(df, window=3)
+        assert out.height == 6
+
+    def test_partial_match_kept(self) -> None:
+        """Same lat/lon but different speed must not be dropped."""
+        df = _make_raw(
+            [
+                ("a", 0, 43.0, -79.0, 55.0, 90.0),
+                ("a", 60, 43.001, -79.0, 0.0, 0.0),
+                ("a", 120, 43.0, -79.0, 56.0, 90.0),  # lat/lon match, speed differs
+            ]
+        )
+        out = trucktrack.filter_stale_pings(df)
+        assert out.height == 3
+
+    def test_stopped_truck_repeats_kept(self) -> None:
+        """A stopped truck (speed=0) emitting repeated identical pings is legitimate."""
+        df = _make_raw(
+            [
+                ("a", 0, 43.0, -79.0, 0.0, 0.0),
+                ("a", 60, 43.0, -79.0, 0.0, 0.0),
+                ("a", 120, 43.0, -79.0, 0.0, 0.0),
+                ("a", 180, 43.0, -79.0, 0.0, 0.0),
+            ]
+        )
+        out = trucktrack.filter_stale_pings(df)
+        assert out.height == 4
+
+    def test_zero_speed_does_not_poison_buffer(self) -> None:
+        """A later moving ping that coincidentally matches a zero-speed row must pass.
+
+        Without the speed=0 exemption, a stationary (43.0, -79.0, 0, 0) would sit in
+        the buffer and spuriously flag a later moving ping at the same coords.
+        """
+        df = _make_raw(
+            [
+                ("a", 0, 43.0, -79.0, 0.0, 0.0),  # stopped
+                ("a", 60, 43.1, -79.0, 55.0, 90.0),  # moving away
+                ("a", 120, 43.0, -79.0, 55.0, 90.0),  # returns, now moving — keep
+            ]
+        )
+        out = trucktrack.filter_stale_pings(df)
+        assert out.height == 3

@@ -118,3 +118,84 @@ def test_empty_route_handled() -> None:
     cfg = _config(destination=(43.65, -79.38))
     points = generate_trace(cfg)
     assert points  # parking maneuver geometry is non-empty
+
+
+# ── GPS error injectors ──────────────────────────────────────────────────
+
+
+class TestStaleReemissionInjector:
+    @staticmethod
+    def _linear_trace(n: int) -> list[TracePoint]:
+        base = datetime(2026, 1, 1, 8, 0, tzinfo=UTC).replace(tzinfo=None)
+        from datetime import timedelta
+
+        return [
+            TracePoint(
+                lat=43.0 + i * 0.001,
+                lon=-79.0,
+                speed_mph=55.0,
+                heading=90.0,
+                timestamp=base + timedelta(seconds=60 * i),
+            )
+            for i in range(n)
+        ]
+
+    def test_injects_stale_copies(self) -> None:
+        import random
+
+        from trucktrack.generate.gps_errors import stale_reemission
+
+        points = self._linear_trace(30)
+        rng = random.Random(0)
+        out = stale_reemission(points, rng, count=3)
+
+        # 3 rows inserted.
+        assert len(out) == 33
+
+        # Every inserted row must have a (lat, lon, speed, heading) tuple
+        # that matches some earlier original row.
+        src_keys = {(p.lat, p.lon, p.speed_mph, p.heading) for p in points}
+        # After injection the stale rows duplicate original keys — at least
+        # three rows share a key with an earlier one within the output.
+        seen: dict[tuple[float, float, float, float], int] = {}
+        dup_count = 0
+        for p in out:
+            k = (p.lat, p.lon, p.speed_mph, p.heading)
+            if k in seen and k in src_keys:
+                dup_count += 1
+            seen[k] = seen.get(k, 0) + 1
+        assert dup_count >= 3
+
+    def test_filter_removes_injected_errors(self) -> None:
+        """Injector + filter round-trip: trace returns to original length."""
+        import random
+
+        import trucktrack
+        from trucktrack.generate.gps_errors import stale_reemission
+
+        points = self._linear_trace(30)
+        rng = random.Random(7)
+        corrupted = stale_reemission(points, rng, count=3)
+        assert len(corrupted) == 33
+
+        df = pl.DataFrame(
+            {
+                "id": ["truck_A"] * len(corrupted),
+                "time": [p.timestamp for p in corrupted],
+                "lat": [p.lat for p in corrupted],
+                "lon": [p.lon for p in corrupted],
+                "speed": [p.speed_mph for p in corrupted],
+                "heading": [p.heading for p in corrupted],
+            }
+        )
+        cleaned = trucktrack.filter_stale_pings(df, window=8)
+        assert cleaned.height == 30
+
+    def test_noop_on_short_trace(self) -> None:
+        import random
+
+        from trucktrack.generate.gps_errors import stale_reemission
+
+        points = self._linear_trace(5)
+        out = stale_reemission(points, random.Random(0), count=3)
+        assert out == points
