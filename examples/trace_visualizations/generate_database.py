@@ -29,7 +29,7 @@ from trucktrack.generate.gps_errors import GPS_ERRORS
 from trucktrack.generate.models import ErrorConfig, TripConfig, default_error_profile
 from trucktrack.generate.operational_errors import OPERATIONAL_ERRORS
 from trucktrack.query import _CHUNK_ID_LEN, _chunk_id
-from trucktrack.valhalla._actor import _find_config
+from trucktrack.valhalla import find_config
 
 OUTPUT_DIR = Path(
     os.environ.get("OUTPUT_DIR", "examples/trace_visualizations/output/trucks")
@@ -84,7 +84,6 @@ def _make_trip_configs(
     """Build TripConfig for each trip of a single truck."""
     configs: list[TripConfig] = []
     current_time = start_time
-    valhalla_config = _find_config()
     for i in range(n_trips):
         origin = rng.choice(WAYPOINTS)
         dest = rng.choice([w for w in WAYPOINTS if w != origin])
@@ -96,7 +95,7 @@ def _make_trip_configs(
                 departure_time=current_time,
                 trip_id=truck_id,
                 seed=rng.randint(0, 2**31),
-                config=valhalla_config,
+                config=find_config(),
                 errors=errors,
             )
         )

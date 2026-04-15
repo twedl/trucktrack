@@ -20,7 +20,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from trucktrack import ErrorConfig, TripConfig, generate_trace
-from trucktrack.valhalla._actor import _find_config
+from trucktrack.valhalla import find_config
 from trucktrack.valhalla.quality import MapMatchQuality, evaluate_map_match
 
 
@@ -63,7 +63,7 @@ def demo_shape_break() -> MapMatchQuality:
         destination=(45.4236, -75.7009),
         departure_time=datetime(2025, 6, 15, 8, 0, tzinfo=UTC),
         seed=42,
-        config=_find_config(),
+        config=find_config(),
         errors=[
             ErrorConfig(
                 "geofence_gap",

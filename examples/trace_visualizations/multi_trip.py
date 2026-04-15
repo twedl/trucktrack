@@ -31,8 +31,11 @@ from trucktrack import (
 )
 from trucktrack.generate import TripConfig
 from trucktrack.generate.models import TracePoint
-from trucktrack.valhalla import map_match_dataframe_full, map_match_route_shape
-from trucktrack.valhalla._actor import _find_config
+from trucktrack.valhalla import (
+    find_config,
+    map_match_dataframe_full,
+    map_match_route_shape,
+)
 from trucktrack.visualize import plot_trace_layers, save_map, serve_map
 
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", "examples/trace_visualizations/output"))
@@ -58,7 +61,6 @@ def generate_multi_trip(
     rng = random.Random(seed)
     all_points: list[TracePoint] = []
     current_time = departure
-    valhalla_config = _find_config()
 
     for i in range(len(waypoints) - 1):
         config = TripConfig(
@@ -66,7 +68,7 @@ def generate_multi_trip(
             destination=waypoints[i + 1],
             departure_time=current_time,
             seed=rng.randint(0, 2**31),
-            config=valhalla_config,
+            config=find_config(),
             gps_noise_meters=1.0,
             errors=[],
         )

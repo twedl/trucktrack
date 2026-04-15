@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import threading
 from pathlib import Path
@@ -33,16 +34,20 @@ def _looks_like_valhalla_config(path: Path) -> bool:
     return isinstance(data, dict) and "mjolnir" in data
 
 
-def _find_config() -> Path | None:
+@functools.lru_cache(maxsize=1)
+def find_config() -> Path | None:
     """Discover ``valhalla.json`` in conventional locations relative to cwd.
 
     Search order:
 
     1. ``./valhalla.json``
     2. ``./valhalla_tiles/valhalla.json``
+
+    Cached for the process lifetime — assumes cwd doesn't change.  Call
+    ``find_config.cache_clear()`` if you chdir and want to rediscover.
     """
     for candidate in _SEARCH_PATHS:
-        if candidate.is_file() and _looks_like_valhalla_config(candidate):
+        if _looks_like_valhalla_config(candidate):
             return candidate
     return None
 
@@ -51,7 +56,7 @@ def get_actor(config: str | Path | None = None) -> Any:
     """Return a cached Valhalla Actor for the given config.
 
     When *config* is ``None``, discovers ``valhalla.json`` via
-    :func:`_find_config`.  Raises :class:`FileNotFoundError` when no
+    :func:`find_config`.  Raises :class:`FileNotFoundError` when no
     config is found.
     """
     try:
@@ -67,7 +72,7 @@ def get_actor(config: str | Path | None = None) -> Any:
     actors: dict[str, Any] = _local.actors
 
     if config is None:
-        config = _find_config()
+        config = find_config()
         if config is None:
             raise FileNotFoundError(
                 "No valhalla.json found. Create one at ./valhalla.json "

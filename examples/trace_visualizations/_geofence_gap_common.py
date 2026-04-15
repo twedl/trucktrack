@@ -21,8 +21,7 @@ from trucktrack import (
     split_by_stops,
     traces_to_parquet,
 )
-from trucktrack.valhalla import map_match_dataframe_full
-from trucktrack.valhalla._actor import _find_config
+from trucktrack.valhalla import find_config, map_match_dataframe_full
 from trucktrack.valhalla.map_matching import _adaptive_breakage_distance
 from trucktrack.visualize import plot_trace_layers, save_map, serve_map
 
@@ -50,7 +49,7 @@ def run(example: GeofenceGapExample, *, serve: bool = False, port: int = 5000) -
             destination=example.destination,
             departure_time=datetime(2025, 6, 15, 8, 0, tzinfo=UTC),
             seed=42,
-            config=_find_config(),
+            config=find_config(),
             errors=[
                 ErrorConfig(
                     "geofence_gap",

@@ -35,7 +35,7 @@ from trucktrack import (
     inspect as tt_inspect,
 )
 from trucktrack.generate import TripConfig
-from trucktrack.valhalla._actor import _find_config
+from trucktrack.valhalla import find_config
 from trucktrack.visualize import save_map, serve_map
 
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", "examples/trace_visualizations/output"))
@@ -57,7 +57,7 @@ def main(args: argparse.Namespace) -> None:
             destination=DESTINATION,
             departure_time=datetime(2025, 6, 15, 8, 0, tzinfo=UTC),
             seed=42,
-            config=_find_config(),
+            config=find_config(),
         )
         points = generate_trace(config)
         print(f"  {len(points)} trace points generated")

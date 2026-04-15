@@ -27,7 +27,7 @@ from trucktrack import (
     traces_to_parquet,
 )
 from trucktrack.generate import TripConfig
-from trucktrack.valhalla._actor import _find_config, get_actor
+from trucktrack.valhalla import find_config, get_actor
 from trucktrack.valhalla._parsing import decode_polyline6
 
 ORIGIN = (43.6532, -79.3832)  # Toronto
@@ -47,7 +47,7 @@ def get_movement_points(
             destination=DESTINATION,
             departure_time=datetime(2025, 6, 15, 8, 0, tzinfo=UTC),
             seed=42,
-            config=_find_config(),
+            config=find_config(),
             gps_noise_meters=gps_noise_meters,
             errors=None if use_errors else [],  # None = default profile
         )

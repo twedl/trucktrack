@@ -190,8 +190,8 @@ def run_map_matching(
     """Map-match all trips across partitions in parallel.
 
     *config* is an optional path to ``valhalla.json``; when ``None``
-    :func:`trucktrack.valhalla._actor._find_config` discovers one in
-    cwd (e.g. ``./valhalla.json``).
+    :func:`trucktrack.valhalla.find_config` discovers one in cwd
+    (e.g. ``./valhalla.json``).
 
     *input_dir* should be the hive-partitioned output of
     :func:`trucktrack.pipeline.run_pipeline`, with layout::

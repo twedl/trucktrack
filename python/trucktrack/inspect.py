@@ -17,7 +17,7 @@ callers can iterate on parameters cheaply::
         stop_max_diameter=50.0,
         stop_min_duration=timedelta(minutes=2),
     )
-    trips = tt.inspect.map_match_trips(split)  # valhalla.json discovered in cwd
+    trips = tt.inspect.map_match_trips(split)
     quality = tt.inspect.evaluate_quality(split, trips=trips)
     m = tt.inspect.plot_inspection(raw, split, trips)
     tt.visualize.serve_map(m)

@@ -18,6 +18,7 @@ requires_pyvalhalla = pytest.mark.skipif(
     reason="pyvalhalla not installed",
 )
 
+
 def _valhalla_works() -> bool:
     """True iff a ``valhalla.json`` is discoverable AND Actor construction
     succeeds with it.  Catches both missing configs and stale ones that
@@ -26,7 +27,7 @@ def _valhalla_works() -> bool:
     if not _pyvalhalla_available:
         return False
     try:
-        from trucktrack.valhalla._actor import get_actor
+        from trucktrack.valhalla import get_actor
 
         get_actor()
     except Exception:
@@ -46,7 +47,7 @@ requires_tiles = pytest.mark.skipif(
 @requires_tiles
 class TestActorCache:
     def test_get_actor_returns_same_instance(self) -> None:
-        from trucktrack.valhalla._actor import get_actor
+        from trucktrack.valhalla import get_actor
 
         a1 = get_actor()
         a2 = get_actor()

@@ -1,6 +1,6 @@
 """Valhalla routing and map-matching via local pyvalhalla bindings."""
 
-from trucktrack.valhalla._actor import DEFAULT_TRUCK_COSTING, get_actor
+from trucktrack.valhalla._actor import DEFAULT_TRUCK_COSTING, find_config, get_actor
 from trucktrack.valhalla._parsing import decode_polyline6, parse_valhalla_response
 from trucktrack.valhalla.map_matching import (
     MatchedPoint,
@@ -18,6 +18,7 @@ __all__ = [
     "DEFAULT_TRUCK_COSTING",
     "MatchedPoint",
     "decode_polyline6",
+    "find_config",
     "get_actor",
     "map_match",
     "map_match_dataframe",

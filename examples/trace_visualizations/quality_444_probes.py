@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from trucktrack import TripConfig, generate_trace
-from trucktrack.valhalla._actor import _find_config
+from trucktrack.valhalla import find_config
 from trucktrack.valhalla.map_matching import map_match_full
 
 
@@ -84,7 +84,7 @@ def probe_tiny_search_radius() -> MapMatchQuality:
         destination=(45.4236, -75.7009),
         departure_time=datetime(2025, 6, 15, 8, 0, tzinfo=UTC),
         seed=42,
-        config=_find_config(),
+        config=find_config(),
         errors=[],
     )
     pts = [(p.lat, p.lon) for p in generate_trace(config)[:50]]
@@ -103,7 +103,7 @@ def probe_zero_route_factor() -> MapMatchQuality:
         destination=(45.4236, -75.7009),
         departure_time=datetime(2025, 6, 15, 8, 0, tzinfo=UTC),
         seed=42,
-        config=_find_config(),
+        config=find_config(),
         errors=[],
     )
     pts = [(p.lat, p.lon) for p in generate_trace(config)[:50]]
@@ -158,7 +158,7 @@ def probe_huge_interpolation_distance() -> MapMatchQuality:
         destination=(45.4236, -75.7009),
         departure_time=datetime(2025, 6, 15, 8, 0, tzinfo=UTC),
         seed=42,
-        config=_find_config(),
+        config=find_config(),
         errors=[],
     )
     pts = [(p.lat, p.lon) for p in generate_trace(config)[:20]]

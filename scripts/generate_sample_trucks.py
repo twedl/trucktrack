@@ -24,22 +24,15 @@ import polars as pl
 from trucktrack import generate_trace
 from trucktrack.generate.models import TripConfig
 from trucktrack.query import _CHUNK_ID_LEN
-from trucktrack.valhalla._actor import _find_config
+from trucktrack.valhalla import find_config
 
 OUTPUT_DIR = Path(__file__).parent.parent / "data" / "trucks"
 
-
-def _config_path() -> Path:
-    found = _find_config()
-    if found is None:
-        raise SystemExit(
-            "No valhalla.json found. Place one at ./valhalla.json or "
-            "./valhalla_tiles/valhalla.json."
-        )
-    return found
-
-
-CONFIG_PATH = _config_path()
+if find_config() is None:
+    raise SystemExit(
+        "No valhalla.json found. Place one at ./valhalla.json or "
+        "./valhalla_tiles/valhalla.json."
+    )
 
 # Hand-picked 32-char hex IDs whose last two chars span three chunk
 # partitions; stable across runs so the committed parquet has fixed
@@ -78,7 +71,7 @@ def _build_trip_configs(truck_id: str, rng: random.Random) -> list[TripConfig]:
                 departure_time=current_time,
                 trip_id=truck_id,
                 seed=rng.randint(0, 2**31),
-                config=CONFIG_PATH,
+                config=find_config(),
             )
         )
         current_time += timedelta(hours=rng.uniform(4, 8))
