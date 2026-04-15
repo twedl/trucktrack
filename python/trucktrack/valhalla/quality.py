@@ -93,7 +93,7 @@ def _length_and_reversals(
     return total_m, reversals
 
 
-def _path_quality(
+def path_quality(
     points: list[tuple[float, float]],
     shapes: list[list[tuple[float, float]]],
 ) -> tuple[float | None, int]:
@@ -133,7 +133,7 @@ def _evaluate(
     if record_breaks:
         q.n_polylines = len(shapes)
         q.shape_gaps = _polyline_break_gaps(shapes)
-    q.path_length_ratio, q.heading_reversals = _path_quality(points, shapes)
+    q.path_length_ratio, q.heading_reversals = path_quality(points, shapes)
     q.ok = not q.has_issues
     return q
 

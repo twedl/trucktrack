@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 from pathlib import Path
 from typing import Any
@@ -18,8 +19,27 @@ _local = threading.local()
 CONFIG_FILENAME = "valhalla.json"
 
 
+def _config_points_to_existing_tiles(config_path: Path) -> bool:
+    """True when the config's ``mjolnir.tile_extract``/``tile_dir`` resolves locally.
+
+    Configs generated in containers often embed absolute paths like
+    ``/custom_files/valhalla_tiles.tar`` that don't exist on the host.
+    Skipping those lets us fall back to a freshly built config.
+    """
+    try:
+        data = json.loads(config_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    mjolnir = data.get("mjolnir", {})
+    for key in ("tile_extract", "tile_dir"):
+        value = mjolnir.get(key)
+        if value and Path(value).exists():
+            return True
+    return False
+
+
 def _find_config(tile_extract: str) -> Path | None:
-    """Look for an existing valhalla.json next to, inside, or in the cwd.
+    """Look for a *valid* valhalla.json next to, inside, or in the cwd.
 
     Search order:
 
@@ -27,20 +47,21 @@ def _find_config(tile_extract: str) -> Path | None:
     2. Sibling of *tile_extract* (e.g. ``valhalla_tiles/valhalla.json``
        next to ``valhalla_tiles.tar``).
     3. Current working directory.
+
+    A candidate is only accepted when its embedded tile path exists
+    locally — stale container-style configs (e.g. pointing at
+    ``/custom_files/...``) are skipped so ``get_actor`` can fall back
+    to :func:`valhalla.get_config`.
     """
     p = Path(tile_extract)
+    candidates: list[Path] = []
     if p.is_dir():
-        candidate = p / CONFIG_FILENAME
-        if candidate.is_file():
+        candidates.append(p / CONFIG_FILENAME)
+    candidates.append(p.parent / CONFIG_FILENAME)
+    candidates.append(Path.cwd() / CONFIG_FILENAME)
+    for candidate in candidates:
+        if candidate.is_file() and _config_points_to_existing_tiles(candidate):
             return candidate
-    # Sibling of a .tar / directory (e.g. valhalla_tiles/valhalla.json for
-    # valhalla_tiles.tar sitting in the same parent).
-    candidate = p.parent / CONFIG_FILENAME
-    if candidate.is_file():
-        return candidate
-    candidate = Path.cwd() / CONFIG_FILENAME
-    if candidate.is_file():
-        return candidate
     return None
 
 

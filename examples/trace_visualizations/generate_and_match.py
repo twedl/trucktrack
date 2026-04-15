@@ -1,8 +1,9 @@
-"""Generate a fake truck trip, split, partition, map-match, and visualize it.
+"""Generate a fake truck trip, split, map-match, and visualize it.
 
 End-to-end example: synthesize a GPS trace between two Ontario points,
-split it at observation gaps, partition into a hive layout, map-match
-each segment, and visualize all three stages on an interactive map.
+then drive the rest of the workflow through :mod:`trucktrack.inspect`:
+split at observation gaps / stops, map-match each trip, evaluate match
+quality, and plot all stages on one interactive map.
 
 Requires pyvalhalla and a tile extract built by scripts/setup_valhalla.py.
 
@@ -25,18 +26,16 @@ import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-import polars as pl
 from trucktrack import (
     generate_trace,
-    partition_existing_parquet,
     read_parquet,
-    split_by_observation_gap,
-    split_by_stops,
     traces_to_parquet,
 )
+from trucktrack import (
+    inspect as tt_inspect,
+)
 from trucktrack.generate import TripConfig
-from trucktrack.valhalla import map_match_dataframe_full
-from trucktrack.visualize import plot_trace_layers, save_map, serve_map
+from trucktrack.visualize import save_map
 
 TILE_EXTRACT = os.environ.get(
     "VALHALLA_TILE_EXTRACT", "valhalla_tiles/valhalla_tiles.tar"
@@ -72,62 +71,47 @@ def main(args: argparse.Namespace) -> None:
         df = read_parquet(str(parquet_path))
         print(f"  DataFrame: {df.shape[0]} rows, columns: {df.columns}")
 
-        # 3. Split at 5-minute observation gaps, then detect stops.
+        # 3. Split at observation gaps, detect stops, filter traffic-jam stops.
         print("Splitting...")
-        gap_split = split_by_observation_gap(df, timedelta(minutes=5), min_length=3)
-        split = split_by_stops(
-            gap_split,
-            max_diameter=50.0,
-            min_duration=timedelta(minutes=2),
+        split = tt_inspect.split_trips(
+            df,
+            gap=timedelta(minutes=5),
+            stop_max_diameter=50.0,
+            stop_min_duration=timedelta(minutes=2),
         )
-        n_segments = split["segment_id"].n_unique()
-        n_stops = split.filter(pl.col("is_stop"))["segment_id"].n_unique()
-        print(f"  {n_segments} segment(s), {n_stops} stop(s)")
+        n_trips = split.filter(~split["is_stop"])["segment_id"].n_unique()
+        n_stops = split.filter(split["is_stop"])["segment_id"].n_unique()
+        print(f"  {n_trips} trip(s), {n_stops} stop(s)")
 
-        # 4. Partition into a hive layout.
-        print("Partitioning...")
-        split_path = tmp_dir / "split.parquet"
-        split.write_parquet(split_path)
-        partition_dir = tmp_dir / "partitioned"
-        summary = partition_existing_parquet(split_path, partition_dir)
-        for tier, n in sorted(summary.items()):
-            print(f"  {tier}: {n} partition(s)")
-
-        # 5. Map-match each segment and collect OSM way IDs.
+        # 4. Map-match each non-stop trip.
         print("Map-matching...")
-        matched_parts = []
-        all_ways: list[int] = []
-        all_shapes: list[list[tuple[float, float]]] = []
-        for pq in sorted(partition_dir.rglob("*.parquet")):
-            chunk = pl.read_parquet(pq)
-            for (seg_id,), seg in chunk.group_by("segment_id"):
-                matched, ways, shape = map_match_dataframe_full(
-                    seg, tile_extract=TILE_EXTRACT
-                )
-                matched_parts.append(matched)
-                all_ways.extend(ways)
-                if shape:
-                    all_shapes.append(shape)
-                print(f"  segment {seg_id}: {len(seg)} pts, {len(ways)} OSM ways")
+        trips = tt_inspect.map_match_trips(split, tile_extract=TILE_EXTRACT)
+        for sid, tm in trips.items():
+            print(
+                f"  segment {sid}: {tm.matched_df.height} pts, "
+                f"{len(tm.way_ids)} OSM ways"
+            )
 
-        result = pl.concat(matched_parts)
+        # 5. Evaluate match quality per trip (reuses cached shapes).
+        quality = tt_inspect.evaluate_quality(split, trips=trips)
+        print("\nQuality report:")
+        print(quality)
 
-        # 6. Visualize all stages on one map.
+        # 6. Build the inspection map.
         print("Building map...")
-        m = plot_trace_layers(
-            raw=df, segments=split, matched=result, matched_shape=all_shapes or None
-        )
+        m = tt_inspect.plot_inspection(df, split, trips)
 
-        # 7. Print the OSM way IDs.
-        print(f"\nOSM way IDs ({len(all_ways)} ways):")
+        # 7. Print a sampling of OSM way IDs.
+        all_ways = [w for tm in trips.values() for w in tm.way_ids]
+        print(f"\nOSM way IDs ({len(all_ways)} total):")
         for wid in all_ways[:10]:
             print(f"  {wid}")
         if len(all_ways) > 10:
             print(f"  ... ({len(all_ways) - 10} more)")
 
-        # 8. Save or serve the map (serve_map blocks until killed).
+        # 8. Save or serve the map (serve blocks until killed).
         if args.serve:
-            serve_map(m, host="0.0.0.0", port=args.port)
+            tt_inspect.serve_inspection(m, host="0.0.0.0", port=args.port)
         else:
             out_path = OUTPUT_DIR / "trace.html"
             save_map(m, out_path)
