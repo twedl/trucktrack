@@ -95,8 +95,7 @@ def run(example: GeofenceGapExample, *, serve: bool = False, port: int = 5000) -
             matched, ways, shape = map_match_dataframe_full(seg)
             matched_parts.append(matched)
             all_ways.extend(ways)
-            if shape:
-                all_shapes.append(shape)
+            all_shapes.extend(shape)
             print(
                 f"  segment {seg_id}: {len(seg)} pts, {len(ways)} OSM ways, "
                 f"adaptive breakage_distance={bd:.0f} m"

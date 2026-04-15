@@ -132,7 +132,7 @@ class TestEvaluateQualityCached:
             segment_id=1,
             matched_df=split,
             way_ids=[],
-            shape=shape,
+            shape=[shape],
         )
         out = tti.evaluate_quality(split, trips={1: tm})
 

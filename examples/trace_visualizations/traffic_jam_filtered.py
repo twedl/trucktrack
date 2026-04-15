@@ -99,8 +99,7 @@ def main(args: argparse.Namespace) -> None:
             matched, ways, shape = map_match_dataframe_full(seg)
             matched_parts.append(matched)
             all_ways.extend(ways)
-            if shape:
-                all_shapes.append(shape)
+            all_shapes.extend(shape)
             print(f"  segment {seg_id}: {len(seg)} pts, {len(ways)} OSM ways")
 
         result = pl.concat(matched_parts) if matched_parts else None

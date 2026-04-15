@@ -62,14 +62,16 @@ class TripMatch:
 
     ``matched_df`` is the trip's original rows augmented with
     ``matched_lat``, ``matched_lon``, and ``distance_from_trace``.
-    ``shape`` is the full road-snapped polyline (empty when Valhalla
-    returns no geometry).
+    ``shape`` is a list of road-snapped polylines — one per route
+    segment Valhalla returned.  When the matcher breaks the trace,
+    disjoint segments arrive separately so renderers never bridge them
+    with a straight chord.  Empty when Valhalla returns no geometry.
     """
 
     segment_id: int
     matched_df: pl.DataFrame
     way_ids: list[int]
-    shape: list[tuple[float, float]]
+    shape: list[list[tuple[float, float]]]
 
 
 def load_truck_trace(
@@ -250,8 +252,7 @@ def _cached_quality_row(
     sid: int, sub_df: pl.DataFrame, tm: TripMatch
 ) -> dict[str, Any]:
     pts = list(zip(sub_df["lat"].to_list(), sub_df["lon"].to_list(), strict=True))
-    shapes = [tm.shape] if tm.shape else []
-    ratio, reversals = path_quality(pts, shapes)
+    ratio, reversals = path_quality(pts, tm.shape)
     q = MapMatchQuality(
         trip_id=str(sid),
         ok=True,
@@ -286,7 +287,7 @@ def plot_inspection(
         matched = pl.concat(
             [tm.matched_df for tm in trips.values()], how="vertical_relaxed"
         )
-        matched_shape = [tm.shape for tm in trips.values() if tm.shape] or None
+        matched_shape = [seg for tm in trips.values() for seg in tm.shape] or None
     else:
         matched = None
         matched_shape = None

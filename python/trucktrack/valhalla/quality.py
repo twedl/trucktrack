@@ -199,6 +199,6 @@ def evaluate_map_match_attributes(
             config=config,
             trace_options=trace_options,
         )
-        return [shape] if shape else []
+        return shape
 
     return _evaluate(trip_id, points, match, record_breaks=False)

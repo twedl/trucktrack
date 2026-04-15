@@ -117,21 +117,26 @@ def _parse_matched_points(
     return results
 
 
-def _parse_route_shape(resp: dict[str, Any]) -> list[tuple[float, float]]:
-    """Flatten a ``trace_route`` response into one road-following polyline.
+def _parse_route_shape(resp: dict[str, Any]) -> list[list[tuple[float, float]]]:
+    """Parse a ``trace_route`` response into one polyline per route segment.
 
-    Concatenates the primary trip's legs with any alternates.  Used to
+    Returns a list of road-following polylines.  When the matcher breaks
+    the trace, Valhalla returns disjoint segments as the primary ``trip``
+    plus entries in ``alternates``; each becomes its own polyline so
+    callers never have to bridge them with a straight chord.  Used to
     replace ``trace_attributes.shape`` (which is just the snapped input
     points and draws straight chords between sparse GPS fixes) with the
     full edge geometry Valhalla traversed.
     """
-    shape: list[tuple[float, float]] = []
+    shapes: list[list[tuple[float, float]]] = []
     primary = concat_leg_shapes(resp.get("trip", {}).get("legs", []))
-    shape.extend(primary)
+    if primary:
+        shapes.append(primary)
     for alt in resp.get("alternates", []):
         alt_shape = concat_leg_shapes(alt.get("trip", {}).get("legs", []))
-        shape.extend(alt_shape)
-    return shape
+        if alt_shape:
+            shapes.append(alt_shape)
+    return shapes
 
 
 def _parse_way_ids(resp: dict[str, Any]) -> list[int]:
@@ -201,7 +206,7 @@ def map_match_full(
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
     trace_options: dict[str, object] | None = None,
-) -> tuple[list[MatchedPoint], list[int], list[tuple[float, float]]]:
+) -> tuple[list[MatchedPoint], list[int], list[list[tuple[float, float]]]]:
     """Snap points and return matched points, OSM way IDs, and road geometry.
 
     Makes two Valhalla calls: ``trace_attributes`` for the snapped
@@ -211,6 +216,10 @@ def map_match_full(
     draws straight chords across sparse GPS fixes, whereas
     ``trace_route`` returns the edge geometry Valhalla traversed
     between them.
+
+    The shape is a list of polylines — one per matched route segment.
+    When the matcher breaks the trace, disjoint segments come back
+    separately so callers don't bridge them with a straight chord.
     """
     actor = get_actor(config=config)
     body = _build_trace_body(
@@ -300,12 +309,14 @@ def map_match_dataframe_full(
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
     trace_options: dict[str, object] | None = None,
-) -> tuple[pl.DataFrame, list[int], list[tuple[float, float]]]:
+) -> tuple[pl.DataFrame, list[int], list[list[tuple[float, float]]]]:
     """Map-match a DataFrame and return the augmented DataFrame, way IDs, and shape.
 
-    Single ``trace_attributes`` call — avoids the overhead of calling
-    :func:`map_match_dataframe` and :func:`map_match_ways` separately.
-    The shape is the full road-snapped polyline decoded from the response.
+    The shape is a list of road-snapped polylines — one per matched
+    route segment.  When the matcher breaks the trace, disjoint segments
+    come back separately so callers don't bridge them with a straight
+    chord.  See :func:`map_match_full` for the underlying two-call
+    structure.
     """
     df = df.sort("time")
     points = list(zip(df[lat_col].to_list(), df[lon_col].to_list(), strict=True))
