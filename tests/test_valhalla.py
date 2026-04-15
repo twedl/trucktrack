@@ -97,11 +97,15 @@ class TestMapMatch:
             assert result[i] != result[i - 1]
 
     def test_map_match_dataframe(self) -> None:
+        from datetime import UTC, datetime, timedelta
+
         import polars as pl
         from trucktrack.valhalla import map_match_dataframe
 
+        start = datetime(2026, 1, 1, tzinfo=UTC)
         df = pl.DataFrame(
             {
+                "time": [start + timedelta(seconds=60 * i) for i in range(3)],
                 "lat": [43.65, 43.651, 43.652],
                 "lon": [-79.38, -79.381, -79.382],
             }
