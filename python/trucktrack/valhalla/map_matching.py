@@ -137,7 +137,7 @@ def _parse_way_ids(resp: dict[str, Any]) -> list[int]:
 
 def map_match(
     points: list[tuple[float, float]],
-    tile_extract: str | None = None,
+    *,
     costing: str = "auto",
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
@@ -145,15 +145,14 @@ def map_match(
 ) -> list[MatchedPoint]:
     """Snap a sequence of (lat, lon) points to the road network.
 
-    Returns one MatchedPoint per input point.  At least one of
-    *tile_extract* or *config* must be provided.
+    Returns one MatchedPoint per input point.
 
     ``trace_options`` overrides Meili defaults (see
     :data:`DEFAULT_TRACE_OPTIONS`).  Any key not supplied falls back
     to the default; ``breakage_distance`` additionally falls back to
     an adaptive per-call value when not supplied.
     """
-    actor = get_actor(tile_extract, config=config)
+    actor = get_actor(config=config)
     body = _build_trace_body(
         points, costing, costing_options, trace_options=trace_options
     )
@@ -163,7 +162,7 @@ def map_match(
 
 def map_match_ways(
     points: list[tuple[float, float]],
-    tile_extract: str | None = None,
+    *,
     costing: str = "auto",
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
@@ -174,7 +173,7 @@ def map_match_ways(
     Consecutive duplicate way IDs are collapsed (a single OSM way may
     span multiple graph edges).
     """
-    actor = get_actor(tile_extract, config=config)
+    actor = get_actor(config=config)
     body = _build_trace_body(
         points,
         costing,
@@ -188,7 +187,7 @@ def map_match_ways(
 
 def map_match_full(
     points: list[tuple[float, float]],
-    tile_extract: str | None = None,
+    *,
     costing: str = "auto",
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
@@ -200,7 +199,7 @@ def map_match_full(
     coordinates, deduplicated way-ID sequence, and the full matched
     route shape from the response.
     """
-    actor = get_actor(tile_extract, config=config)
+    actor = get_actor(config=config)
     body = _build_trace_body(
         points, costing, costing_options, trace_options=trace_options
     )
@@ -214,7 +213,7 @@ def map_match_full(
 
 def map_match_route_shape(
     points: list[tuple[float, float]],
-    tile_extract: str | None = None,
+    *,
     costing: str = "auto",
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
@@ -231,7 +230,7 @@ def map_match_route_shape(
     contains multiple route segments: the primary ``trip`` plus entries
     in ``alternates``.  Each is returned as a separate polyline.
     """
-    actor = get_actor(tile_extract, config=config)
+    actor = get_actor(config=config)
     body = _build_trace_body(
         points, costing, costing_options, trace_options=trace_options
     )
@@ -253,7 +252,7 @@ def map_match_route_shape(
 
 def map_match_dataframe(
     df: pl.DataFrame,
-    tile_extract: str | None = None,
+    *,
     lat_col: str = "lat",
     lon_col: str = "lon",
     costing: str = "auto",
@@ -266,7 +265,6 @@ def map_match_dataframe(
     points = list(zip(df[lat_col].to_list(), df[lon_col].to_list(), strict=True))
     matched = map_match(
         points,
-        tile_extract,
         costing=costing,
         costing_options=costing_options,
         config=config,
@@ -281,7 +279,7 @@ def map_match_dataframe(
 
 def map_match_dataframe_full(
     df: pl.DataFrame,
-    tile_extract: str | None = None,
+    *,
     lat_col: str = "lat",
     lon_col: str = "lon",
     costing: str = "auto",
@@ -299,7 +297,6 @@ def map_match_dataframe_full(
     points = list(zip(df[lat_col].to_list(), df[lon_col].to_list(), strict=True))
     matched, ways, shape = map_match_full(
         points,
-        tile_extract,
         costing=costing,
         costing_options=costing_options,
         config=config,

@@ -7,8 +7,9 @@ trips share a single vehicle ID so they appear in one DataFrame.
 
 Usage::
 
-    VALHALLA_TILE_EXTRACT=valhalla_tiles/valhalla_tiles.tar \
-        uv run python examples/trace_visualizations/multi_trip.py
+    uv run python examples/trace_visualizations/multi_trip.py
+
+Requires a ``valhalla.json`` in cwd.
 """
 
 from __future__ import annotations
@@ -31,11 +32,9 @@ from trucktrack import (
 from trucktrack.generate import TripConfig
 from trucktrack.generate.models import TracePoint
 from trucktrack.valhalla import map_match_dataframe_full, map_match_route_shape
+from trucktrack.valhalla._actor import _find_config
 from trucktrack.visualize import plot_trace_layers, save_map, serve_map
 
-TILE_EXTRACT = os.environ.get(
-    "VALHALLA_TILE_EXTRACT", "valhalla_tiles/valhalla_tiles.tar"
-)
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", "examples/trace_visualizations/output"))
 
 # Four Ontario locations (short hops to stay within Valhalla limits)
@@ -59,6 +58,7 @@ def generate_multi_trip(
     rng = random.Random(seed)
     all_points: list[TracePoint] = []
     current_time = departure
+    valhalla_config = _find_config()
 
     for i in range(len(waypoints) - 1):
         config = TripConfig(
@@ -66,7 +66,7 @@ def generate_multi_trip(
             destination=waypoints[i + 1],
             departure_time=current_time,
             seed=rng.randint(0, 2**31),
-            tile_extract=TILE_EXTRACT,
+            config=valhalla_config,
             gps_noise_meters=1.0,
             errors=[],
         )
@@ -127,11 +127,9 @@ def main(args: argparse.Namespace) -> None:
         all_ways: list[int] = []
         all_shapes: list[list[tuple[float, float]]] = []
         for (seg_id,), seg in movement.group_by("segment_id", maintain_order=True):
-            matched, ways, _ = map_match_dataframe_full(
-                seg, tile_extract=TILE_EXTRACT
-            )
+            matched, ways, _ = map_match_dataframe_full(seg)
             pts = list(zip(seg["lat"].to_list(), seg["lon"].to_list(), strict=True))
-            shapes = map_match_route_shape(pts, tile_extract=TILE_EXTRACT)
+            shapes = map_match_route_shape(pts)
             matched_parts.append(matched)
             all_ways.extend(ways)
             all_shapes.extend(shapes)

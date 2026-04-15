@@ -10,8 +10,9 @@ least once; remaining trips use the default error profile.
 
 Usage::
 
-    VALHALLA_TILE_EXTRACT=valhalla_tiles/valhalla_tiles.tar \
-        uv run python examples/trace_visualizations/generate_database.py
+    uv run python examples/trace_visualizations/generate_database.py
+
+Requires a ``valhalla.json`` in cwd.
 """
 
 from __future__ import annotations
@@ -28,10 +29,8 @@ from trucktrack.generate.gps_errors import GPS_ERRORS
 from trucktrack.generate.models import ErrorConfig, TripConfig, default_error_profile
 from trucktrack.generate.operational_errors import OPERATIONAL_ERRORS
 from trucktrack.query import _CHUNK_ID_LEN, _chunk_id
+from trucktrack.valhalla._actor import _find_config
 
-TILE_EXTRACT = os.environ.get(
-    "VALHALLA_TILE_EXTRACT", "valhalla_tiles/valhalla_tiles.tar"
-)
 OUTPUT_DIR = Path(
     os.environ.get("OUTPUT_DIR", "examples/trace_visualizations/output/trucks")
 )
@@ -85,6 +84,7 @@ def _make_trip_configs(
     """Build TripConfig for each trip of a single truck."""
     configs: list[TripConfig] = []
     current_time = start_time
+    valhalla_config = _find_config()
     for i in range(n_trips):
         origin = rng.choice(WAYPOINTS)
         dest = rng.choice([w for w in WAYPOINTS if w != origin])
@@ -96,7 +96,7 @@ def _make_trip_configs(
                 departure_time=current_time,
                 trip_id=truck_id,
                 seed=rng.randint(0, 2**31),
-                tile_extract=TILE_EXTRACT,
+                config=valhalla_config,
                 errors=errors,
             )
         )

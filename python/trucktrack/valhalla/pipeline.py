@@ -68,12 +68,9 @@ def _null_way_result(trip_id: str, date: object) -> pl.DataFrame:
 def map_match_trip(
     trip: pl.DataFrame,
     *,
-    tile_extract: str | None = None,
     config: str | Path | None = None,
 ) -> pl.DataFrame:
     """Map-match a single trip and return id, date, way_id rows.
-
-    At least one of *tile_extract* or *config* must be provided.
 
     If matching fails (e.g. corrupted GPS data exceeding Valhalla's
     distance limit), returns a single row with null way_id so no
@@ -86,7 +83,7 @@ def map_match_trip(
         return _null_way_result(trip_id, date)
     try:
         points = list(zip(trip["lat"].to_list(), trip["lon"].to_list(), strict=True))
-        ways = map_match_ways(points, tile_extract=tile_extract, config=config)
+        ways = map_match_ways(points, config=config)
     except Exception as e:
         print(f"  [WARN] {trip_id}: {e}", file=sys.stderr)
         return _null_way_result(trip_id, date)
@@ -100,7 +97,6 @@ def _process_partition(
     partition_dir: Path,
     input_dir: Path,
     output_dir: Path,
-    tile_extract: str | None,
     config: str | Path | None,
     progress: tqdm[None] | None = None,
 ) -> tuple[str, int, int, int]:
@@ -136,9 +132,7 @@ def _process_partition(
             continue
         matched_trips = []
         for _, trip in df.group_by("id"):
-            matched_trips.append(
-                map_match_trip(trip, tile_extract=tile_extract, config=config)
-            )
+            matched_trips.append(map_match_trip(trip, config=config))
             total_trips += 1
 
         if not matched_trips:
@@ -168,13 +162,12 @@ def _process_block(
     partition_dirs: list[Path],
     input_dir: Path,
     output_dir: Path,
-    tile_extract: str | None,
     config: str | Path | None,
     progress: tqdm[None] | None = None,
 ) -> list[tuple[str, int, int, int]]:
     """Process a contiguous block of spatially adjacent partitions sequentially."""
     return [
-        _process_partition(pdir, input_dir, output_dir, tile_extract, config, progress)
+        _process_partition(pdir, input_dir, output_dir, config, progress)
         for pdir in partition_dirs
     ]
 
@@ -190,15 +183,15 @@ def run_map_matching(
     input_dir: Path,
     output_dir: Path,
     *,
-    tile_extract: str | None = None,
     config: str | Path | None = None,
     max_workers: int | None = None,
     quiet: bool = False,
 ) -> None:
     """Map-match all trips across partitions in parallel.
 
-    At least one of *tile_extract* or *config* must be provided so
-    Valhalla can locate the routing tiles.
+    *config* is an optional path to ``valhalla.json``; when ``None``
+    :func:`trucktrack.valhalla._actor._find_config` discovers one in
+    cwd (e.g. ``./valhalla.json``).
 
     *input_dir* should be the hive-partitioned output of
     :func:`trucktrack.pipeline.run_pipeline`, with layout::
@@ -268,7 +261,6 @@ def run_map_matching(
                 block,
                 input_dir,
                 output_dir,
-                tile_extract,
                 config,
                 progress,
             )

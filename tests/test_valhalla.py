@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 # Skip the entire module if pyvalhalla is not installed.
@@ -20,23 +18,38 @@ requires_pyvalhalla = pytest.mark.skipif(
     reason="pyvalhalla not installed",
 )
 
-_TILE_EXTRACT = os.environ.get("VALHALLA_TILE_EXTRACT", "")
+def _valhalla_works() -> bool:
+    """True iff a ``valhalla.json`` is discoverable AND Actor construction
+    succeeds with it.  Catches both missing configs and stale ones that
+    point at unavailable or incompatible tile extracts.
+    """
+    if not _pyvalhalla_available:
+        return False
+    try:
+        from trucktrack.valhalla._actor import get_actor
+
+        get_actor()
+    except Exception:
+        return False
+    return True
+
+
+_valhalla_ok = _valhalla_works()
 
 requires_tiles = pytest.mark.skipif(
-    not _TILE_EXTRACT,
-    reason="VALHALLA_TILE_EXTRACT env var not set",
+    not _valhalla_ok,
+    reason="no working valhalla.json discoverable",
 )
 
 
 @requires_pyvalhalla
+@requires_tiles
 class TestActorCache:
     def test_get_actor_returns_same_instance(self) -> None:
-        if not _TILE_EXTRACT:
-            pytest.skip("VALHALLA_TILE_EXTRACT not set")
         from trucktrack.valhalla._actor import get_actor
 
-        a1 = get_actor(_TILE_EXTRACT)
-        a2 = get_actor(_TILE_EXTRACT)
+        a1 = get_actor()
+        a2 = get_actor()
         assert a1 is a2
 
 
@@ -50,7 +63,6 @@ class TestRoute:
         result = route(
             origin=(43.65, -79.38),
             destination=(43.70, -79.40),
-            tile_extract=_TILE_EXTRACT,
         )
         assert isinstance(result, RouteSegment)
         assert len(result.coords) >= 2
@@ -66,7 +78,7 @@ class TestMapMatch:
         from trucktrack.valhalla import MatchedPoint, map_match
 
         points = [(43.65, -79.38), (43.651, -79.381), (43.652, -79.382)]
-        result = map_match(points, tile_extract=_TILE_EXTRACT)
+        result = map_match(points)
         assert len(result) == len(points)
         for mp in result:
             assert isinstance(mp, MatchedPoint)
@@ -75,7 +87,7 @@ class TestMapMatch:
         from trucktrack.valhalla import map_match_ways
 
         points = [(43.65, -79.38), (43.651, -79.381), (43.652, -79.382)]
-        result = map_match_ways(points, tile_extract=_TILE_EXTRACT)
+        result = map_match_ways(points)
         assert isinstance(result, list)
         assert len(result) >= 1
         assert all(isinstance(w, int) for w in result)
@@ -93,7 +105,7 @@ class TestMapMatch:
                 "lon": [-79.38, -79.381, -79.382],
             }
         )
-        result = map_match_dataframe(df, tile_extract=_TILE_EXTRACT)
+        result = map_match_dataframe(df)
         assert "matched_lat" in result.columns
         assert "matched_lon" in result.columns
         assert "distance_from_trace" in result.columns

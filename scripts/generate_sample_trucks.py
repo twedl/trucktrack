@@ -7,19 +7,15 @@ Layout matches the pipeline's raw stage::
     data/trucks/year=YYYY/chunk_id=XX/part-0.parquet
 
 Truck UUIDs and seeds are fixed so successive runs produce identical
-output — safe to commit the result.  Requires a tile extract::
+output — safe to commit the result.  Requires a discoverable
+``valhalla.json`` (e.g. ``./valhalla.json`` or
+``./valhalla_tiles/valhalla.json``)::
 
-    VALHALLA_TILE_EXTRACT=/path/to/valhalla_tiles.tar \\
-        uv run python scripts/generate_sample_trucks.py
-
-``trucktrack.valhalla._actor`` skips stale sibling ``valhalla.json``
-files whose embedded tile paths don't resolve, so the tar path can be
-passed through directly.
+    uv run python scripts/generate_sample_trucks.py
 """
 
 from __future__ import annotations
 
-import os
 import random
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -28,20 +24,22 @@ import polars as pl
 from trucktrack import generate_trace
 from trucktrack.generate.models import TripConfig
 from trucktrack.query import _CHUNK_ID_LEN
+from trucktrack.valhalla._actor import _find_config
 
 OUTPUT_DIR = Path(__file__).parent.parent / "data" / "trucks"
 
 
-def _tile_extract() -> str:
-    real_tar = os.environ.get("VALHALLA_TILE_EXTRACT")
-    if not real_tar:
-        raise SystemExit("set VALHALLA_TILE_EXTRACT to the tile extract (.tar)")
-    if not Path(real_tar).exists():
-        raise SystemExit(f"VALHALLA_TILE_EXTRACT does not exist: {real_tar}")
-    return str(Path(real_tar).resolve())
+def _config_path() -> Path:
+    found = _find_config()
+    if found is None:
+        raise SystemExit(
+            "No valhalla.json found. Place one at ./valhalla.json or "
+            "./valhalla_tiles/valhalla.json."
+        )
+    return found
 
 
-TILE_EXTRACT = _tile_extract()
+CONFIG_PATH = _config_path()
 
 # Hand-picked 32-char hex IDs whose last two chars span three chunk
 # partitions; stable across runs so the committed parquet has fixed
@@ -80,7 +78,7 @@ def _build_trip_configs(truck_id: str, rng: random.Random) -> list[TripConfig]:
                 departure_time=current_time,
                 trip_id=truck_id,
                 seed=rng.randint(0, 2**31),
-                tile_extract=TILE_EXTRACT,
+                config=CONFIG_PATH,
             )
         )
         current_time += timedelta(hours=rng.uniform(4, 8))

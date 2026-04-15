@@ -12,20 +12,18 @@ Tune the parameters in CONFIG and re-run to iterate.
 
 Usage (against the committed sample dataset at ``data/trucks/``)::
 
-    VALHALLA_TILE_EXTRACT=/path/to/valhalla_tiles.tar \
-        uv run python examples/inspect_truck.py \
+    uv run python examples/inspect_truck.py \
         --data-dir data/trucks \
         --truck-id aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa01 \
         --start 2026-01-01 --end 2026-01-03
 
-Regenerate or extend ``data/trucks/`` via
-``scripts/generate_sample_trucks.py``.
+Requires a ``valhalla.json`` in cwd.  Regenerate or extend
+``data/trucks/`` via ``scripts/generate_sample_trucks.py``.
 """
 
 from __future__ import annotations
 
 import argparse
-import os
 from datetime import timedelta
 from pathlib import Path
 
@@ -42,8 +40,6 @@ CONFIG = {
 
 
 def main(args: argparse.Namespace) -> None:
-    tile_extract = os.environ["VALHALLA_TILE_EXTRACT"]
-
     raw = tt.load_truck_trace(
         args.truck_id, args.start, args.end, data_dir=args.data_dir
     )
@@ -54,7 +50,7 @@ def main(args: argparse.Namespace) -> None:
     n_stops = split.filter(split["is_stop"])["segment_id"].n_unique()
     print(f"{n_trips} trip(s), {n_stops} stop(s)")
 
-    trips = tt.map_match_trips(split, tile_extract=tile_extract)
+    trips = tt.map_match_trips(split)
     for sid, tm in trips.items():
         print(f"  trip {sid}: {tm.matched_df.height} pts, {len(tm.way_ids)} ways")
 

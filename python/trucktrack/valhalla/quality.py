@@ -142,7 +142,6 @@ def evaluate_map_match(
     trip_id: str,
     points: list[tuple[float, float]],
     *,
-    tile_extract: str | None = None,
     costing: str = "auto",
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
@@ -160,7 +159,6 @@ def evaluate_map_match(
         points,
         lambda: map_match_route_shape(
             points,
-            tile_extract=tile_extract,
             costing=costing,
             costing_options=costing_options,
             config=config,
@@ -174,7 +172,6 @@ def evaluate_map_match_attributes(
     trip_id: str,
     points: list[tuple[float, float]],
     *,
-    tile_extract: str | None = None,
     costing: str = "auto",
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
@@ -197,7 +194,6 @@ def evaluate_map_match_attributes(
     def match() -> list[list[tuple[float, float]]]:
         _matched, _ways, shape = map_match_full(
             points,
-            tile_extract=tile_extract,
             costing=costing,
             costing_options=costing_options,
             config=config,

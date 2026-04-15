@@ -18,74 +18,41 @@ _local = threading.local()
 
 CONFIG_FILENAME = "valhalla.json"
 
+_SEARCH_PATHS: tuple[Path, ...] = (
+    Path(CONFIG_FILENAME),
+    Path("valhalla_tiles") / CONFIG_FILENAME,
+)
 
-def _config_matches_tile_extract(config_path: Path, tile_extract: Path) -> bool:
-    """True when the config's tile path resolves to *tile_extract*.
 
-    A sibling ``valhalla.json`` may belong to a different project or
-    embed container-style paths (e.g. ``/custom_files/...``).  We only
-    accept a config whose ``mjolnir.tile_extract``/``tile_dir`` resolves
-    to the same file/directory the caller actually requested.
-    """
+def _looks_like_valhalla_config(path: Path) -> bool:
+    """Cheap sanity check: JSON-parses and contains a ``mjolnir`` key."""
     try:
-        data = json.loads(config_path.read_text())
+        data = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError):
         return False
-    target = tile_extract.resolve()
-    mjolnir = data.get("mjolnir", {})
-    for key in ("tile_extract", "tile_dir"):
-        value = mjolnir.get(key)
-        if not value:
-            continue
-        candidate = Path(value)
-        if candidate.exists() and candidate.resolve() == target:
-            return True
-    return False
+    return isinstance(data, dict) and "mjolnir" in data
 
 
-def _find_config(tile_extract: str) -> Path | None:
-    """Look for a *matching* valhalla.json next to, inside, or in the cwd.
+def _find_config() -> Path | None:
+    """Discover ``valhalla.json`` in conventional locations relative to cwd.
 
     Search order:
 
-    1. Inside *tile_extract* (when it is a directory).
-    2. Sibling of *tile_extract* (e.g. ``valhalla_tiles/valhalla.json``
-       next to ``valhalla_tiles.tar``).
-    3. Current working directory.
-
-    A candidate is only accepted when its embedded tile path resolves
-    to *tile_extract* — stale or foreign configs are skipped so
-    ``get_actor`` falls back to :func:`valhalla.get_config`.
+    1. ``./valhalla.json``
+    2. ``./valhalla_tiles/valhalla.json``
     """
-    p = Path(tile_extract)
-    candidates: list[Path] = []
-    if p.is_dir():
-        candidates.append(p / CONFIG_FILENAME)
-    candidates.append(p.parent / CONFIG_FILENAME)
-    candidates.append(Path.cwd() / CONFIG_FILENAME)
-    for candidate in candidates:
-        if candidate.is_file() and _config_matches_tile_extract(candidate, p):
+    for candidate in _SEARCH_PATHS:
+        if candidate.is_file() and _looks_like_valhalla_config(candidate):
             return candidate
     return None
 
 
-def get_actor(
-    tile_extract: str | None = None,
-    config: str | Path | None = None,
-) -> Any:
-    """Return a cached Valhalla Actor for the given tile extract or config.
+def get_actor(config: str | Path | None = None) -> Any:
+    """Return a cached Valhalla Actor for the given config.
 
-    At least one of *tile_extract* or *config* must be provided.
-
-    Parameters
-    ----------
-    tile_extract
-        Path to the Valhalla tile extract (``.tar`` file or directory).
-        Optional when *config* is provided (the config already contains
-        the tile path).
-    config
-        Explicit path to a ``valhalla.json`` config file.  When provided
-        this takes priority over automatic discovery.
+    When *config* is ``None``, discovers ``valhalla.json`` via
+    :func:`_find_config`.  Raises :class:`FileNotFoundError` when no
+    config is found.
     """
     try:
         import valhalla
@@ -99,20 +66,15 @@ def get_actor(
         _local.actors = {}
     actors: dict[str, Any] = _local.actors
 
-    if config is not None:
-        key = str(Path(config).resolve())
-        if key not in actors:
-            actors[key] = valhalla.Actor(Path(config))
-    elif tile_extract is not None:
-        key = str(Path(tile_extract).resolve())
-        if key not in actors:
-            found = _find_config(tile_extract)
-            if found is not None:
-                actors[key] = valhalla.Actor(found)
-            else:
-                actors[key] = valhalla.Actor(
-                    valhalla.get_config(tile_extract=tile_extract)
-                )
-    else:
-        raise ValueError("At least one of tile_extract or config must be provided.")
+    if config is None:
+        config = _find_config()
+        if config is None:
+            raise FileNotFoundError(
+                "No valhalla.json found. Create one at ./valhalla.json "
+                "pointing at your tile extract, or pass config=..."
+            )
+    config_path = Path(config).resolve()
+    key = str(config_path)
+    if key not in actors:
+        actors[key] = valhalla.Actor(config_path)
     return actors[key]

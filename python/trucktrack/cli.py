@@ -130,7 +130,7 @@ def _cmd_generate(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
         gps_noise_meters=args.noise,
         seed=args.seed,
         valhalla_url=args.valhalla_url,
-        tile_extract=args.tile_extract,
+        config=args.config,
     )
     points = generate_trace(config)
     if not points:
@@ -257,10 +257,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Valhalla base URL (falls back to straight-line if unreachable).",
     )
     p_gen.add_argument(
-        "--tile-extract",
+        "--config",
         default=None,
         metavar="PATH",
-        help="Path to Valhalla tile extract (.tar). Uses local pyvalhalla.",
+        help="Path to valhalla.json. Uses local pyvalhalla.",
     )
 
     # partition

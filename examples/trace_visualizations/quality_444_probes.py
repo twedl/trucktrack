@@ -13,12 +13,11 @@ location").  Running this script reports which probes actually hit 444.
 
 from __future__ import annotations
 
-import os
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from dataclasses import dataclass
-
 from trucktrack import TripConfig, generate_trace
+from trucktrack.valhalla._actor import _find_config
 from trucktrack.valhalla.map_matching import map_match_full
 
 
@@ -31,7 +30,6 @@ def evaluate_map_match(
     label: str,
     points: list[tuple[float, float]],
     *,
-    tile_extract: str | None = None,
     trace_options: dict[str, object] | None = None,
 ) -> "ProbeResult":
     """Call trace_attributes (not trace_route) so we can observe the
@@ -40,17 +38,13 @@ def evaluate_map_match(
     if len(points) < 2:
         return ProbeResult(error="insufficient points (<2)")
     try:
-        map_match_full(points, tile_extract=tile_extract, trace_options=trace_options)
+        map_match_full(points, trace_options=trace_options)
     except Exception as exc:
         return ProbeResult(error=f"{type(exc).__name__}: {exc}")
     return ProbeResult(error=None)
 
 
 MapMatchQuality = ProbeResult  # keep existing probe signatures
-
-TILE_EXTRACT = os.environ.get(
-    "VALHALLA_TILE_EXTRACT", "valhalla_tiles/valhalla_tiles.tar"
-)
 
 
 def run(label: str, q: MapMatchQuality) -> None:
@@ -65,7 +59,6 @@ def probe_lake_ontario_middle() -> MapMatchQuality:
     return evaluate_map_match(
         "lake_middle",
         [(43.50, -78.00), (43.55, -77.80), (43.60, -77.60)],
-        tile_extract=TILE_EXTRACT,
     )
 
 
@@ -80,7 +73,6 @@ def probe_teleport_across_lake() -> MapMatchQuality:
             (43.1566, -77.6088),  # Rochester
             (43.6532, -79.3832),  # Toronto again
         ],
-        tile_extract=TILE_EXTRACT,
     )
 
 
@@ -92,14 +84,13 @@ def probe_tiny_search_radius() -> MapMatchQuality:
         destination=(45.4236, -75.7009),
         departure_time=datetime(2025, 6, 15, 8, 0, tzinfo=UTC),
         seed=42,
-        tile_extract=TILE_EXTRACT,
+        config=_find_config(),
         errors=[],
     )
     pts = [(p.lat, p.lon) for p in generate_trace(config)[:50]]
     return evaluate_map_match(
         "tiny_search_radius",
         pts,
-        tile_extract=TILE_EXTRACT,
         trace_options={"search_radius": 1, "gps_accuracy": 1},
     )
 
@@ -112,14 +103,13 @@ def probe_zero_route_factor() -> MapMatchQuality:
         destination=(45.4236, -75.7009),
         departure_time=datetime(2025, 6, 15, 8, 0, tzinfo=UTC),
         seed=42,
-        tile_extract=TILE_EXTRACT,
+        config=_find_config(),
         errors=[],
     )
     pts = [(p.lat, p.lon) for p in generate_trace(config)[:50]]
     return evaluate_map_match(
         "zero_route_factor",
         pts,
-        tile_extract=TILE_EXTRACT,
         trace_options={
             "max_route_distance_factor": 0.01,
             "max_route_time_factor": 0.01,
@@ -133,7 +123,6 @@ def probe_duplicate_points() -> MapMatchQuality:
     return evaluate_map_match(
         "duplicate_points",
         [(43.6532, -79.3832)] * 5,
-        tile_extract=TILE_EXTRACT,
     )
 
 
@@ -143,7 +132,6 @@ def probe_sparse_far_apart() -> MapMatchQuality:
     return evaluate_map_match(
         "sparse_far_apart",
         [(43.6532, -79.3832), (45.4236, -75.7009)],
-        tile_extract=TILE_EXTRACT,
         trace_options={"breakage_distance": 1000},
     )
 
@@ -158,7 +146,6 @@ def probe_all_interpolated() -> MapMatchQuality:
     return evaluate_map_match(
         "all_interpolated",
         [(43.6532, -79.3832), (43.65324, -79.38324)],
-        tile_extract=TILE_EXTRACT,
         trace_options={"interpolation_distance": 50},
     )
 
@@ -171,14 +158,13 @@ def probe_huge_interpolation_distance() -> MapMatchQuality:
         destination=(45.4236, -75.7009),
         departure_time=datetime(2025, 6, 15, 8, 0, tzinfo=UTC),
         seed=42,
-        tile_extract=TILE_EXTRACT,
+        config=_find_config(),
         errors=[],
     )
     pts = [(p.lat, p.lon) for p in generate_trace(config)[:20]]
     return evaluate_map_match(
         "huge_interpolation_distance",
         pts,
-        tile_extract=TILE_EXTRACT,
         trace_options={"interpolation_distance": 1_000_000},
     )
 

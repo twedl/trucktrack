@@ -13,12 +13,12 @@ from trucktrack.valhalla._parsing import parse_valhalla_response
 def route(
     origin: tuple[float, float],
     destination: tuple[float, float],
-    tile_extract: str | None = None,
+    *,
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
 ) -> RouteSegment:
     """Fetch a truck route using local pyvalhalla bindings."""
-    actor = get_actor(tile_extract, config=config)
+    actor = get_actor(config=config)
     body = {
         "locations": [
             {"lat": origin[0], "lon": origin[1]},

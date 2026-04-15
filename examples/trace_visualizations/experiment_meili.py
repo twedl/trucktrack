@@ -5,14 +5,14 @@ with varying parameter combinations.
 
 Usage::
 
-    VALHALLA_TILE_EXTRACT=valhalla_tiles/valhalla_tiles.tar \
-        uv run python examples/trace_visualizations/experiment_meili.py
+    uv run python examples/trace_visualizations/experiment_meili.py
+
+Requires a ``valhalla.json`` in cwd.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import tempfile
 import time
 from datetime import UTC, datetime, timedelta
@@ -27,12 +27,8 @@ from trucktrack import (
     traces_to_parquet,
 )
 from trucktrack.generate import TripConfig
-from trucktrack.valhalla._actor import get_actor
+from trucktrack.valhalla._actor import _find_config, get_actor
 from trucktrack.valhalla._parsing import decode_polyline6
-
-TILE_EXTRACT = os.environ.get(
-    "VALHALLA_TILE_EXTRACT", "valhalla_tiles/valhalla_tiles.tar"
-)
 
 ORIGIN = (43.6532, -79.3832)  # Toronto
 DESTINATION = (43.2557, -79.8711)  # Hamilton
@@ -51,7 +47,7 @@ def get_movement_points(
             destination=DESTINATION,
             departure_time=datetime(2025, 6, 15, 8, 0, tzinfo=UTC),
             seed=42,
-            tile_extract=TILE_EXTRACT,
+            config=_find_config(),
             gps_noise_meters=gps_noise_meters,
             errors=None if use_errors else [],  # None = default profile
         )
@@ -133,7 +129,7 @@ EXPERIMENTS = [
 
 
 def run_suite(label: str, pts: list[tuple[float, float]]) -> None:
-    actor = get_actor(TILE_EXTRACT)
+    actor = get_actor()
 
     # Warmup
     run_trace_route(actor, pts, EXPERIMENTS[0][1])

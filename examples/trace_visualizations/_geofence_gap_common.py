@@ -22,12 +22,10 @@ from trucktrack import (
     traces_to_parquet,
 )
 from trucktrack.valhalla import map_match_dataframe_full
+from trucktrack.valhalla._actor import _find_config
 from trucktrack.valhalla.map_matching import _adaptive_breakage_distance
 from trucktrack.visualize import plot_trace_layers, save_map, serve_map
 
-TILE_EXTRACT = os.environ.get(
-    "VALHALLA_TILE_EXTRACT", "valhalla_tiles/valhalla_tiles.tar"
-)
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", "examples/trace_visualizations/output"))
 
 
@@ -52,7 +50,7 @@ def run(example: GeofenceGapExample, *, serve: bool = False, port: int = 5000) -
             destination=example.destination,
             departure_time=datetime(2025, 6, 15, 8, 0, tzinfo=UTC),
             seed=42,
-            tile_extract=TILE_EXTRACT,
+            config=_find_config(),
             errors=[
                 ErrorConfig(
                     "geofence_gap",
@@ -95,9 +93,7 @@ def run(example: GeofenceGapExample, *, serve: bool = False, port: int = 5000) -
                 continue
             seg_points = list(zip(seg["lat"].to_list(), seg["lon"].to_list()))
             bd = _adaptive_breakage_distance(seg_points)
-            matched, ways, shape = map_match_dataframe_full(
-                seg, tile_extract=TILE_EXTRACT
-            )
+            matched, ways, shape = map_match_dataframe_full(seg)
             matched_parts.append(matched)
             all_ways.extend(ways)
             if shape:

@@ -25,7 +25,7 @@ def generate_trace(config: TripConfig) -> list[TracePoint]:
     rng = random.Random(config.seed)
 
     route = fetch_route(
-        config.origin, config.destination, config.valhalla_url, config.tile_extract
+        config.origin, config.destination, config.valhalla_url, config=config.config
     )
 
     origin_heading = _route_start_heading(route)

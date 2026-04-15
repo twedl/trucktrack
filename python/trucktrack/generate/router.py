@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import requests
 
 from trucktrack.generate.models import DEFAULT_VALHALLA_URL, RouteSegment
@@ -13,17 +15,18 @@ def fetch_route(
     origin: tuple[float, float],
     destination: tuple[float, float],
     valhalla_url: str = DEFAULT_VALHALLA_URL,
-    tile_extract: str | None = None,
+    config: str | Path | None = None,
 ) -> RouteSegment:
     """Fetch a truck route from Valhalla.
 
-    If *tile_extract* is provided, uses local pyvalhalla bindings.
-    Otherwise falls back to the HTTP API at *valhalla_url*.
+    If *config* is provided, uses local pyvalhalla bindings via the
+    given ``valhalla.json``.  Otherwise falls back to the HTTP API at
+    *valhalla_url*.
     """
-    if tile_extract is not None:
+    if config is not None:
         from trucktrack.valhalla.routing import route
 
-        return route(origin, destination, tile_extract)
+        return route(origin, destination, config=config)
 
     body = {
         "locations": [

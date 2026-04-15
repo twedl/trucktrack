@@ -2,8 +2,9 @@
 
 Usage::
 
-    VALHALLA_TILE_EXTRACT=valhalla_tiles/valhalla_tiles.tar \
-        uv run python examples/trace_visualizations/geofence_gap_toronto_ottawa.py
+    uv run python examples/trace_visualizations/geofence_gap_toronto_ottawa.py
+
+Requires a ``valhalla.json`` in cwd.
 """
 
 from __future__ import annotations

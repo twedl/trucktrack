@@ -17,7 +17,7 @@ callers can iterate on parameters cheaply::
         stop_max_diameter=50.0,
         stop_min_duration=timedelta(minutes=2),
     )
-    trips = tt.inspect.map_match_trips(split, tile_extract=TILE)
+    trips = tt.inspect.map_match_trips(split)  # valhalla.json discovered in cwd
     quality = tt.inspect.evaluate_quality(split, trips=trips)
     m = tt.inspect.plot_inspection(raw, split, trips)
     tt.visualize.serve_map(m)
@@ -159,7 +159,6 @@ def split_trips(
 def map_match_trips(
     split_df: pl.DataFrame,
     *,
-    tile_extract: str | None = None,
     costing: str = "auto",
     costing_options: dict[str, Any] | None = None,
     trace_options: dict[str, Any] | None = None,
@@ -180,7 +179,6 @@ def map_match_trips(
             continue
         matched_df, way_ids, shape = map_match_dataframe_full(
             sub,
-            tile_extract=tile_extract,
             costing=costing,
             costing_options=costing_options,
             trace_options=trace_options,
@@ -210,7 +208,6 @@ def evaluate_quality(
     split_df: pl.DataFrame,
     *,
     trips: dict[int, TripMatch] | None = None,
-    tile_extract: str | None = None,
     costing: str = "auto",
     costing_options: dict[str, Any] | None = None,
     trace_options: dict[str, Any] | None = None,
@@ -223,15 +220,10 @@ def evaluate_quality(
     When *trips* is provided, ``path_length_ratio`` and
     ``heading_reversals`` are computed directly from the cached match
     output (no second Valhalla call).  ``shape_gaps`` / ``n_polylines``
-    are unavailable on the cached path — use the Valhalla path
-    (``trips=None``, pass ``tile_extract``) if you need them.
-
-    Raises ``ValueError`` when both *trips* and *tile_extract* are
-    missing and the function has no way to produce quality signals.
+    are unavailable on the cached path — pass ``trips=None`` to let
+    Valhalla compute them (requires a discoverable ``valhalla.json`` or
+    an explicit ``config=`` path).
     """
-    if trips is None and tile_extract is None and config is None:
-        raise ValueError("provide trips=... or tile_extract=... / config=...")
-
     df = _non_stop(split_df, skip_stops)
     rows: list[dict[str, Any]] = []
     for (sid,), sub in df.sort("time").group_by("segment_id", maintain_order=True):
@@ -245,7 +237,6 @@ def evaluate_quality(
             q = evaluate_map_match(
                 str(sid_int),
                 pts,
-                tile_extract=tile_extract,
                 costing=costing,
                 costing_options=costing_options,
                 config=config,

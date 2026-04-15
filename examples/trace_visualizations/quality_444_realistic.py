@@ -21,22 +21,18 @@ which actually reproduce the 444 wrapper given our local tile extract.
 
 Usage::
 
-    VALHALLA_TILE_EXTRACT=valhalla_tiles/valhalla_tiles.tar \
-        uv run python examples/trace_visualizations/quality_444_realistic.py
+    uv run python examples/trace_visualizations/quality_444_realistic.py
+
+Requires a ``valhalla.json`` in cwd.
 """
 
 from __future__ import annotations
 
-import os
 import random
 
 from trucktrack.valhalla.quality import (
     MapMatchQuality,
     evaluate_map_match_attributes,
-)
-
-TILE_EXTRACT = os.environ.get(
-    "VALHALLA_TILE_EXTRACT", "valhalla_tiles/valhalla_tiles.tar"
 )
 
 
@@ -60,7 +56,6 @@ def scenario_power_cycle_wrong_fix() -> MapMatchQuality:
             (43.1566, -77.6088),  # Rochester, glitched
             (43.6532, -79.3832),  # Toronto, recovered
         ],
-        tile_extract=TILE_EXTRACT,
     )
 
 
@@ -84,7 +79,6 @@ def scenario_latlon_swap_burst() -> MapMatchQuality:
             (45.4245, -75.7002),
             (43.6550, -79.3815),  # back to Toronto
         ],
-        tile_extract=TILE_EXTRACT,
     )
 
 
@@ -103,7 +97,6 @@ def scenario_multipath_urban_canyon() -> MapMatchQuality:
     return evaluate_map_match_attributes(
         "multipath_urban_canyon",
         pts,
-        tile_extract=TILE_EXTRACT,
         trace_options={"search_radius": 10, "gps_accuracy": 5},
     )
 
@@ -122,9 +115,7 @@ def scenario_dwell_drift_crosslane() -> MapMatchQuality:
         pts.append(
             (base[0] + rng.gauss(0, 0.0005), base[1] + rng.gauss(0, 0.0006))
         )
-    return evaluate_map_match_attributes(
-        "dwell_drift_crosslane", pts, tile_extract=TILE_EXTRACT
-    )
+    return evaluate_map_match_attributes("dwell_drift_crosslane", pts)
 
 
 def main() -> None:

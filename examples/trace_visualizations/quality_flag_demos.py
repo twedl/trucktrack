@@ -10,21 +10,18 @@ Runs three trip segments, one per flag:
 
 Usage::
 
-    VALHALLA_TILE_EXTRACT=valhalla_tiles/valhalla_tiles.tar \
-        uv run python examples/trace_visualizations/quality_flag_demos.py
+    uv run python examples/trace_visualizations/quality_flag_demos.py
+
+Requires a ``valhalla.json`` in cwd.
 """
 
 from __future__ import annotations
 
-import os
 from datetime import UTC, datetime
 
 from trucktrack import ErrorConfig, TripConfig, generate_trace
+from trucktrack.valhalla._actor import _find_config
 from trucktrack.valhalla.quality import MapMatchQuality, evaluate_map_match
-
-TILE_EXTRACT = os.environ.get(
-    "VALHALLA_TILE_EXTRACT", "valhalla_tiles/valhalla_tiles.tar"
-)
 
 
 def _print(label: str, q: MapMatchQuality) -> None:
@@ -43,7 +40,6 @@ def demo_insufficient_points() -> MapMatchQuality:
     return evaluate_map_match(
         trip_id="too_few_points",
         points=[(43.6426, -79.3871)],
-        tile_extract=TILE_EXTRACT,
     )
 
 
@@ -53,7 +49,6 @@ def demo_valhalla_raises() -> MapMatchQuality:
     return evaluate_map_match(
         trip_id="off_tile",
         points=[(0.0, 0.0), (0.1, 0.1)],
-        tile_extract=TILE_EXTRACT,
     )
 
 
@@ -68,7 +63,7 @@ def demo_shape_break() -> MapMatchQuality:
         destination=(45.4236, -75.7009),
         departure_time=datetime(2025, 6, 15, 8, 0, tzinfo=UTC),
         seed=42,
-        tile_extract=TILE_EXTRACT,
+        config=_find_config(),
         errors=[
             ErrorConfig(
                 "geofence_gap",
@@ -81,7 +76,6 @@ def demo_shape_break() -> MapMatchQuality:
     return evaluate_map_match(
         trip_id="break_on_gap",
         points=points,
-        tile_extract=TILE_EXTRACT,
         trace_options={"breakage_distance": 3000},
     )
 

@@ -74,8 +74,7 @@ from trucktrack.valhalla.pipeline import run_map_matching
 run_map_matching(
     Path("data/partitioned"),
     Path("data/matched"),
-    tile_extract="valhalla_tiles.tar",
-    # or: config="valhalla.json",
+    # config="valhalla.json"  # omit to auto-discover in cwd
 )
 ```
 

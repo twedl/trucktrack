@@ -148,11 +148,6 @@ class TestEvaluateQualityCached:
         assert row["ok"] is False
         assert row["error"] is None
 
-    def test_requires_trips_or_tile_extract(self) -> None:
-        split = _straight_split_df()
-        with pytest.raises(ValueError, match="trips=.* or tile_extract="):
-            tti.evaluate_quality(split)
-
 
 # ---------------------------------------------------------------------------
 # load_truck_trace time filter (raw hive layout fixture)

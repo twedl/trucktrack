@@ -6,12 +6,12 @@ installed ``trucktrack`` package directly.
 
 Usage::
 
-    VALHALLA_TILE_EXTRACT=valhalla_tiles/valhalla_tiles.tar \
-        uv run python examples/end_to_end.py
+    uv run python examples/end_to_end.py
+
+Requires a ``valhalla.json`` in cwd (or under ``valhalla_tiles/``).
 
 Environment variables::
 
-    VALHALLA_TILE_EXTRACT  Path to Valhalla tile extract (required)
     OUTPUT_DIR             Base output directory (default: examples/end_to_end_output)
     N_TRUCKS               Number of trucks to generate (default: 5)
     K_TRIPS                Number of trips per truck (default: 5)
@@ -33,7 +33,6 @@ from trucktrack.pipeline import run_pipeline  # noqa: E402
 from trucktrack.valhalla.pipeline import run_map_matching  # noqa: E402
 
 OUTPUT_BASE = Path(os.environ.get("OUTPUT_DIR", "examples/end_to_end_output"))
-TILE_EXTRACT = os.environ.get("VALHALLA_TILE_EXTRACT", "valhalla_tiles.tar")
 MAX_WORKERS = int(os.environ.get("MAX_WORKERS", "1"))
 
 
@@ -58,7 +57,6 @@ def main() -> None:
     run_map_matching(
         partitioned_dir,
         matched_dir,
-        tile_extract=TILE_EXTRACT,
         max_workers=MAX_WORKERS,
     )
 

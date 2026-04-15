@@ -17,19 +17,14 @@
 
 Usage::
 
-    VALHALLA_TILE_EXTRACT=valhalla_tiles/valhalla_tiles.tar \
-        uv run python examples/trace_visualizations/quality_signals_demo.py
+    uv run python examples/trace_visualizations/quality_signals_demo.py
+
+Requires a ``valhalla.json`` in cwd.
 """
 
 from __future__ import annotations
 
-import os
-
 from trucktrack.valhalla.quality import MapMatchQuality, evaluate_map_match
-
-TILE_EXTRACT = os.environ.get(
-    "VALHALLA_TILE_EXTRACT", "valhalla_tiles/valhalla_tiles.tar"
-)
 
 
 def _report(label: str, q: MapMatchQuality) -> None:
@@ -61,7 +56,6 @@ def scenario_zigzag_parallel_streets(
     return evaluate_map_match(
         "zigzag_parallel_streets",
         pts,
-        tile_extract=TILE_EXTRACT,
         trace_options=trace_options,
     )
 

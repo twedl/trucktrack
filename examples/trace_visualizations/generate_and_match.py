@@ -10,12 +10,12 @@ Requires pyvalhalla and a tile extract built by scripts/setup_valhalla.py.
 Usage::
 
     # Save to HTML file:
-    VALHALLA_TILE_EXTRACT=valhalla_tiles/valhalla_tiles.tar \
-        uv run python examples/trace_visualizations/generate_and_match.py
+    uv run python examples/trace_visualizations/generate_and_match.py
 
     # Serve via Flask (useful inside k8s notebooks):
-    VALHALLA_TILE_EXTRACT=valhalla_tiles/valhalla_tiles.tar \
-        uv run python examples/trace_visualizations/generate_and_match.py --serve
+    uv run python examples/trace_visualizations/generate_and_match.py --serve
+
+Requires a ``valhalla.json`` in cwd.
 """
 
 from __future__ import annotations
@@ -35,11 +35,9 @@ from trucktrack import (
     inspect as tt_inspect,
 )
 from trucktrack.generate import TripConfig
+from trucktrack.valhalla._actor import _find_config
 from trucktrack.visualize import save_map, serve_map
 
-TILE_EXTRACT = os.environ.get(
-    "VALHALLA_TILE_EXTRACT", "valhalla_tiles/valhalla_tiles.tar"
-)
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", "examples/trace_visualizations/output"))
 
 # FCA Brampton Assembly Plant → Comber Petro-Canada
@@ -59,7 +57,7 @@ def main(args: argparse.Namespace) -> None:
             destination=DESTINATION,
             departure_time=datetime(2025, 6, 15, 8, 0, tzinfo=UTC),
             seed=42,
-            tile_extract=TILE_EXTRACT,
+            config=_find_config(),
         )
         points = generate_trace(config)
         print(f"  {len(points)} trace points generated")
@@ -81,7 +79,7 @@ def main(args: argparse.Namespace) -> None:
         print(f"  {n_trips} trip(s), {n_stops} stop(s)")
 
         print("Map-matching...")
-        trips = tt_inspect.map_match_trips(split, tile_extract=TILE_EXTRACT)
+        trips = tt_inspect.map_match_trips(split)
         for sid, tm in trips.items():
             print(
                 f"  segment {sid}: {tm.matched_df.height} pts, "

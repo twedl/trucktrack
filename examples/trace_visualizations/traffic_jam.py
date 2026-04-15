@@ -7,8 +7,9 @@ produce two trip segments and two stop segments (origin stop + jam).
 
 Usage::
 
-    VALHALLA_TILE_EXTRACT=valhalla_tiles/valhalla_tiles.tar \
-        uv run python examples/trace_visualizations/traffic_jam.py
+    uv run python examples/trace_visualizations/traffic_jam.py
+
+Requires a ``valhalla.json`` in cwd.
 """
 
 from __future__ import annotations
@@ -31,11 +32,9 @@ from trucktrack import (
 from trucktrack.generate import TripConfig
 from trucktrack.generate.models import TracePoint
 from trucktrack.valhalla import map_match_dataframe_full
+from trucktrack.valhalla._actor import _find_config
 from trucktrack.visualize import plot_trace_layers, save_map, serve_map
 
-TILE_EXTRACT = os.environ.get(
-    "VALHALLA_TILE_EXTRACT", "valhalla_tiles/valhalla_tiles.tar"
-)
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", "examples/trace_visualizations/output"))
 
 # FCA Brampton Assembly Plant → Comber Petro-Canada
@@ -99,7 +98,7 @@ def main(args: argparse.Namespace) -> None:
             destination=DESTINATION,
             departure_time=datetime(2025, 6, 15, 8, 0, tzinfo=UTC),
             seed=42,
-            tile_extract=TILE_EXTRACT,
+            config=_find_config(),
         )
         points = generate_trace(config)
         print(f"  {len(points)} trace points generated")
@@ -136,9 +135,7 @@ def main(args: argparse.Namespace) -> None:
         all_ways: list[int] = []
         all_shapes: list[list[tuple[float, float]]] = []
         for (seg_id,), seg in movement.group_by("segment_id", maintain_order=True):
-            matched, ways, shape = map_match_dataframe_full(
-                seg, tile_extract=TILE_EXTRACT
-            )
+            matched, ways, shape = map_match_dataframe_full(seg)
             matched_parts.append(matched)
             all_ways.extend(ways)
             if shape:

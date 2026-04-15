@@ -5,8 +5,9 @@ Valhalla's trace_route endpoint.
 
 Usage::
 
-    VALHALLA_TILE_EXTRACT=valhalla_tiles/valhalla_tiles.tar \
-        uv run python examples/trace_visualizations/investigate_meili.py
+    uv run python examples/trace_visualizations/investigate_meili.py
+
+Requires a ``valhalla.json`` in cwd.
 """
 
 from __future__ import annotations
@@ -26,11 +27,9 @@ from trucktrack import (
 )
 from trucktrack.generate import TripConfig
 from trucktrack.valhalla import map_match_dataframe_full, map_match_route_shape
+from trucktrack.valhalla._actor import _find_config
 from trucktrack.visualize import plot_trace_layers, save_map
 
-TILE_EXTRACT = os.environ.get(
-    "VALHALLA_TILE_EXTRACT", "valhalla_tiles/valhalla_tiles.tar"
-)
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", "examples/trace_visualizations/output"))
 
 # Toronto → Hamilton
@@ -51,7 +50,7 @@ def main() -> None:
             destination=DESTINATION,
             departure_time=datetime(2025, 6, 15, 8, 0, tzinfo=UTC),
             seed=42,
-            tile_extract=TILE_EXTRACT,
+            config=_find_config(),
         )
         points = generate_trace(config)
         print(f"  {len(points)} trace points")
@@ -78,11 +77,9 @@ def main() -> None:
         all_ways: list[int] = []
         all_shapes: list[list[tuple[float, float]]] = []
         for (seg_id,), seg in movement.group_by("segment_id", maintain_order=True):
-            matched, ways, _ = map_match_dataframe_full(
-                seg, tile_extract=TILE_EXTRACT
-            )
+            matched, ways, _ = map_match_dataframe_full(seg)
             pts = list(zip(seg["lat"].to_list(), seg["lon"].to_list(), strict=True))
-            shapes = map_match_route_shape(pts, tile_extract=TILE_EXTRACT)
+            shapes = map_match_route_shape(pts)
             matched_parts.append(matched)
             all_ways.extend(ways)
             all_shapes.extend(shapes)
