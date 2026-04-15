@@ -12,7 +12,7 @@ Tune the parameters in CONFIG and re-run to iterate.
 
 Usage (against the committed sample dataset at ``data/trucks/``)::
 
-    VALHALLA_TILE_EXTRACT=valhalla_tiles/valhalla_tiles.tar \
+    VALHALLA_TILE_EXTRACT=/path/to/valhalla_tiles.tar \
         uv run python examples/inspect_truck.py \
         --data-dir data/trucks \
         --truck-id aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa01 \

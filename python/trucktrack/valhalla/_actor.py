@@ -19,27 +19,32 @@ _local = threading.local()
 CONFIG_FILENAME = "valhalla.json"
 
 
-def _config_points_to_existing_tiles(config_path: Path) -> bool:
-    """True when the config's ``mjolnir.tile_extract``/``tile_dir`` resolves locally.
+def _config_matches_tile_extract(config_path: Path, tile_extract: Path) -> bool:
+    """True when the config's tile path resolves to *tile_extract*.
 
-    Configs generated in containers often embed absolute paths like
-    ``/custom_files/valhalla_tiles.tar`` that don't exist on the host.
-    Skipping those lets us fall back to a freshly built config.
+    A sibling ``valhalla.json`` may belong to a different project or
+    embed container-style paths (e.g. ``/custom_files/...``).  We only
+    accept a config whose ``mjolnir.tile_extract``/``tile_dir`` resolves
+    to the same file/directory the caller actually requested.
     """
     try:
         data = json.loads(config_path.read_text())
     except (OSError, json.JSONDecodeError):
         return False
+    target = tile_extract.resolve()
     mjolnir = data.get("mjolnir", {})
     for key in ("tile_extract", "tile_dir"):
         value = mjolnir.get(key)
-        if value and Path(value).exists():
+        if not value:
+            continue
+        candidate = Path(value)
+        if candidate.exists() and candidate.resolve() == target:
             return True
     return False
 
 
 def _find_config(tile_extract: str) -> Path | None:
-    """Look for a *valid* valhalla.json next to, inside, or in the cwd.
+    """Look for a *matching* valhalla.json next to, inside, or in the cwd.
 
     Search order:
 
@@ -48,10 +53,9 @@ def _find_config(tile_extract: str) -> Path | None:
        next to ``valhalla_tiles.tar``).
     3. Current working directory.
 
-    A candidate is only accepted when its embedded tile path exists
-    locally — stale container-style configs (e.g. pointing at
-    ``/custom_files/...``) are skipped so ``get_actor`` can fall back
-    to :func:`valhalla.get_config`.
+    A candidate is only accepted when its embedded tile path resolves
+    to *tile_extract* — stale or foreign configs are skipped so
+    ``get_actor`` falls back to :func:`valhalla.get_config`.
     """
     p = Path(tile_extract)
     candidates: list[Path] = []
@@ -60,7 +64,7 @@ def _find_config(tile_extract: str) -> Path | None:
     candidates.append(p.parent / CONFIG_FILENAME)
     candidates.append(Path.cwd() / CONFIG_FILENAME)
     for candidate in candidates:
-        if candidate.is_file() and _config_points_to_existing_tiles(candidate):
+        if candidate.is_file() and _config_matches_tile_extract(candidate, p):
             return candidate
     return None
 
