@@ -295,9 +295,7 @@ class TestStalePingFilter:
         )
         out = trucktrack.filter_stale_pings(df)
         assert out.height == 2
-        # The stale copy at t=63 is dropped; rows at t=0 and t=60 remain.
-        lats = sorted(out["lat"].to_list())
-        assert lats == [43.0, 43.001]
+        assert sorted(out["lat"].to_list()) == [43.0, 43.001]
 
     def test_clean_data_passes_through(self) -> None:
         df = _make_raw(

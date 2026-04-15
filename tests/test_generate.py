@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import random
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import polars as pl
 import pytest
 import requests
+import trucktrack
 from trucktrack.generate import (
     TracePoint,
     TripConfig,
@@ -15,6 +17,7 @@ from trucktrack.generate import (
     traces_to_csv,
     traces_to_parquet,
 )
+from trucktrack.generate.gps_errors import stale_reemission
 from trucktrack.generate.models import DEFAULT_VALHALLA_URL
 
 
@@ -123,40 +126,27 @@ def test_empty_route_handled() -> None:
 # ── GPS error injectors ──────────────────────────────────────────────────
 
 
+def _linear_trace(n: int) -> list[TracePoint]:
+    base = datetime(2026, 1, 1, 8, 0, tzinfo=UTC).replace(tzinfo=None)
+    return [
+        TracePoint(
+            lat=43.0 + i * 0.001,
+            lon=-79.0,
+            speed_mph=55.0,
+            heading=90.0,
+            timestamp=base + timedelta(seconds=60 * i),
+        )
+        for i in range(n)
+    ]
+
+
 class TestStaleReemissionInjector:
-    @staticmethod
-    def _linear_trace(n: int) -> list[TracePoint]:
-        base = datetime(2026, 1, 1, 8, 0, tzinfo=UTC).replace(tzinfo=None)
-        from datetime import timedelta
-
-        return [
-            TracePoint(
-                lat=43.0 + i * 0.001,
-                lon=-79.0,
-                speed_mph=55.0,
-                heading=90.0,
-                timestamp=base + timedelta(seconds=60 * i),
-            )
-            for i in range(n)
-        ]
-
     def test_injects_stale_copies(self) -> None:
-        import random
-
-        from trucktrack.generate.gps_errors import stale_reemission
-
-        points = self._linear_trace(30)
-        rng = random.Random(0)
-        out = stale_reemission(points, rng, count=3)
-
-        # 3 rows inserted.
+        points = _linear_trace(30)
+        out = stale_reemission(points, random.Random(0), count=3)
         assert len(out) == 33
 
-        # Every inserted row must have a (lat, lon, speed, heading) tuple
-        # that matches some earlier original row.
         src_keys = {(p.lat, p.lon, p.speed_mph, p.heading) for p in points}
-        # After injection the stale rows duplicate original keys — at least
-        # three rows share a key with an earlier one within the output.
         seen: dict[tuple[float, float, float, float], int] = {}
         dup_count = 0
         for p in out:
@@ -168,14 +158,8 @@ class TestStaleReemissionInjector:
 
     def test_filter_removes_injected_errors(self) -> None:
         """Injector + filter round-trip: trace returns to original length."""
-        import random
-
-        import trucktrack
-        from trucktrack.generate.gps_errors import stale_reemission
-
-        points = self._linear_trace(30)
-        rng = random.Random(7)
-        corrupted = stale_reemission(points, rng, count=3)
+        points = _linear_trace(30)
+        corrupted = stale_reemission(points, random.Random(7), count=3)
         assert len(corrupted) == 33
 
         df = pl.DataFrame(
@@ -192,10 +176,6 @@ class TestStaleReemissionInjector:
         assert cleaned.height == 30
 
     def test_noop_on_short_trace(self) -> None:
-        import random
-
-        from trucktrack.generate.gps_errors import stale_reemission
-
-        points = self._linear_trace(5)
+        points = _linear_trace(5)
         out = stale_reemission(points, random.Random(0), count=3)
         assert out == points
