@@ -38,6 +38,21 @@ CONFIG = {
     "traffic_min_distance": 10.0,
 }
 
+# Valhalla Meili defaults — tweak any key to change matching behaviour.
+# See DEFAULT_TRACE_OPTIONS in trucktrack.valhalla.map_matching for source.
+TRACE_OPTIONS: dict[str, object] = {
+    "search_radius": 50,  # meters, per-point candidate search
+    "gps_accuracy": 25,  # meters, emission noise (Meili sigma_z)
+    "interpolation_distance": 20,  # meters, fold points closer than this
+    "max_route_distance_factor": 10,  # max detour between consecutive fixes
+    "max_route_time_factor": 10,
+    "beta": 5,  # transition smoothing; higher = stickier to prev edge
+    "turn_penalty_factor": 500,  # cost per U-turn; 0 = permissive
+    # "breakage_distance": 3000,  # override Valhalla's default; leave commented
+    # to keep the adaptive per-call value from
+    # trucktrack.valhalla.map_matching
+}
+
 
 def main(args: argparse.Namespace) -> None:
     raw = tt.load_truck_trace(
@@ -50,7 +65,7 @@ def main(args: argparse.Namespace) -> None:
     n_stops = split.filter(split["is_stop"])["segment_id"].n_unique()
     print(f"{n_trips} trip(s), {n_stops} stop(s)")
 
-    trips = tt.map_match_trips(split)
+    trips = tt.map_match_trips(split, trace_options=TRACE_OPTIONS)
     for sid, tm in trips.items():
         print(f"  trip {sid}: {tm.matched_df.height} pts, {len(tm.way_ids)} ways")
 
