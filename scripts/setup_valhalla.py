@@ -23,6 +23,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import subprocess
 import sys
@@ -35,6 +36,20 @@ GEOFABRIK_URL = (
     "https://download.geofabrik.de/north-america/canada/ontario-latest.osm.pbf"
 )
 DEFAULT_PBF_PATH = Path("data/osm/ontario-latest.osm.pbf")
+
+# Parameters that client requests are allowed to override at call time.
+# valhalla_build_config has no CLI flag for meili.customizable, so we patch
+# the generated JSON in build_config().
+MEILI_CUSTOMIZABLE: list[str] = [
+    "search_radius",
+    "gps_accuracy",
+    "breakage_distance",
+    "turn_penalty_factor",
+    "interpolation_distance",
+    "max_route_distance_factor",
+    "max_route_time_factor",
+    "beta",
+]
 
 CONFIG_OPTIONS: dict[str, bool | int | float] = {
     "mjolnir-max-cache-size": 1_000_000_000,
@@ -128,11 +143,16 @@ def build_config(
     for key, value in CONFIG_OPTIONS.items():
         cmd.extend([f"--{key}", str(value)])
     print(f"Generating config: {config_path}", file=sys.stderr)
-    with config_path.open("w") as fh:
-        result = subprocess.run(cmd, stdout=fh, check=False)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if result.returncode != 0:
-        config_path.unlink(missing_ok=True)
         raise SystemExit(result.returncode)
+
+    # valhalla_build_config has no flag for meili.customizable, so patch it
+    # after generation.  Without this, client-side overrides for
+    # breakage_distance, turn_penalty_factor, etc. are silently ignored.
+    config = json.loads(result.stdout)
+    config.setdefault("meili", {})["customizable"] = MEILI_CUSTOMIZABLE
+    config_path.write_text(json.dumps(config, indent=2) + "\n")
 
 
 def main(argv: list[str] | None = None) -> int:
