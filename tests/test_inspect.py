@@ -75,6 +75,7 @@ class TestSplitTrips:
             stop_max_diameter=30.0,
             stop_min_duration=timedelta(minutes=2),
             traffic_max_angle_change=None,
+            stale_window=None,
         )
         assert "segment_id" in out.columns
         assert "is_stop" in out.columns
@@ -94,6 +95,7 @@ class TestSplitTrips:
             stop_max_diameter=30.0,
             stop_min_duration=timedelta(minutes=2),
             traffic_max_angle_change=None,
+            stale_window=None,
         )
         assert_frame_equal(out, baseline)
 

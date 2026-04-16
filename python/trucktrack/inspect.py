@@ -34,6 +34,7 @@ import polars as pl
 
 from trucktrack.query import ChunkIndex, scan_raw_truck
 from trucktrack.splitters import (
+    filter_stale_pings,
     filter_traffic_stops,
     split_by_observation_gap,
     split_by_stops,
@@ -138,13 +139,20 @@ def split_trips(
     traffic_max_angle_change: float | None = 30.0,
     traffic_min_distance: float = 10.0,
     min_length: int = 3,
+    stale_window: int | None = 5,
 ) -> pl.DataFrame:
-    """Apply gap split, stop split, and (optionally) the traffic filter.
+    """Apply stale-ping, gap, stop, and (optionally) traffic filters.
+
+    Mirrors the pipeline's per-chunk processing so inspect results match
+    what ``run_pipeline`` produces for the same input.
 
     Returns the input rows annotated with ``segment_id`` and ``is_stop``.
     Pass ``traffic_max_angle_change=None`` to skip the traffic filter
-    (useful for with/without comparisons).
+    (useful for with/without comparisons).  Pass ``stale_window=None``
+    to skip the stale-ping filter.
     """
+    if stale_window is not None:
+        df = filter_stale_pings(df, window=stale_window)
     gapped = split_by_observation_gap(df, gap, min_length=min_length)
     stopped = split_by_stops(
         gapped, stop_max_diameter, stop_min_duration, min_length=min_length
