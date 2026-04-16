@@ -102,7 +102,12 @@ def map_match_trip(
     trip_id = trip["id"][0]
     date = cast(datetime, trip["time"].min()).date()
     if len(trip) < 2:
-        q = MapMatchQuality(trip_id=trip_id, ok=False, error="insufficient points (<2)", n_points=len(trip))
+        q = MapMatchQuality(
+            trip_id=trip_id,
+            ok=False,
+            error="insufficient points (<2)",
+            n_points=len(trip),
+        )
         return (
             _null_way_result(trip_id, date),
             pl.DataFrame([_quality_row(trip_id, date, q)], schema=_QUALITY_SCHEMA),

@@ -213,7 +213,10 @@ def map_match_trips(
             matched_df = sub.with_columns(
                 pl.Series("matched_lat", [m.lat for m in q.matched_points]),
                 pl.Series("matched_lon", [m.lon for m in q.matched_points]),
-                pl.Series("distance_from_trace", [m.distance_from_trace for m in q.matched_points]),
+                pl.Series(
+                    "distance_from_trace",
+                    [m.distance_from_trace for m in q.matched_points],
+                ),
             )
             out[sid_int] = TripMatch(
                 segment_id=sid_int,

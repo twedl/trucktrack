@@ -41,7 +41,8 @@ def _adaptive_breakage_distance(points: list[tuple[float, float]]) -> float:
         d = haversine_m(points[i - 1][0], points[i - 1][1], points[i][0], points[i][1])
         if d > max_gap:
             max_gap = d
-    return max(_BASE_BREAKAGE_DISTANCE, min(_MAX_BREAKAGE_DISTANCE, max_gap * _BREAKAGE_MULTIPLIER))
+    scaled = max_gap * _BREAKAGE_MULTIPLIER
+    return max(_BASE_BREAKAGE_DISTANCE, min(_MAX_BREAKAGE_DISTANCE, scaled))
 
 
 def _build_trace_options(
