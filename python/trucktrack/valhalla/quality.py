@@ -181,6 +181,7 @@ def evaluate_map_match(
     input (spurious detours), or when the matched path reverses
     direction many times (stop jitter / multipath).
     """
+
     def match() -> _MatchResult:
         shapes = map_match_route_shape(
             points,
