@@ -20,7 +20,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from trucktrack.generate.interpolator import bearing, haversine_m
-from trucktrack.valhalla.map_matching import map_match_full, map_match_route_shape
+from trucktrack.valhalla.map_matching import (
+    MatchedPoint,
+    map_match_full,
+    map_match_route_shape,
+    map_match_ways,
+)
 
 # A clean match is ~1.0–1.1; spurious detours push the ratio above 1.5.
 # A ratio well below 1.0 means the match has gaps (breakage_distance too
@@ -46,6 +51,10 @@ class MapMatchQuality:
     # None when input straight-line length is zero (coincident points).
     path_length_ratio: float | None = None
     heading_reversals: int = 0
+    # Match results — populated on success, empty on error.
+    matched_points: list[MatchedPoint] = field(default_factory=list)
+    way_ids: list[int] = field(default_factory=list)
+    shapes: list[list[tuple[float, float]]] = field(default_factory=list)
 
     @property
     def has_issues(self) -> bool:
@@ -117,10 +126,19 @@ def path_quality(
     return ratio, reversals
 
 
+@dataclass
+class _MatchResult:
+    """Internal container for raw Valhalla output."""
+
+    shapes: list[list[tuple[float, float]]]
+    matched_points: list[MatchedPoint] = field(default_factory=list)
+    way_ids: list[int] = field(default_factory=list)
+
+
 def _evaluate(
     trip_id: str,
     points: list[tuple[float, float]],
-    match: Callable[[], list[list[tuple[float, float]]]],
+    match: Callable[[], _MatchResult],
     *,
     record_breaks: bool,
 ) -> MapMatchQuality:
@@ -130,15 +148,18 @@ def _evaluate(
         return q
 
     try:
-        shapes = match()
+        result = match()
     except Exception as exc:  # pyvalhalla raises RuntimeError on failure
         q.error = f"{type(exc).__name__}: {exc}"
         return q
 
+    q.shapes = result.shapes
+    q.matched_points = result.matched_points
+    q.way_ids = result.way_ids
     if record_breaks:
-        q.n_polylines = len(shapes)
-        q.shape_gaps = _polyline_break_gaps(shapes)
-    q.path_length_ratio, q.heading_reversals = path_quality(points, shapes)
+        q.n_polylines = len(result.shapes)
+        q.shape_gaps = _polyline_break_gaps(result.shapes)
+    q.path_length_ratio, q.heading_reversals = path_quality(points, result.shapes)
     q.ok = not q.has_issues
     return q
 
@@ -159,18 +180,17 @@ def evaluate_map_match(
     input (spurious detours), or when the matched path reverses
     direction many times (stop jitter / multipath).
     """
-    return _evaluate(
-        trip_id,
-        points,
-        lambda: map_match_route_shape(
+    def match() -> _MatchResult:
+        shapes = map_match_route_shape(
             points,
             costing=costing,
             costing_options=costing_options,
             config=config,
             trace_options=trace_options,
-        ),
-        record_breaks=True,
-    )
+        )
+        return _MatchResult(shapes=shapes)
+
+    return _evaluate(trip_id, points, match, record_breaks=True)
 
 
 def evaluate_map_match_attributes(
@@ -196,14 +216,44 @@ def evaluate_map_match_attributes(
     ratio and heading-reversal checks still apply.
     """
 
-    def match() -> list[list[tuple[float, float]]]:
-        _matched, _ways, shape = map_match_full(
+    def match() -> _MatchResult:
+        matched, ways, shapes = map_match_full(
             points,
             costing=costing,
             costing_options=costing_options,
             config=config,
             trace_options=trace_options,
         )
-        return shape
+        return _MatchResult(shapes=shapes, matched_points=matched, way_ids=ways)
+
+    return _evaluate(trip_id, points, match, record_breaks=False)
+
+
+def evaluate_map_match_ways(
+    trip_id: str,
+    points: list[tuple[float, float]],
+    *,
+    costing: str = "auto",
+    costing_options: dict[str, object] | None = None,
+    config: str | Path | None = None,
+    trace_options: dict[str, object] | None = None,
+) -> MapMatchQuality:
+    """Lightweight quality wrapper around :func:`map_match_ways`.
+
+    Single Valhalla call (``trace_attributes``).  Records way IDs on
+    success and the error string on failure — no shape or point-level
+    metrics.  Intended for pipeline use where the extra ``trace_route``
+    call is not worth the cost.
+    """
+
+    def match() -> _MatchResult:
+        ways = map_match_ways(
+            points,
+            costing=costing,
+            costing_options=costing_options,
+            config=config,
+            trace_options=trace_options,
+        )
+        return _MatchResult(shapes=[], way_ids=ways)
 
     return _evaluate(trip_id, points, match, record_breaks=False)

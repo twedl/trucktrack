@@ -32,9 +32,19 @@ from typing import cast
 import polars as pl
 from tqdm import tqdm
 
-from trucktrack.valhalla.map_matching import map_match_ways
+from trucktrack.valhalla.quality import MapMatchQuality, evaluate_map_match_ways
 
 _WAY_SCHEMA = {"id": pl.Utf8, "date": pl.Date, "way_id": pl.Int64}
+_QUALITY_SCHEMA = {
+    "id": pl.Utf8,
+    "date": pl.Date,
+    "ok": pl.Boolean,
+    "error": pl.Utf8,
+    "n_points": pl.Int64,
+    "n_polylines": pl.Int64,
+    "path_length_ratio": pl.Float64,
+    "heading_reversals": pl.Int64,
+}
 
 
 @contextmanager
@@ -65,32 +75,64 @@ def _null_way_result(trip_id: str, date: object) -> pl.DataFrame:
     )
 
 
+def _quality_row(trip_id: str, date: object, q: MapMatchQuality) -> dict[str, object]:
+    return {
+        "id": trip_id,
+        "date": date,
+        "ok": q.ok,
+        "error": q.error,
+        "n_points": q.n_points,
+        "n_polylines": q.n_polylines,
+        "path_length_ratio": q.path_length_ratio,
+        "heading_reversals": q.heading_reversals,
+    }
+
+
 def map_match_trip(
     trip: pl.DataFrame,
     *,
     config: str | Path | None = None,
-) -> pl.DataFrame:
-    """Map-match a single trip and return id, date, way_id rows.
+) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Map-match a single trip and return (way_ids_df, quality_df).
 
-    If matching fails (e.g. corrupted GPS data exceeding Valhalla's
-    distance limit), returns a single row with null way_id so no
-    trips are dropped.
+    Uses :func:`evaluate_map_match_attributes` so that Valhalla errors
+    are captured in the quality row instead of crashing the pipeline.
     """
     trip = trip.sort("time")
     trip_id = trip["id"][0]
     date = cast(datetime, trip["time"].min()).date()
     if len(trip) < 2:
-        return _null_way_result(trip_id, date)
+        q = MapMatchQuality(trip_id=trip_id, ok=False, error="insufficient points (<2)", n_points=len(trip))
+        return (
+            _null_way_result(trip_id, date),
+            pl.DataFrame([_quality_row(trip_id, date, q)], schema=_QUALITY_SCHEMA),
+        )
+    points = list(zip(trip["lat"].to_list(), trip["lon"].to_list(), strict=True))
+    q = evaluate_map_match_ways(trip_id, points, config=config)
+    if q.error is not None:
+        print(f"  [WARN] {trip_id}: {q.error}", file=sys.stderr)
+    ways = q.way_ids
+    if ways:
+        way_df = pl.DataFrame(
+            {"id": [trip_id] * len(ways), "date": [date] * len(ways), "way_id": ways},
+            schema=_WAY_SCHEMA,
+        )
+    else:
+        way_df = _null_way_result(trip_id, date)
+    quality_df = pl.DataFrame([_quality_row(trip_id, date, q)], schema=_QUALITY_SCHEMA)
+    return way_df, quality_df
+
+
+def _atomic_write_parquet(df: pl.DataFrame, dest: Path) -> None:
+    """Write a parquet file atomically via temp-file-then-rename."""
+    fd, tmp = tempfile.mkstemp(dir=dest.parent, suffix=".tmp.parquet")
+    os.close(fd)
     try:
-        points = list(zip(trip["lat"].to_list(), trip["lon"].to_list(), strict=True))
-        ways = map_match_ways(points, config=config)
-    except Exception as e:
-        print(f"  [WARN] {trip_id}: {e}", file=sys.stderr)
-        return _null_way_result(trip_id, date)
-    return pl.DataFrame(
-        {"id": [trip_id] * len(ways), "date": [date] * len(ways), "way_id": ways},
-        schema=_WAY_SCHEMA,
-    )
+        df.write_parquet(tmp)
+        os.rename(tmp, dest)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def _process_partition(
@@ -108,7 +150,9 @@ def _process_partition(
     """
     rel = partition_dir.relative_to(input_dir)
     out_dir = output_dir / rel
+    quality_dir = output_dir / "_quality" / rel
     out_dir.mkdir(parents=True, exist_ok=True)
+    quality_dir.mkdir(parents=True, exist_ok=True)
 
     chunks = sorted(partition_dir.glob("*.parquet"))
     skipped = 0
@@ -117,6 +161,7 @@ def _process_partition(
 
     for chunk_path in chunks:
         out_path = out_dir / chunk_path.name
+        quality_path = quality_dir / chunk_path.name
         if out_path.exists():
             skipped += 1
             if progress is not None:
@@ -130,27 +175,25 @@ def _process_partition(
             if progress is not None:
                 progress.update(1)
             continue
-        matched_trips = []
+        way_dfs = []
+        quality_dfs = []
         for _, trip in df.group_by("id"):
-            matched_trips.append(map_match_trip(trip, config=config))
+            way_df, quality_df = map_match_trip(trip, config=config)
+            way_dfs.append(way_df)
+            quality_dfs.append(quality_df)
             total_trips += 1
 
-        if not matched_trips:
+        if not way_dfs:
             if progress is not None:
                 progress.update(1)
             continue
 
-        matched = pl.concat(matched_trips)
+        matched = pl.concat(way_dfs)
+        quality = pl.concat(quality_dfs)
         total_rows += len(matched)
 
-        fd, tmp = tempfile.mkstemp(dir=out_dir, suffix=".tmp.parquet")
-        os.close(fd)
-        try:
-            matched.write_parquet(tmp)
-            os.rename(tmp, out_path)
-        except BaseException:
-            Path(tmp).unlink(missing_ok=True)
-            raise
+        _atomic_write_parquet(matched, out_path)
+        _atomic_write_parquet(quality, quality_path)
 
         if progress is not None:
             progress.update(1)
