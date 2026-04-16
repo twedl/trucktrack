@@ -172,10 +172,16 @@ def _group_chunks(
     return groups
 
 
-def compact_partitions(data_dir: str | Path) -> int:
+def compact_partitions(
+    data_dir: str | Path,
+    *,
+    max_partition_bytes: int = 1_000_000_000,
+) -> int:
     """Merge chunk files within each partition into a single file.
 
     Partitions that already contain a single file are skipped.
+    Partitions whose total size exceeds *max_partition_bytes*
+    (default 1 GB) are skipped to avoid OOM during the sort.
     Returns the number of partitions compacted.
 
     Safe: writes to a temp file, renames to ``data.parquet``
@@ -189,8 +195,13 @@ def compact_partitions(data_dir: str | Path) -> int:
         files_by_dir.setdefault(p.parent, []).append(p)
 
     compacted = 0
+    skipped = 0
     for pdir, files in sorted(files_by_dir.items()):
         if len(files) <= 1:
+            continue
+        total_bytes = sum(f.stat().st_size for f in files)
+        if total_bytes > max_partition_bytes:
+            skipped += 1
             continue
         tmp = pdir / "_compacted.tmp"
         pl.scan_parquet(files).sort("hilbert_idx").drop("hilbert_idx").sink_parquet(tmp)
@@ -199,6 +210,11 @@ def compact_partitions(data_dir: str | Path) -> int:
         for f in files:
             f.unlink(missing_ok=True)
         compacted += 1
+    if skipped:
+        print(
+            f"  Skipped {skipped} partition(s) exceeding "
+            f"{max_partition_bytes / 1e9:.0f} GB"
+        )
     return compacted
 
 
@@ -214,6 +230,7 @@ def run_pipeline(
     max_workers: int | None = None,
     group_size: int = 1,
     compact: bool = False,
+    max_partition_bytes: int = 1_000_000_000,
 ) -> dict[str, int]:
     """Run the full gap+stop+partition pipeline in parallel.
 
@@ -234,6 +251,9 @@ def run_pipeline(
     compact
         If ``True``, run :func:`compact_partitions` after processing
         to merge any remaining multi-file partitions into single files.
+    max_partition_bytes
+        Partitions whose total file size exceeds this limit are skipped
+        during compaction to avoid OOM.  Default 1 GB.
 
     Returns a {tier_name: partition_count} summary.
     """
@@ -289,7 +309,9 @@ def run_pipeline(
 
     if compact:
         print("\nCompacting partitions...")
-        n_compacted = compact_partitions(output_dir)
+        n_compacted = compact_partitions(
+            output_dir, max_partition_bytes=max_partition_bytes
+        )
         print(f"  Compacted {n_compacted} partition(s)")
 
     # Count distinct tiles written.
