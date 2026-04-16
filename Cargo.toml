@@ -1,6 +1,6 @@
 [package]
 name = "trucktrack"
-version = "0.1.15"
+version = "0.1.16"
 edition = "2021"
 description = "Rust backend for trucktrack"
 license = "MIT"
