@@ -193,7 +193,7 @@ def compact_partitions(data_dir: str | Path) -> int:
         if len(files) <= 1:
             continue
         tmp = pdir / "_compacted.tmp"
-        pl.scan_parquet(files).sink_parquet(tmp)
+        pl.scan_parquet(files).sort("hilbert_idx").drop("hilbert_idx").sink_parquet(tmp)
         # Rename first so data.parquet exists before deleting originals.
         tmp.rename(pdir / "data.parquet")
         for f in files:

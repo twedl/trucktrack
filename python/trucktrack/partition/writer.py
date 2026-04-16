@@ -48,14 +48,10 @@ def write_partitions(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    merged = (
-        points.join(
-            metadata.select(["id", "tier", "partition_id", "hilbert_idx"]),
-            on="id",
-        )
-        .sort(["partition_id", "hilbert_idx"])
-        .drop("hilbert_idx")
-    )
+    merged = points.join(
+        metadata.select(["id", "tier", "partition_id", "hilbert_idx"]),
+        on="id",
+    ).sort(["partition_id", "hilbert_idx"])
 
     # polars writes hive-style directories when partition_by is given.
     merged.write_parquet(
