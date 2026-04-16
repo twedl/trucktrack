@@ -159,7 +159,8 @@ def _evaluate(
     if record_breaks:
         q.n_polylines = len(result.shapes)
         q.shape_gaps = _polyline_break_gaps(result.shapes)
-    q.path_length_ratio, q.heading_reversals = path_quality(points, result.shapes)
+    if result.shapes:
+        q.path_length_ratio, q.heading_reversals = path_quality(points, result.shapes)
     q.ok = not q.has_issues
     return q
 

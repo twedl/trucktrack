@@ -95,7 +95,7 @@ def map_match_trip(
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     """Map-match a single trip and return (way_ids_df, quality_df).
 
-    Uses :func:`evaluate_map_match_attributes` so that Valhalla errors
+    Uses :func:`evaluate_map_match_ways` so that Valhalla errors
     are captured in the quality row instead of crashing the pipeline.
     """
     trip = trip.sort("time")

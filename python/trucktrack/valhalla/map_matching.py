@@ -18,8 +18,8 @@ from trucktrack.valhalla._parsing import concat_leg_shapes
 _BASE_BREAKAGE_DISTANCE = 3000  # meters
 _BREAKAGE_MULTIPLIER = 1.5  # breakage = max_gap * multiplier
 # Cap so that large highway gaps (where haversine ≈ driving distance) don't
-# overshoot — a 50 km straight-line gap with 3x multiplier would request
-# 150 km breakage, but 60 km is sufficient and avoids slow Meili searches.
+# overshoot — without a cap, a 50 km gap would request 75 km breakage,
+# but 60 km is sufficient and avoids slow Meili searches.
 _MAX_BREAKAGE_DISTANCE = 60_000  # meters
 
 
