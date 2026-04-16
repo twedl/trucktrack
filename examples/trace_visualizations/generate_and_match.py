@@ -81,10 +81,13 @@ def main(args: argparse.Namespace) -> None:
         print("Map-matching...")
         trips = tt_inspect.map_match_trips(split)
         for sid, tm in trips.items():
-            print(
-                f"  segment {sid}: {tm.matched_df.height} pts, "
-                f"{len(tm.way_ids)} OSM ways"
-            )
+            if tm.error is not None:
+                print(f"  segment {sid}: ERROR: {tm.error}")
+            else:
+                print(
+                    f"  segment {sid}: {tm.matched_df.height} pts, "
+                    f"{len(tm.way_ids)} OSM ways"
+                )
 
         quality = tt_inspect.evaluate_quality(split, trips=trips)
         print("\nQuality report:")

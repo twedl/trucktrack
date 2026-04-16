@@ -39,10 +39,10 @@ from trucktrack.splitters import (
     split_by_observation_gap,
     split_by_stops,
 )
-from trucktrack.valhalla.map_matching import map_match_dataframe_full
 from trucktrack.valhalla.quality import (
     MapMatchQuality,
     evaluate_map_match,
+    evaluate_map_match_attributes,
     path_quality,
 )
 from trucktrack.visualize import plot_trace_layers
@@ -67,12 +67,16 @@ class TripMatch:
     segment Valhalla returned.  When the matcher breaks the trace,
     disjoint segments arrive separately so renderers never bridge them
     with a straight chord.  Empty when Valhalla returns no geometry.
+
+    ``error`` is ``None`` on success; on failure it contains the
+    error description and the other fields are empty / unchanged.
     """
 
     segment_id: int
     matched_df: pl.DataFrame
     way_ids: list[int]
     shape: list[list[tuple[float, float]]]
+    error: str | None = None
 
 
 def load_truck_trace(
@@ -179,27 +183,44 @@ def map_match_trips(
     """Map-match each non-stop segment, keyed by ``segment_id``.
 
     Segments shorter than *min_points* are skipped.  Valhalla errors
-    propagate — run :func:`evaluate_quality` without a ``trips`` argument
-    if you want failures captured as rows instead.
+    are captured in :attr:`TripMatch.error` instead of crashing — the
+    returned dict always has one entry per eligible segment.
     """
     df = _non_stop(split_df, skip_stops)
     out: dict[int, TripMatch] = {}
     for (sid,), sub in df.sort("time").group_by("segment_id", maintain_order=True):
         if sub.height < min_points:
             continue
-        matched_df, way_ids, shape = map_match_dataframe_full(
-            sub,
+        sid_int = int(sid)
+        pts = list(zip(sub["lat"].to_list(), sub["lon"].to_list(), strict=True))
+        q = evaluate_map_match_attributes(
+            str(sid_int),
+            pts,
             costing=costing,
             costing_options=costing_options,
-            trace_options=trace_options,
             config=config,
+            trace_options=trace_options,
         )
-        out[int(sid)] = TripMatch(
-            segment_id=int(sid),
-            matched_df=matched_df,
-            way_ids=way_ids,
-            shape=shape,
-        )
+        if q.error is not None:
+            out[sid_int] = TripMatch(
+                segment_id=sid_int,
+                matched_df=sub,
+                way_ids=[],
+                shape=[],
+                error=q.error,
+            )
+        else:
+            matched_df = sub.with_columns(
+                pl.Series("matched_lat", [m.lat for m in q.matched_points]),
+                pl.Series("matched_lon", [m.lon for m in q.matched_points]),
+                pl.Series("distance_from_trace", [m.distance_from_trace for m in q.matched_points]),
+            )
+            out[sid_int] = TripMatch(
+                segment_id=sid_int,
+                matched_df=matched_df,
+                way_ids=q.way_ids,
+                shape=q.shapes,
+            )
     return out
 
 
@@ -260,6 +281,14 @@ def _cached_quality_row(
     sid: int, sub_df: pl.DataFrame, tm: TripMatch
 ) -> dict[str, Any]:
     pts = list(zip(sub_df["lat"].to_list(), sub_df["lon"].to_list(), strict=True))
+    if tm.error is not None:
+        q = MapMatchQuality(
+            trip_id=str(sid),
+            ok=False,
+            error=tm.error,
+            n_points=len(pts),
+        )
+        return _row_from_quality(sid, q)
     ratio, reversals = path_quality(pts, tm.shape)
     q = MapMatchQuality(
         trip_id=str(sid),
