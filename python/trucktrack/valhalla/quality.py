@@ -23,8 +23,11 @@ from trucktrack.generate.interpolator import bearing, haversine_m
 from trucktrack.valhalla.map_matching import map_match_full, map_match_route_shape
 
 # A clean match is ~1.0–1.1; spurious detours push the ratio above 1.5.
+# A ratio well below 1.0 means the match has gaps (breakage_distance too
+# low or missing tiles) — the matched segments only cover part of the trace.
 # Legitimate U-turns are rare on truck traces, so more than a handful of
 # reversals in a single trip usually means jitter-driven garbage.
+_MIN_PATH_LENGTH_RATIO = 0.7
 _MAX_PATH_LENGTH_RATIO = 1.5
 _MAX_HEADING_REVERSALS = 5
 _HEADING_REVERSAL_DEG = 150.0
@@ -51,7 +54,9 @@ class MapMatchQuality:
             or bool(self.shape_gaps)
             or (
                 self.path_length_ratio is not None
-                and self.path_length_ratio > _MAX_PATH_LENGTH_RATIO
+                and not _MIN_PATH_LENGTH_RATIO
+                <= self.path_length_ratio
+                <= _MAX_PATH_LENGTH_RATIO
             )
             or self.heading_reversals > _MAX_HEADING_REVERSALS
         )
