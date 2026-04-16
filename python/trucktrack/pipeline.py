@@ -43,6 +43,7 @@ STOP_MAX_DIAMETER = 250.0  # meters
 STOP_MIN_DURATION = timedelta(minutes=5)
 TRAFFIC_MAX_ANGLE = 30.0  # degrees
 MIN_SEGMENT_LENGTH = 2
+MAX_PARTITION_BYTES = 1_000_000_000  # 1 GB
 
 
 def _write_chunk(
@@ -175,7 +176,7 @@ def _group_chunks(
 def compact_partitions(
     data_dir: str | Path,
     *,
-    max_partition_bytes: int = 1_000_000_000,
+    max_partition_bytes: int = MAX_PARTITION_BYTES,
 ) -> int:
     """Merge chunk files within each partition into a single file.
 
@@ -230,7 +231,7 @@ def run_pipeline(
     max_workers: int | None = None,
     group_size: int = 1,
     compact: bool = False,
-    max_partition_bytes: int = 1_000_000_000,
+    max_partition_bytes: int = MAX_PARTITION_BYTES,
 ) -> dict[str, int]:
     """Run the full gap+stop+partition pipeline in parallel.
 
