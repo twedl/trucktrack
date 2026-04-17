@@ -41,6 +41,8 @@ from trucktrack.query import (
     scan_raw_truck,
 )
 from trucktrack.splitters import (
+    filter_impossible_speeds,
+    filter_impossible_speeds_file,
     filter_stale_pings,
     filter_stale_pings_file,
     filter_traffic_stops,
@@ -60,6 +62,8 @@ __all__ = [
     "read_dataset",
     "process_parquet_in_rust",
     "process_dataframe_in_rust",
+    "filter_impossible_speeds",
+    "filter_impossible_speeds_file",
     "filter_stale_pings",
     "filter_stale_pings_file",
     "filter_traffic_stops",

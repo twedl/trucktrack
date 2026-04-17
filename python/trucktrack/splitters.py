@@ -169,6 +169,72 @@ def filter_stale_pings_file(
     )
 
 
+# ── ImpossibleSpeedFilter ───────────────────────────────────────────────
+
+
+def filter_impossible_speeds(
+    df: pl.DataFrame,
+    *,
+    max_speed_kmh: float = 200.0,
+    id_col: str = "id",
+    time_col: str = "time",
+    lat_col: str = "lat",
+    lon_col: str = "lon",
+) -> pl.DataFrame:
+    """Drop GPS points implying physically impossible speeds.
+
+    Per truck, sorted by ``(id, time)``, compares each point's Haversine
+    distance and time delta against the last *kept* point.  If the
+    implied speed exceeds ``max_speed_kmh`` (km/h) the current row is
+    dropped and the last-kept anchor is held — so a burst of adjacent
+    spikes all collapse against the last clean fix rather than
+    re-anchoring on a glitch.
+
+    The first valid point per truck is always kept.  Rows with a null
+    ``time`` / ``lat`` / ``lon`` can't be evaluated; they pass through
+    and do not advance the anchor.  Output is sorted by ``(id, time)``.
+
+    This filter operates on computed speed (distance ÷ time), not the
+    device-reported ``speed`` column, because a glitched GPS often emits
+    a self-consistently wrong reported speed.
+
+    Parameters
+    ----------
+    max_speed_kmh
+        Maximum plausible speed in km/h.  Points implying a higher
+        speed against the previous kept fix are dropped.  Default 200.
+    id_col, time_col, lat_col, lon_col
+        Column names.
+    """
+    max_speed_mps = max_speed_kmh / 3.6
+    return _core.filter_impossible_speeds_df(
+        df, id_col, time_col, lat_col, lon_col, max_speed_mps
+    )
+
+
+def filter_impossible_speeds_file(
+    input_path: str | Path,
+    output_path: str | Path,
+    *,
+    max_speed_kmh: float = 200.0,
+    id_col: str = "id",
+    time_col: str = "time",
+    lat_col: str = "lat",
+    lon_col: str = "lon",
+) -> int:
+    """File-based variant of :func:`filter_impossible_speeds`."""
+    max_speed_mps = max_speed_kmh / 3.6
+    return _core.filter_impossible_speeds_file(
+        str(input_path),
+        str(output_path),
+        id_col,
+        time_col,
+        lat_col,
+        lon_col,
+        max_speed_mps,
+    )
+
+
 # ── TrafficFilter ───────────────────────────────────────────────────────
 
 

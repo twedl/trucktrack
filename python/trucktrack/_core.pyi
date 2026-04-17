@@ -119,6 +119,29 @@ def filter_stale_pings_file(
     """File-based variant of filter_stale_pings_df."""
     ...
 
+def filter_impossible_speeds_df(
+    df: pl.DataFrame,
+    id_col: str,
+    time_col: str,
+    lat_col: str,
+    lon_col: str,
+    max_speed_mps: float,
+) -> pl.DataFrame:
+    """Drop GPS points whose implied speed from the prior fix exceeds max_speed_mps."""
+    ...
+
+def filter_impossible_speeds_file(
+    input_path: str,
+    output_path: str,
+    id_col: str,
+    time_col: str,
+    lat_col: str,
+    lon_col: str,
+    max_speed_mps: float,
+) -> int:
+    """File-based variant of filter_impossible_speeds_df."""
+    ...
+
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Haversine distance in kilometers between two (lat, lon) points."""
     ...

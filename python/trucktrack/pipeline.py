@@ -42,6 +42,7 @@ GAP_THRESHOLD = timedelta(minutes=30)
 STOP_MAX_DIAMETER = 250.0  # meters
 STOP_MIN_DURATION = timedelta(minutes=5)
 TRAFFIC_MAX_ANGLE = 30.0  # degrees
+IMPOSSIBLE_SPEED_KMH = 200.0  # km/h; drop GPS points implying travel above this
 MIN_SEGMENT_LENGTH = 2
 MAX_PARTITION_BYTES = 1_000_000_000  # 1 GB
 
@@ -66,9 +67,10 @@ def _process_chunk(
     stop_max_diameter: float,
     stop_min_duration: timedelta,
     traffic_max_angle: float,
+    impossible_speed_kmh: float,
     min_segment_length: int,
 ) -> pl.DataFrame:
-    """Run stale-ping filter, gap split, stop split, filter, and partition on one chunk.
+    """Run pre-process filters, segmentation, and partitioning on one chunk.
 
     Returns a DataFrame with tier/partition_id/hilbert_idx columns.
     """
@@ -80,6 +82,15 @@ def _process_chunk(
         lon_col="lon",
         speed_col="speed",
         heading_col="heading",
+    )
+
+    df = trucktrack.filter_impossible_speeds(
+        df,
+        max_speed_kmh=impossible_speed_kmh,
+        id_col="id",
+        time_col="time",
+        lat_col="lat",
+        lon_col="lon",
     )
 
     df = trucktrack.split_by_observation_gap(
@@ -135,6 +146,7 @@ def _process_and_write(
     stop_max_diameter: float,
     stop_min_duration: timedelta,
     traffic_max_angle: float,
+    impossible_speed_kmh: float,
     min_segment_length: int,
 ) -> tuple[int, int]:
     """Read, process, and write a group of chunks. Returns (rows_in, rows_out)."""
@@ -147,6 +159,7 @@ def _process_and_write(
         stop_max_diameter=stop_max_diameter,
         stop_min_duration=stop_min_duration,
         traffic_max_angle=traffic_max_angle,
+        impossible_speed_kmh=impossible_speed_kmh,
         min_segment_length=min_segment_length,
     )
 
@@ -227,6 +240,7 @@ def run_pipeline(
     stop_max_diameter: float = STOP_MAX_DIAMETER,
     stop_min_duration: timedelta = STOP_MIN_DURATION,
     traffic_max_angle: float = TRAFFIC_MAX_ANGLE,
+    impossible_speed_kmh: float = IMPOSSIBLE_SPEED_KMH,
     min_segment_length: int = MIN_SEGMENT_LENGTH,
     max_workers: int | None = None,
     group_size: int = 1,
@@ -296,6 +310,7 @@ def run_pipeline(
                 stop_max_diameter,
                 stop_min_duration,
                 traffic_max_angle,
+                impossible_speed_kmh,
                 min_segment_length,
             ): group_name
             for group_name, group_paths in groups

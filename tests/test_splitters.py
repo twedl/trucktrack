@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import polars as pl
@@ -377,3 +377,129 @@ class TestStalePingFilter:
         )
         out = trucktrack.filter_stale_pings(df)
         assert out.height == 3
+
+
+# ── ImpossibleSpeedFilter ────────────────────────────────────────────────
+
+
+class TestFilterImpossibleSpeeds:
+    def test_keeps_plausible_trajectory(self) -> None:
+        """~110 m / 60 s ≈ 1.85 m/s — well under threshold."""
+        df = _make_raw(
+            [
+                ("a", 0, 43.0, -79.0, 10.0, 0.0),
+                ("a", 60, 43.001, -79.0, 10.0, 0.0),
+                ("a", 120, 43.002, -79.0, 10.0, 0.0),
+            ]
+        )
+        out = trucktrack.filter_impossible_speeds(df)
+        assert out.height == 3
+
+    def test_drops_single_spike(self) -> None:
+        """A 1° jump (~111 km) in 1 s is clearly impossible; row is dropped."""
+        df = _make_raw(
+            [
+                ("a", 0, 43.0, -79.0, 10.0, 0.0),
+                ("a", 1, 44.0, -79.0, 10.0, 0.0),  # spike
+                ("a", 2, 43.00001, -79.0, 10.0, 0.0),
+            ]
+        )
+        out = trucktrack.filter_impossible_speeds(df)
+        assert out.height == 2
+        assert sorted(out["lat"].to_list()) == pytest.approx([43.0, 43.00001])
+
+    def test_first_point_always_kept(self) -> None:
+        """Single point per truck has no prior anchor and survives."""
+        df = _make_raw([("a", 0, 43.0, -79.0, 10.0, 0.0)])
+        out = trucktrack.filter_impossible_speeds(df)
+        assert out.height == 1
+
+    def test_consecutive_spikes_collapse_against_anchor(self) -> None:
+        """Two adjacent spikes both drop; the anchor is row 0, not the last spike."""
+        df = _make_raw(
+            [
+                ("a", 0, 43.0, -79.0, 10.0, 0.0),
+                ("a", 1, 44.0, -79.0, 10.0, 0.0),  # spike 1
+                ("a", 2, 45.0, -79.0, 10.0, 0.0),  # spike 2
+                ("a", 3, 43.00002, -79.0, 10.0, 0.0),  # within tolerance of row 0
+            ]
+        )
+        out = trucktrack.filter_impossible_speeds(df)
+        assert out.height == 2
+        assert sorted(out["lat"].to_list()) == pytest.approx([43.0, 43.00002])
+
+    def test_trucks_are_independent(self) -> None:
+        """One truck's spike must not cause another truck's point to drop."""
+        df = _make_raw(
+            [
+                ("a", 0, 43.0, -79.0, 10.0, 0.0),
+                ("a", 1, 44.0, -79.0, 10.0, 0.0),  # a's spike
+                ("b", 0, 50.0, -100.0, 10.0, 0.0),
+                ("b", 60, 50.001, -100.0, 10.0, 0.0),
+            ]
+        )
+        out = trucktrack.filter_impossible_speeds(df)
+        # a: 1 kept (row 0), b: 2 kept.
+        assert out.height == 3
+        counts = {tid: 0 for tid in ("a", "b")}
+        for tid in out["id"].to_list():
+            counts[tid] += 1
+        assert counts == {"a": 1, "b": 2}
+
+    def test_null_coords_pass_through(self) -> None:
+        """Null lat keeps the row and does not advance the anchor."""
+        df = pl.DataFrame(
+            {
+                "id": ["a", "a", "a"],
+                "time": [
+                    datetime(2026, 1, 1, 0, 0, 0),
+                    datetime(2026, 1, 1, 0, 1, 0),
+                    datetime(2026, 1, 1, 0, 2, 0),
+                ],
+                "lat": [43.0, None, 43.002],
+                "lon": [-79.0, -79.0, -79.0],
+            }
+        )
+        out = trucktrack.filter_impossible_speeds(df)
+        assert out.height == 3
+
+    def test_duplicate_timestamp_kept(self) -> None:
+        """dt == 0 between consecutive valid points — keep without dividing by zero."""
+        df = _make_raw(
+            [
+                ("a", 0, 43.0, -79.0, 10.0, 0.0),
+                ("a", 0, 43.001, -79.0, 10.0, 0.0),
+            ]
+        )
+        out = trucktrack.filter_impossible_speeds(df)
+        assert out.height == 2
+
+    def test_threshold_is_configurable(self) -> None:
+        """A 100 m / 60 s fix (~6 km/h) drops when the threshold is set absurdly low."""
+        df = _make_raw(
+            [
+                ("a", 0, 43.0, -79.0, 10.0, 0.0),
+                ("a", 60, 43.001, -79.0, 10.0, 0.0),
+            ]
+        )
+        out = trucktrack.filter_impossible_speeds(df, max_speed_kmh=1.0)
+        # ~6.7 km/h implied, threshold 1 km/h → second row dropped.
+        assert out.height == 1
+
+    def test_file_io_path(self, tmp_path: Path) -> None:
+        """`_file` variant round-trips parquet and drops the spike row."""
+        df = _make_raw(
+            [
+                ("a", 0, 43.0, -79.0, 10.0, 0.0),
+                ("a", 1, 44.0, -79.0, 10.0, 0.0),  # spike
+                ("a", 2, 43.00001, -79.0, 10.0, 0.0),
+            ]
+        )
+        inp = tmp_path / "speed_in.parquet"
+        out = tmp_path / "speed_out.parquet"
+        df.write_parquet(inp)
+        n = trucktrack.filter_impossible_speeds_file(inp, out)
+        assert out.exists()
+        assert n == 2
+        result = pl.read_parquet(out)
+        assert result.height == 2

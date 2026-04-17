@@ -235,6 +235,62 @@ fn filter_stale_pings_file(
     Ok(n)
 }
 
+// ── Impossible-speed filter PyO3 wrappers ──────────────────────────────
+
+#[pyfunction]
+#[pyo3(signature = (df, id_col, time_col, lat_col, lon_col, max_speed_mps))]
+fn filter_impossible_speeds_df(
+    df: PyDataFrame,
+    id_col: &str,
+    time_col: &str,
+    lat_col: &str,
+    lon_col: &str,
+    max_speed_mps: f64,
+) -> PyResult<PyDataFrame> {
+    let result = splitters::speed::filter_impossible_speeds(
+        df.into(),
+        id_col,
+        time_col,
+        lat_col,
+        lon_col,
+        max_speed_mps,
+    )
+    .map_err(polars_err)?;
+    Ok(PyDataFrame(result))
+}
+
+#[pyfunction]
+#[pyo3(signature = (input_path, output_path, id_col, time_col, lat_col, lon_col, max_speed_mps))]
+fn filter_impossible_speeds_file(
+    input_path: &str,
+    output_path: &str,
+    id_col: &str,
+    time_col: &str,
+    lat_col: &str,
+    lon_col: &str,
+    max_speed_mps: f64,
+) -> PyResult<usize> {
+    let in_file = std::fs::File::open(input_path).map_err(io_err)?;
+    let df = ParquetReader::new(in_file).finish().map_err(polars_err)?;
+
+    let mut result = splitters::speed::filter_impossible_speeds(
+        df,
+        id_col,
+        time_col,
+        lat_col,
+        lon_col,
+        max_speed_mps,
+    )
+    .map_err(polars_err)?;
+
+    let n = result.height();
+    let out_file = std::fs::File::create(output_path).map_err(io_err)?;
+    ParquetWriter::new(out_file)
+        .finish(&mut result)
+        .map_err(polars_err)?;
+    Ok(n)
+}
+
 // ── Module registration ─────────────────────────────────────────────────
 
 #[pymodule]
@@ -249,6 +305,8 @@ fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(filter_traffic_stops_file, m)?)?;
     m.add_function(wrap_pyfunction!(filter_stale_pings_df, m)?)?;
     m.add_function(wrap_pyfunction!(filter_stale_pings_file, m)?)?;
+    m.add_function(wrap_pyfunction!(filter_impossible_speeds_df, m)?)?;
+    m.add_function(wrap_pyfunction!(filter_impossible_speeds_file, m)?)?;
     m.add_function(wrap_pyfunction!(partition::haversine_km, m)?)?;
     m.add_function(wrap_pyfunction!(partition::valhalla_tile_id, m)?)?;
     m.add_function(wrap_pyfunction!(partition::classify_and_partition_key, m)?)?;
