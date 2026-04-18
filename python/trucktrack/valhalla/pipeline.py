@@ -138,11 +138,17 @@ def _atomic_write_parquet(df: pl.DataFrame, dest: Path) -> None:
         raise
 
 
+def _parquet_row_count(path: Path) -> int:
+    """Row count from parquet footer — no row-group read."""
+    return int(pl.scan_parquet(path).select(pl.len()).collect().item())
+
+
 def _process_partition(
     partition_dir: Path,
     input_dir: Path,
     output_dir: Path,
     config: str | Path | None,
+    row_counts: dict[Path, int],
     progress: tqdm[None] | None = None,
 ) -> tuple[str, int, int, int]:
     """Read one partition chunk-by-chunk, map-match each trip, and write results.
@@ -163,7 +169,7 @@ def _process_partition(
     total_rows = 0
 
     for chunk_path in chunks:
-        raw_rows = pl.scan_parquet(chunk_path).select(pl.len()).collect().item()
+        raw_rows = row_counts[chunk_path]
         out_path = out_dir / chunk_path.name
         quality_path = quality_dir / chunk_path.name
         if out_path.exists():
@@ -213,11 +219,12 @@ def _process_block(
     input_dir: Path,
     output_dir: Path,
     config: str | Path | None,
+    row_counts: dict[Path, int],
     progress: tqdm[None] | None = None,
 ) -> list[tuple[str, int, int, int]]:
     """Process a contiguous block of spatially adjacent partitions sequentially."""
     return [
-        _process_partition(pdir, input_dir, output_dir, config, progress)
+        _process_partition(pdir, input_dir, output_dir, config, row_counts, progress)
         for pdir in partition_dirs
     ]
 
@@ -260,32 +267,33 @@ def run_map_matching(
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
 
-    # Single pass: collect partition dirs and chunk paths.
-    chunks_per_partition: dict[Path, int] = {}
     all_chunk_paths: list[Path] = []
+    partition_dir_set: set[Path] = set()
     for p in input_dir.rglob("*.parquet"):
         if p.parent.name.startswith("partition_id="):
-            chunks_per_partition[p.parent] = chunks_per_partition.get(p.parent, 0) + 1
+            partition_dir_set.add(p.parent)
             all_chunk_paths.append(p)
-    partition_dirs = sorted(chunks_per_partition, key=_partition_sort_key)
+    partition_dirs = sorted(partition_dir_set, key=_partition_sort_key)
+    total_chunks = len(all_chunk_paths)
 
     if not partition_dirs:
         print(f"No partitions found under {input_dir}", file=sys.stderr)
         return
 
-    # Row counts come from parquet footers — cheap, but prints a status line
-    # so large datasets don't look hung while the bar is still setting up.
-    print(
-        f"Counting rows across {len(all_chunk_paths):,} chunk(s)...",
-        file=sys.stderr,
-    )
-    total_input_rows = sum(
-        pl.scan_parquet(p).select(pl.len()).collect().item() for p in all_chunk_paths
-    )
-
     if max_workers is None:
         max_workers = os.cpu_count() or 1
     max_workers = min(max_workers, len(partition_dirs))
+
+    # Parquet-footer reads are one RTT each; parallelize so networked
+    # filesystems don't serialize thousands of tiny reads.
+    print(
+        f"Counting rows across {total_chunks:,} chunk(s)...",
+        file=sys.stderr,
+    )
+    with ThreadPoolExecutor(max_workers=max_workers) as count_pool:
+        counts = list(count_pool.map(_parquet_row_count, all_chunk_paths))
+    row_counts = dict(zip(all_chunk_paths, counts, strict=True))
+    total_input_rows = sum(counts)
 
     # Split into contiguous blocks so each thread covers a geographic
     # region and Valhalla's tile cache stays warm.
@@ -298,8 +306,6 @@ def run_map_matching(
         end = start + block_size + (1 if i < remainder else 0)
         blocks.append(partition_dirs[start:end])
         start = end
-
-    total_chunks = sum(chunks_per_partition.values())
 
     size_str = f"{block_size}\u2013{block_size + 1}" if remainder else str(block_size)
     print(
@@ -331,6 +337,7 @@ def run_map_matching(
                 input_dir,
                 output_dir,
                 config,
+                row_counts,
                 progress,
             )
             for block in blocks
