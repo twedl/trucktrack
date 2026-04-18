@@ -172,7 +172,7 @@ def _process_partition(
             continue
 
         lf = pl.scan_parquet(chunk_path)
-        if "is_stop" in lf.collect_schema().names():
+        if "is_stop" in lf.collect_schema():
             lf = lf.filter(~pl.col("is_stop"))
         df = lf.select(["id", "time", "lat", "lon"]).collect()
         if df.is_empty():
@@ -250,8 +250,9 @@ def run_map_matching(
 
     *max_workers* defaults to ``os.cpu_count()``.
 
-    *quiet* suppresses Valhalla's C++ log output. Progress (tqdm) and
-    trip-level warnings still print to stderr.
+    *quiet* suppresses Valhalla's C++ log output. Progress (tqdm) still
+    prints to stderr. Per-trip errors are recorded in the quality
+    parquet rather than logged.
     """
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
