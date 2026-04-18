@@ -24,6 +24,7 @@ jobs:
           command: build
           args: --release --out dist/ -i python3.12
           manylinux: auto
+          rust-toolchain: stable
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
