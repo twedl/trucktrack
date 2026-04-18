@@ -114,8 +114,6 @@ def map_match_trip(
         )
     points = list(zip(trip["lat"].to_list(), trip["lon"].to_list(), strict=True))
     q = evaluate_map_match_ways(trip_id, points, config=config)
-    if q.error is not None:
-        print(f"  [WARN] {trip_id}: {q.error}", file=sys.stderr)
     ways = q.way_ids
     if ways:
         way_df = pl.DataFrame(
@@ -173,9 +171,10 @@ def _process_partition(
                 progress.update(1)
             continue
 
-        df = pl.read_parquet(chunk_path)
-        if "is_stop" in df.columns:
-            df = df.filter(~pl.col("is_stop"))
+        lf = pl.scan_parquet(chunk_path)
+        if "is_stop" in lf.collect_schema().names():
+            lf = lf.filter(~pl.col("is_stop"))
+        df = lf.select(["id", "time", "lat", "lon"]).collect()
         if df.is_empty():
             if progress is not None:
                 progress.update(1)
