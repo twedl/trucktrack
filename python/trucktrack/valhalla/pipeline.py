@@ -27,6 +27,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager, nullcontext
 from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 from typing import cast
 
 import polars as pl
@@ -45,6 +46,19 @@ _QUALITY_SCHEMA = {
     "path_length_ratio": pl.Float64,
     "heading_reversals": pl.Int64,
 }
+_TIMING_SCHEMA = {
+    "partition": pl.Utf8,
+    "skipped": pl.Int64,
+    "trips": pl.Int64,
+    "rows_out": pl.Int64,
+    "elapsed_s": pl.Float64,
+}
+
+
+def _quality_schema(debug: bool) -> dict[str, type[pl.DataType]]:
+    if not debug:
+        return _QUALITY_SCHEMA
+    return {**_QUALITY_SCHEMA, "elapsed_s": pl.Float64}
 
 
 @contextmanager
@@ -75,8 +89,13 @@ def _null_way_result(trip_id: str, date: object) -> pl.DataFrame:
     )
 
 
-def _quality_row(trip_id: str, date: object, q: MapMatchQuality) -> dict[str, object]:
-    return {
+def _quality_row(
+    trip_id: str,
+    date: object,
+    q: MapMatchQuality,
+    elapsed_s: float | None = None,
+) -> dict[str, object]:
+    row: dict[str, object] = {
         "id": trip_id,
         "date": date,
         "ok": q.ok,
@@ -86,21 +105,30 @@ def _quality_row(trip_id: str, date: object, q: MapMatchQuality) -> dict[str, ob
         "path_length_ratio": q.path_length_ratio,
         "heading_reversals": q.heading_reversals,
     }
+    if elapsed_s is not None:
+        row["elapsed_s"] = elapsed_s
+    return row
 
 
 def map_match_trip(
     trip: pl.DataFrame,
     *,
     config: str | Path | None = None,
+    debug: bool = False,
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     """Map-match a single trip and return (way_ids_df, quality_df).
 
     Uses :func:`evaluate_map_match_ways` so that Valhalla errors
     are captured in the quality row instead of crashing the pipeline.
+
+    When *debug* is true, the quality row carries an ``elapsed_s``
+    column measuring time spent in the Valhalla call for this trip.
     """
     trip = trip.sort("time")
     trip_id = trip["id"][0]
     date = cast(datetime, trip["time"].min()).date()
+    schema = _quality_schema(debug)
+    t0 = perf_counter() if debug else 0.0
     if len(trip) < 2:
         q = MapMatchQuality(
             trip_id=trip_id,
@@ -108,12 +136,10 @@ def map_match_trip(
             error="insufficient points (<2)",
             n_points=len(trip),
         )
-        return (
-            _null_way_result(trip_id, date),
-            pl.DataFrame([_quality_row(trip_id, date, q)], schema=_QUALITY_SCHEMA),
-        )
-    points = list(zip(trip["lat"].to_list(), trip["lon"].to_list(), strict=True))
-    q = evaluate_map_match_ways(trip_id, points, config=config)
+    else:
+        points = list(zip(trip["lat"].to_list(), trip["lon"].to_list(), strict=True))
+        q = evaluate_map_match_ways(trip_id, points, config=config)
+    elapsed = perf_counter() - t0 if debug else None
     ways = q.way_ids
     if ways:
         way_df = pl.DataFrame(
@@ -122,7 +148,7 @@ def map_match_trip(
         )
     else:
         way_df = _null_way_result(trip_id, date)
-    quality_df = pl.DataFrame([_quality_row(trip_id, date, q)], schema=_QUALITY_SCHEMA)
+    quality_df = pl.DataFrame([_quality_row(trip_id, date, q, elapsed)], schema=schema)
     return way_df, quality_df
 
 
@@ -150,13 +176,16 @@ def _process_partition(
     config: str | Path | None,
     row_counts: dict[Path, int],
     progress: tqdm[None] | None = None,
-) -> tuple[str, int, int, int]:
+    *,
+    debug: bool = False,
+) -> tuple[str, int, int, int, float]:
     """Read one partition chunk-by-chunk, map-match each trip, and write results.
 
     Processes one chunk at a time to keep memory free for Valhalla.
     Skips chunks whose output file already exists.
-    Returns (partition_key, chunks_skipped, trips_matched, rows_out).
+    Returns (partition_key, chunks_skipped, trips_matched, rows_out, elapsed_s).
     """
+    t0 = perf_counter()
     rel = partition_dir.relative_to(input_dir)
     out_dir = output_dir / rel
     quality_dir = output_dir / "_quality" / rel
@@ -189,7 +218,7 @@ def _process_partition(
         way_dfs = []
         quality_dfs = []
         for _, trip in df.group_by("id"):
-            way_df, quality_df = map_match_trip(trip, config=config)
+            way_df, quality_df = map_match_trip(trip, config=config, debug=debug)
             way_dfs.append(way_df)
             quality_dfs.append(quality_df)
             total_trips += 1
@@ -211,7 +240,7 @@ def _process_partition(
         _atomic_write_parquet(matched, out_path)
         _atomic_write_parquet(quality, quality_path)
 
-    return str(rel), skipped, total_trips, total_rows
+    return str(rel), skipped, total_trips, total_rows, perf_counter() - t0
 
 
 def _process_block(
@@ -221,10 +250,20 @@ def _process_block(
     config: str | Path | None,
     row_counts: dict[Path, int],
     progress: tqdm[None] | None = None,
-) -> list[tuple[str, int, int, int]]:
+    *,
+    debug: bool = False,
+) -> list[tuple[str, int, int, int, float]]:
     """Process a contiguous block of spatially adjacent partitions sequentially."""
     return [
-        _process_partition(pdir, input_dir, output_dir, config, row_counts, progress)
+        _process_partition(
+            pdir,
+            input_dir,
+            output_dir,
+            config,
+            row_counts,
+            progress,
+            debug=debug,
+        )
         for pdir in partition_dirs
     ]
 
@@ -243,6 +282,7 @@ def run_map_matching(
     config: str | Path | None = None,
     max_workers: int | None = None,
     quiet: bool = False,
+    debug: bool = False,
 ) -> None:
     """Map-match all trips across partitions in parallel.
 
@@ -263,6 +303,10 @@ def run_map_matching(
     *quiet* suppresses Valhalla's C++ log output. Progress (tqdm) still
     prints to stderr. Per-trip errors are recorded in the quality
     parquet rather than logged.
+
+    *debug* adds an ``elapsed_s`` column to each quality row, so you
+    can isolate pathological trips within a slow partition. Per-partition
+    timing is always written to ``output_dir / "_timing.parquet"``.
     """
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
@@ -339,15 +383,33 @@ def run_map_matching(
                 config,
                 row_counts,
                 progress,
+                debug=debug,
             )
             for block in blocks
         ]
 
+        timing_rows: list[dict[str, object]] = []
         for future in as_completed(futures):
-            for _key, skipped, trips, rows in future.result():
+            for key, skipped, trips, rows, elapsed in future.result():
                 total_skipped += skipped
                 total_trips += trips
                 total_rows += rows
+                timing_rows.append(
+                    {
+                        "partition": key,
+                        "skipped": skipped,
+                        "trips": trips,
+                        "rows_out": rows,
+                        "elapsed_s": elapsed,
+                    }
+                )
+
+    if timing_rows:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        timing_df = pl.DataFrame(timing_rows, schema=_TIMING_SCHEMA).sort(
+            "elapsed_s", descending=True
+        )
+        _atomic_write_parquet(timing_df, output_dir / "_timing.parquet")
 
     print("\n--- Map matching complete ---", file=sys.stderr)
     print(f"  Partitions:  {n:>10,}", file=sys.stderr)
@@ -355,3 +417,4 @@ def run_map_matching(
     print(f"  Skipped:     {total_skipped:>10,} chunk(s)", file=sys.stderr)
     print(f"  Matched:     {total_trips:>10,} trip(s)", file=sys.stderr)
     print(f"  Rows out:    {total_rows:>10,}", file=sys.stderr)
+    print(f"  Timing:      {output_dir / '_timing.parquet'}", file=sys.stderr)
