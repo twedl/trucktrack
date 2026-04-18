@@ -45,20 +45,16 @@ _QUALITY_SCHEMA = {
     "n_polylines": pl.Int64,
     "path_length_ratio": pl.Float64,
     "heading_reversals": pl.Int64,
+    "elapsed_s": pl.Float64,
 }
 _TIMING_SCHEMA = {
-    "partition": pl.Utf8,
+    "tier": pl.Utf8,
+    "partition_id": pl.Int64,
     "skipped": pl.Int64,
     "trips": pl.Int64,
     "rows_out": pl.Int64,
     "elapsed_s": pl.Float64,
 }
-
-
-def _quality_schema(debug: bool) -> dict[str, type[pl.DataType]]:
-    if not debug:
-        return _QUALITY_SCHEMA
-    return {**_QUALITY_SCHEMA, "elapsed_s": pl.Float64}
 
 
 @contextmanager
@@ -95,7 +91,7 @@ def _quality_row(
     q: MapMatchQuality,
     elapsed_s: float | None = None,
 ) -> dict[str, object]:
-    row: dict[str, object] = {
+    return {
         "id": trip_id,
         "date": date,
         "ok": q.ok,
@@ -104,10 +100,8 @@ def _quality_row(
         "n_polylines": q.n_polylines,
         "path_length_ratio": q.path_length_ratio,
         "heading_reversals": q.heading_reversals,
+        "elapsed_s": elapsed_s,
     }
-    if elapsed_s is not None:
-        row["elapsed_s"] = elapsed_s
-    return row
 
 
 def map_match_trip(
@@ -121,13 +115,12 @@ def map_match_trip(
     Uses :func:`evaluate_map_match_ways` so that Valhalla errors
     are captured in the quality row instead of crashing the pipeline.
 
-    When *debug* is true, the quality row carries an ``elapsed_s``
-    column measuring time spent in the Valhalla call for this trip.
+    When *debug* is true, the quality row's ``elapsed_s`` column holds
+    the wall-clock time spent in the Valhalla call; otherwise it is null.
     """
     trip = trip.sort("time")
     trip_id = trip["id"][0]
     date = cast(datetime, trip["time"].min()).date()
-    schema = _quality_schema(debug)
     t0 = perf_counter() if debug else 0.0
     if len(trip) < 2:
         q = MapMatchQuality(
@@ -148,7 +141,9 @@ def map_match_trip(
         )
     else:
         way_df = _null_way_result(trip_id, date)
-    quality_df = pl.DataFrame([_quality_row(trip_id, date, q, elapsed)], schema=schema)
+    quality_df = pl.DataFrame(
+        [_quality_row(trip_id, date, q, elapsed)], schema=_QUALITY_SCHEMA
+    )
     return way_df, quality_df
 
 
@@ -178,15 +173,17 @@ def _process_partition(
     progress: tqdm[None] | None = None,
     *,
     debug: bool = False,
-) -> tuple[str, int, int, int, float]:
+) -> tuple[str, int, int, int, int, float]:
     """Read one partition chunk-by-chunk, map-match each trip, and write results.
 
     Processes one chunk at a time to keep memory free for Valhalla.
     Skips chunks whose output file already exists.
-    Returns (partition_key, chunks_skipped, trips_matched, rows_out, elapsed_s).
+    Returns (tier, partition_id, chunks_skipped, trips_matched, rows_out, elapsed_s).
     """
     t0 = perf_counter()
     rel = partition_dir.relative_to(input_dir)
+    tier = rel.parent.name.removeprefix("tier=")
+    partition_id = int(rel.name.removeprefix("partition_id="))
     out_dir = output_dir / rel
     quality_dir = output_dir / "_quality" / rel
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -240,7 +237,7 @@ def _process_partition(
         _atomic_write_parquet(matched, out_path)
         _atomic_write_parquet(quality, quality_path)
 
-    return str(rel), skipped, total_trips, total_rows, perf_counter() - t0
+    return tier, partition_id, skipped, total_trips, total_rows, perf_counter() - t0
 
 
 def _process_block(
@@ -252,7 +249,7 @@ def _process_block(
     progress: tqdm[None] | None = None,
     *,
     debug: bool = False,
-) -> list[tuple[str, int, int, int, float]]:
+) -> list[tuple[str, int, int, int, int, float]]:
     """Process a contiguous block of spatially adjacent partitions sequentially."""
     return [
         _process_partition(
@@ -388,27 +385,20 @@ def run_map_matching(
             for block in blocks
         ]
 
-        timing_rows: list[dict[str, object]] = []
+        partition_results: list[tuple[str, int, int, int, int, float]] = []
         for future in as_completed(futures):
-            for key, skipped, trips, rows, elapsed in future.result():
-                total_skipped += skipped
-                total_trips += trips
-                total_rows += rows
-                timing_rows.append(
-                    {
-                        "partition": key,
-                        "skipped": skipped,
-                        "trips": trips,
-                        "rows_out": rows,
-                        "elapsed_s": elapsed,
-                    }
-                )
+            partition_results.extend(future.result())
 
-    if timing_rows:
+    for _tier, _pid, skipped, trips, rows, _elapsed in partition_results:
+        total_skipped += skipped
+        total_trips += trips
+        total_rows += rows
+
+    if partition_results:
         output_dir.mkdir(parents=True, exist_ok=True)
-        timing_df = pl.DataFrame(timing_rows, schema=_TIMING_SCHEMA).sort(
-            "elapsed_s", descending=True
-        )
+        timing_df = pl.DataFrame(
+            partition_results, schema=_TIMING_SCHEMA, orient="row"
+        ).sort("elapsed_s", descending=True)
         _atomic_write_parquet(timing_df, output_dir / "_timing.parquet")
 
     print("\n--- Map matching complete ---", file=sys.stderr)
