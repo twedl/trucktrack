@@ -163,12 +163,13 @@ def _process_partition(
     total_rows = 0
 
     for chunk_path in chunks:
+        raw_rows = pl.scan_parquet(chunk_path).select(pl.len()).collect().item()
         out_path = out_dir / chunk_path.name
         quality_path = quality_dir / chunk_path.name
         if out_path.exists():
             skipped += 1
             if progress is not None:
-                progress.update(1)
+                progress.update(raw_rows)
             continue
 
         lf = pl.scan_parquet(chunk_path)
@@ -177,7 +178,7 @@ def _process_partition(
         df = lf.select(["id", "time", "lat", "lon"]).collect()
         if df.is_empty():
             if progress is not None:
-                progress.update(1)
+                progress.update(raw_rows)
             continue
         way_dfs = []
         quality_dfs = []
@@ -186,10 +187,15 @@ def _process_partition(
             way_dfs.append(way_df)
             quality_dfs.append(quality_df)
             total_trips += 1
+            if progress is not None:
+                progress.update(len(trip))
+
+        # Rows dropped by the is_stop filter still count as processed.
+        filtered_out = raw_rows - len(df)
+        if progress is not None and filtered_out:
+            progress.update(filtered_out)
 
         if not way_dfs:
-            if progress is not None:
-                progress.update(1)
             continue
 
         matched = pl.concat(way_dfs)
@@ -198,9 +204,6 @@ def _process_partition(
 
         _atomic_write_parquet(matched, out_path)
         _atomic_write_parquet(quality, quality_path)
-
-        if progress is not None:
-            progress.update(1)
 
     return str(rel), skipped, total_trips, total_rows
 
@@ -257,16 +260,28 @@ def run_map_matching(
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
 
-    # Single pass: collect partition dirs and count chunks.
+    # Single pass: collect partition dirs and chunk paths.
     chunks_per_partition: dict[Path, int] = {}
+    all_chunk_paths: list[Path] = []
     for p in input_dir.rglob("*.parquet"):
         if p.parent.name.startswith("partition_id="):
             chunks_per_partition[p.parent] = chunks_per_partition.get(p.parent, 0) + 1
+            all_chunk_paths.append(p)
     partition_dirs = sorted(chunks_per_partition, key=_partition_sort_key)
 
     if not partition_dirs:
         print(f"No partitions found under {input_dir}", file=sys.stderr)
         return
+
+    # Row counts come from parquet footers — cheap, but prints a status line
+    # so large datasets don't look hung while the bar is still setting up.
+    print(
+        f"Counting rows across {len(all_chunk_paths):,} chunk(s)...",
+        file=sys.stderr,
+    )
+    total_input_rows = sum(
+        pl.scan_parquet(p).select(pl.len()).collect().item() for p in all_chunk_paths
+    )
 
     if max_workers is None:
         max_workers = os.cpu_count() or 1
@@ -288,7 +303,8 @@ def run_map_matching(
 
     size_str = f"{block_size}\u2013{block_size + 1}" if remainder else str(block_size)
     print(
-        f"Found {n} partition(s) ({total_chunks} chunks), "
+        f"Found {n} partition(s) "
+        f"({total_chunks:,} chunks, {total_input_rows:,} rows), "
         f"processing with {max_workers} worker(s) "
         f"({size_str} partitions per worker)",
         file=sys.stderr,
@@ -300,7 +316,12 @@ def run_map_matching(
 
     with (
         _silence_stdout() if quiet else nullcontext(),
-        tqdm(total=total_chunks, unit="chunk", desc="Map matching") as progress,
+        tqdm(
+            total=total_input_rows,
+            unit="row",
+            unit_scale=True,
+            desc="Map matching",
+        ) as progress,
         ThreadPoolExecutor(max_workers=max_workers) as pool,
     ):
         futures = [
