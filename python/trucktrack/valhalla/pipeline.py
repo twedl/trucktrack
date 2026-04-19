@@ -33,7 +33,12 @@ from typing import cast
 import polars as pl
 from tqdm import tqdm
 
-from trucktrack.valhalla.quality import MapMatchQuality, evaluate_map_match_ways
+from trucktrack.valhalla._bridge import BridgeConfig
+from trucktrack.valhalla.quality import (
+    MapMatchQuality,
+    evaluate_map_match_ways,
+    evaluate_map_match_with_bridges,
+)
 
 _WAY_SCHEMA = {"id": pl.Utf8, "date": pl.Date, "way_id": pl.Int64}
 _QUALITY_SCHEMA = {
@@ -46,6 +51,10 @@ _QUALITY_SCHEMA = {
     "path_length_ratio": pl.Float64,
     "heading_reversals": pl.Int64,
     "elapsed_s": pl.Float64,
+    "n_bridges": pl.Int64,
+    "max_detour_ratio": pl.Float64,
+    "total_bridge_m": pl.Float64,
+    "any_bridge_failed": pl.Boolean,
 }
 _TIMING_SCHEMA = {
     "tier": pl.Utf8,
@@ -101,6 +110,10 @@ def _quality_row(
         "path_length_ratio": q.path_length_ratio,
         "heading_reversals": q.heading_reversals,
         "elapsed_s": elapsed_s,
+        "n_bridges": q.n_bridges,
+        "max_detour_ratio": q.max_detour_ratio,
+        "total_bridge_m": q.total_bridge_m,
+        "any_bridge_failed": q.any_bridge_failed,
     }
 
 
@@ -109,14 +122,20 @@ def map_match_trip(
     *,
     config: str | Path | None = None,
     debug: bool = False,
+    bridges: BridgeConfig | None = None,
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
     """Map-match a single trip and return (way_ids_df, quality_df).
 
-    Uses :func:`evaluate_map_match_ways` so that Valhalla errors
-    are captured in the quality row instead of crashing the pipeline.
+    Valhalla errors are captured in the quality row instead of crashing
+    the pipeline.
 
     When *debug* is true, the quality row's ``elapsed_s`` column holds
     the wall-clock time spent in the Valhalla call; otherwise it is null.
+
+    When *bridges* is supplied, the trip is split at large gaps,
+    matched segment-by-segment, and bridged via ``/route`` +
+    ``edge_walk`` (see
+    :func:`trucktrack.valhalla.quality.evaluate_map_match_with_bridges`).
     """
     trip = trip.sort("time")
     trip_id = trip["id"][0]
@@ -128,6 +147,10 @@ def map_match_trip(
             ok=False,
             error="insufficient points (<2)",
             n_points=len(trip),
+        )
+    elif bridges is not None:
+        q = evaluate_map_match_with_bridges(
+            trip_id, trip, bridges=bridges, config=config
         )
     else:
         points = list(zip(trip["lat"].to_list(), trip["lon"].to_list(), strict=True))
@@ -173,6 +196,7 @@ def _process_partition(
     progress: tqdm[None] | None = None,
     *,
     debug: bool = False,
+    bridges: BridgeConfig | None = None,
 ) -> tuple[str, int, int, int, int, float]:
     """Read one partition chunk-by-chunk, map-match each trip, and write results.
 
@@ -215,7 +239,9 @@ def _process_partition(
         way_dfs = []
         quality_dfs = []
         for _, trip in df.group_by("id"):
-            way_df, quality_df = map_match_trip(trip, config=config, debug=debug)
+            way_df, quality_df = map_match_trip(
+                trip, config=config, debug=debug, bridges=bridges
+            )
             way_dfs.append(way_df)
             quality_dfs.append(quality_df)
             total_trips += 1
@@ -249,6 +275,7 @@ def _process_block(
     progress: tqdm[None] | None = None,
     *,
     debug: bool = False,
+    bridges: BridgeConfig | None = None,
 ) -> list[tuple[str, int, int, int, int, float]]:
     """Process a contiguous block of spatially adjacent partitions sequentially."""
     return [
@@ -260,6 +287,7 @@ def _process_block(
             row_counts,
             progress,
             debug=debug,
+            bridges=bridges,
         )
         for pdir in partition_dirs
     ]
@@ -280,6 +308,7 @@ def run_map_matching(
     max_workers: int | None = None,
     quiet: bool = False,
     debug: bool = False,
+    bridges: BridgeConfig | None = None,
 ) -> None:
     """Map-match all trips across partitions in parallel.
 
@@ -304,6 +333,12 @@ def run_map_matching(
     *debug* adds an ``elapsed_s`` column to each quality row, so you
     can isolate pathological trips within a slow partition. Per-partition
     timing is always written to ``output_dir / "_timing.parquet"``.
+
+    *bridges*, when supplied, splits trips at large gaps (see
+    :class:`trucktrack.valhalla.BridgeConfig`), matches each segment,
+    and bridges gaps via ``/route`` + ``edge_walk``.  Populates
+    ``n_bridges``, ``max_detour_ratio``, ``total_bridge_m``,
+    ``any_bridge_failed`` in the quality rows.
     """
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
@@ -381,6 +416,7 @@ def run_map_matching(
                 row_counts,
                 progress,
                 debug=debug,
+                bridges=bridges,
             )
             for block in blocks
         ]

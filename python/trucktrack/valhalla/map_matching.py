@@ -34,27 +34,39 @@ class MatchedPoint:
     distance_from_trace: float  # meters
 
 
-def _adaptive_breakage_distance(points: list[tuple[float, float]]) -> float:
-    """Compute breakage_distance from the max gap between consecutive points."""
+def _adaptive_breakage_distance(
+    points: list[tuple[float, float]],
+    max_breakage_m: float = _MAX_BREAKAGE_DISTANCE,
+) -> float:
+    """Compute breakage_distance from the max gap between consecutive points.
+
+    *max_breakage_m* caps the adaptive scaling.  When callers have
+    already split a trace at gaps larger than some threshold, pass that
+    threshold here so the matcher never searches further than the
+    splitter would allow.
+    """
     max_gap = 0.0
     for i in range(1, len(points)):
         d = haversine_m(points[i - 1][0], points[i - 1][1], points[i][0], points[i][1])
         if d > max_gap:
             max_gap = d
     scaled = max_gap * _BREAKAGE_MULTIPLIER
-    return max(_BASE_BREAKAGE_DISTANCE, min(_MAX_BREAKAGE_DISTANCE, scaled))
+    return max(_BASE_BREAKAGE_DISTANCE, min(max_breakage_m, scaled))
 
 
 def _build_trace_options(
     points: list[tuple[float, float]],
     trace_options: dict[str, object] | None,
+    max_breakage_m: float = _MAX_BREAKAGE_DISTANCE,
 ) -> dict[str, object]:
     """Build trace_options with adaptive breakage_distance."""
     opts = dict(DEFAULT_TRACE_OPTIONS)
     if trace_options is not None:
         opts.update(trace_options)
     if "breakage_distance" not in (trace_options or {}):
-        opts["breakage_distance"] = _adaptive_breakage_distance(points)
+        opts["breakage_distance"] = _adaptive_breakage_distance(
+            points, max_breakage_m=max_breakage_m
+        )
     return opts
 
 
@@ -64,12 +76,15 @@ def _build_trace_body(
     costing_options: dict[str, object] | None,
     filters: dict[str, object] | None = None,
     trace_options: dict[str, object] | None = None,
+    max_breakage_m: float = _MAX_BREAKAGE_DISTANCE,
 ) -> dict[str, object]:
     body: dict[str, object] = {
         "shape": [{"lat": lat, "lon": lon} for lat, lon in points],
         "costing": costing,
         "shape_match": "map_snap",
-        "trace_options": _build_trace_options(points, trace_options),
+        "trace_options": _build_trace_options(
+            points, trace_options, max_breakage_m=max_breakage_m
+        ),
     }
     if costing_options is not None:
         body["costing_options"] = {costing: costing_options}
@@ -211,6 +226,7 @@ def map_match_full(
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
     trace_options: dict[str, object] | None = None,
+    max_breakage_m: float = _MAX_BREAKAGE_DISTANCE,
 ) -> tuple[list[MatchedPoint], list[int], list[list[tuple[float, float]]]]:
     """Snap points and return matched points, OSM way IDs, and road geometry.
 
@@ -228,7 +244,11 @@ def map_match_full(
     """
     actor = get_actor(config=config)
     body = _build_trace_body(
-        points, costing, costing_options, trace_options=trace_options
+        points,
+        costing,
+        costing_options,
+        trace_options=trace_options,
+        max_breakage_m=max_breakage_m,
     )
     attrs_resp = json.loads(actor.trace_attributes(json.dumps(body)))
     route_resp = json.loads(actor.trace_route(json.dumps(body)))
@@ -314,6 +334,7 @@ def map_match_dataframe_full(
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
     trace_options: dict[str, object] | None = None,
+    max_breakage_m: float = _MAX_BREAKAGE_DISTANCE,
 ) -> tuple[pl.DataFrame, list[int], list[list[tuple[float, float]]]]:
     """Map-match a DataFrame and return the augmented DataFrame, way IDs, and shape.
 
@@ -331,6 +352,7 @@ def map_match_dataframe_full(
         costing_options=costing_options,
         config=config,
         trace_options=trace_options,
+        max_breakage_m=max_breakage_m,
     )
     result = df.with_columns(
         pl.Series("matched_lat", [m.lat for m in matched]),

@@ -19,7 +19,15 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import polars as pl
+
 from trucktrack.generate.interpolator import bearing, haversine_m
+from trucktrack.valhalla._bridge import (
+    _DEFAULT_BRIDGES,
+    BridgeConfig,
+    BridgeFit,
+    map_match_dataframe_with_bridges,
+)
 from trucktrack.valhalla.map_matching import (
     MatchedPoint,
     map_match_full,
@@ -55,6 +63,13 @@ class MapMatchQuality:
     matched_points: list[MatchedPoint] = field(default_factory=list)
     way_ids: list[int] = field(default_factory=list)
     shapes: list[list[tuple[float, float]]] = field(default_factory=list)
+    # Bridge signals — populated only by evaluate_map_match_with_bridges.
+    # n_bridges counts the routed bridges actually used; when the
+    # fallback path fires, n_bridges is 0 and any_bridge_failed is True.
+    n_bridges: int = 0
+    max_detour_ratio: float | None = None
+    total_bridge_m: float = 0.0
+    any_bridge_failed: bool = False
 
     @property
     def has_issues(self) -> bool:
@@ -68,6 +83,7 @@ class MapMatchQuality:
                 <= _MAX_PATH_LENGTH_RATIO
             )
             or self.heading_reversals > _MAX_HEADING_REVERSALS
+            or self.any_bridge_failed
         )
 
 
@@ -133,6 +149,8 @@ class _MatchResult:
     shapes: list[list[tuple[float, float]]]
     matched_points: list[MatchedPoint] = field(default_factory=list)
     way_ids: list[int] = field(default_factory=list)
+    fits: list[BridgeFit] = field(default_factory=list)
+    fallback_used: bool = False
 
 
 def _evaluate(
@@ -141,9 +159,14 @@ def _evaluate(
     match: Callable[[], _MatchResult],
     *,
     record_breaks: bool,
+    n_points: int | None = None,
 ) -> MapMatchQuality:
-    q = MapMatchQuality(trip_id=trip_id, ok=False, n_points=len(points))
-    if len(points) < 2:
+    q = MapMatchQuality(
+        trip_id=trip_id,
+        ok=False,
+        n_points=len(points) if n_points is None else n_points,
+    )
+    if q.n_points < 2:
         q.error = "insufficient points (<2)"
         return q
 
@@ -159,6 +182,12 @@ def _evaluate(
     if record_breaks:
         q.n_polylines = len(result.shapes)
         q.shape_gaps = _polyline_break_gaps(result.shapes)
+    if result.fits or result.fallback_used:
+        q.n_bridges = len(result.fits)
+        q.total_bridge_m = sum(f.route_m for f in result.fits)
+        if result.fits:
+            q.max_detour_ratio = max(f.detour_ratio for f in result.fits)
+        q.any_bridge_failed = result.fallback_used
     if result.shapes:
         q.path_length_ratio, q.heading_reversals = path_quality(points, result.shapes)
     q.ok = not q.has_issues
@@ -259,3 +288,55 @@ def evaluate_map_match_ways(
         return _MatchResult(shapes=[], way_ids=ways)
 
     return _evaluate(trip_id, points, match, record_breaks=False)
+
+
+def evaluate_map_match_with_bridges(
+    trip_id: str,
+    df: pl.DataFrame,
+    *,
+    bridges: BridgeConfig = _DEFAULT_BRIDGES,
+    lat_col: str = "lat",
+    lon_col: str = "lon",
+    time_col: str = "time",
+    costing: str = "auto",
+    costing_options: dict[str, object] | None = None,
+    config: str | Path | None = None,
+    trace_options: dict[str, object] | None = None,
+) -> MapMatchQuality:
+    """Bridged-match variant of :func:`evaluate_map_match_ways`.
+
+    Splits the trip at large time/distance gaps, map-matches each
+    sub-segment, and bridges gaps with ``/route`` +
+    ``trace_attributes`` in ``edge_walk`` mode (see
+    :func:`trucktrack.valhalla._bridge.map_match_dataframe_with_bridges`).
+
+    On any bridging failure, falls back to a single full-HMM call with
+    ``breakage_distance`` pinned to the base value and sets
+    ``any_bridge_failed=True``.
+
+    Populates the bridge fields on :class:`MapMatchQuality`:
+    ``n_bridges``, ``max_detour_ratio``, ``total_bridge_m``,
+    ``any_bridge_failed``.
+    """
+    points = list(zip(df[lat_col].to_list(), df[lon_col].to_list(), strict=True))
+
+    def match() -> _MatchResult:
+        result = map_match_dataframe_with_bridges(
+            df,
+            bridges=bridges,
+            lat_col=lat_col,
+            lon_col=lon_col,
+            time_col=time_col,
+            costing=costing,
+            costing_options=costing_options,
+            config=config,
+            trace_options=trace_options,
+        )
+        return _MatchResult(
+            shapes=result.shapes,
+            way_ids=result.way_ids,
+            fits=result.fits,
+            fallback_used=result.fallback_used,
+        )
+
+    return _evaluate(trip_id, points, match, record_breaks=False, n_points=len(df))
