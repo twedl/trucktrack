@@ -92,6 +92,36 @@ run_map_matching(
 )
 ```
 
+#### Bridging large gaps
+
+Map-match cost scales poorly when a trip has a large inter-point gap —
+Meili searches candidate routes across the gap and can spend seconds
+or minutes on a single trip.  Opt in to gap-splitting by passing a
+`BridgeConfig`: trips are split at gaps, each sub-segment is matched
+normally, and gaps are filled in with a single `/route` + `edge_walk`
+call to recover way IDs:
+
+```python
+from trucktrack.valhalla import BridgeConfig, run_map_matching
+
+run_map_matching(
+    Path("data/partitioned"),
+    Path("data/matched"),
+    bridges=BridgeConfig(max_dist_m=5000, time_s=240, min_dist_m=1000),
+)
+```
+
+A gap triggers a split when the distance between consecutive points
+exceeds `max_dist_m`, or when the time exceeds `time_s` *and* the
+distance exceeds `min_dist_m` (the distance floor keeps red-light
+stalls from splitting).  The `/route` bridge assumes the truck took a
+shortest path through the gap — true detours are invisible.  Per-trip
+quality rows pick up `n_bridges`, `max_detour_ratio`,
+`total_bridge_m`, and `any_bridge_failed` so downstream can filter.
+On any `/route` failure the orchestrator falls back to a single full
+HMM call with `breakage_distance` pinned to the base value and sets
+`any_bridge_failed=True`.
+
 ## Querying
 
 Pull individual trucks or trips without scanning the full dataset.
