@@ -59,6 +59,7 @@ def _scan_chunk_glob(
     return pl.scan_parquet(
         Path(data_dir) / glob,
         hive_partitioning=True,
+        extra_columns="ignore",
     ).filter(filter_expr)
 
 
@@ -168,9 +169,9 @@ class ChunkIndex:
         files = self._files_for_chunk(cid)
         if not files:
             raise FileNotFoundError(f"No files for chunk_id={cid} in index")
-        return pl.scan_parquet(files, hive_partitioning=True).filter(
-            pl.col("id").str.starts_with(truck_id)
-        )
+        return pl.scan_parquet(
+            files, hive_partitioning=True, extra_columns="ignore"
+        ).filter(pl.col("id").str.starts_with(truck_id))
 
     def scan_trip(self, trip_id: str) -> pl.LazyFrame:
         """Scan files for a single trip by composite trip ID."""
@@ -178,9 +179,9 @@ class ChunkIndex:
         files = self._files_for_chunk(cid)
         if not files:
             raise FileNotFoundError(f"No files for chunk_id={cid} in index")
-        return pl.scan_parquet(files, hive_partitioning=True).filter(
-            pl.col("id") == trip_id
-        )
+        return pl.scan_parquet(
+            files, hive_partitioning=True, extra_columns="ignore"
+        ).filter(pl.col("id") == trip_id)
 
     @functools.cached_property
     def chunk_ids(self) -> list[str]:
