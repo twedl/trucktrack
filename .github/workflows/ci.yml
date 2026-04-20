@@ -37,7 +37,7 @@ jobs:
         run: |
           python -m venv .venv
           . .venv/bin/activate
-          pip install ruff mypy maturin polars
+          pip install ruff mypy maturin polars orjson
 
       - name: Ruff lint
         run: |
