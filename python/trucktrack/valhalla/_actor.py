@@ -106,8 +106,7 @@ def get_actor(config: str | Path | None = None) -> Any:
                 "No valhalla.json found. Create one at ./valhalla.json "
                 "pointing at your tile extract, or pass config=..."
             )
-    config_path = Path(config).resolve()
-    key = str(config_path)
+    key = str(config)
     if key not in actors:
-        actors[key] = valhalla.Actor(config_path)
+        actors[key] = valhalla.Actor(Path(config).resolve())
     return actors[key]
