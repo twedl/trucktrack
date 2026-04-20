@@ -138,7 +138,7 @@ def map_match_trip(
     :func:`trucktrack.valhalla.quality.evaluate_map_match_with_bridges`).
     """
     trip = trip.sort("time")
-    trip_id = trip["id"][0]
+    trip_id = trip.item(0, "id")
     date = cast(datetime, trip["time"].min()).date()
     t0 = perf_counter() if debug else 0.0
     if len(trip) < 2:

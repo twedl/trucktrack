@@ -333,9 +333,11 @@ def map_match_dataframe_with_bridges(
 
             if k < len(segments) - 1:
                 next_seg = segments[k + 1]
-                a = (seg[lat_col][-1], seg[lon_col][-1])
-                b = (next_seg[lat_col][0], next_seg[lon_col][0])
-                gap_s = (next_seg[time_col][0] - seg[time_col][-1]).total_seconds()
+                a = (seg.item(-1, lat_col), seg.item(-1, lon_col))
+                b = (next_seg.item(0, lat_col), next_seg.item(0, lon_col))
+                gap_s = (
+                    next_seg.item(0, time_col) - seg.item(-1, time_col)
+                ).total_seconds()
                 bridge_shape, bridge_ways, fit = bridge_gap(
                     a,
                     b,
