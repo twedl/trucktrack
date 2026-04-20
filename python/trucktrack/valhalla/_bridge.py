@@ -34,6 +34,7 @@ from trucktrack.valhalla.map_matching import (
     _BASE_BREAKAGE_DISTANCE,
     _parse_way_ids,
     map_match_dataframe_full,
+    map_match_ways,
 )
 
 
@@ -236,13 +237,24 @@ def map_match_dataframe_with_bridges(
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
     trace_options: dict[str, object] | None = None,
+    collect_shapes: bool = False,
 ) -> BridgedMatchResult:
     """Map-match a trip, bridging large time/distance gaps with ``/route``.
 
     The matcher runs on each sub-segment separately; gaps are bridged
     by a ``/route`` call plus an ``edge_walk`` to recover way IDs.
-    Way-ID sequences are concatenated with seam-dedup, matched frames
-    are vertically concatenated, shapes are appended in traversal order.
+    Way-ID sequences are concatenated with seam-dedup.
+
+    When *collect_shapes* is false (the default), each sub-segment uses
+    a single ``trace_attributes`` call (``map_match_ways``) — one
+    Valhalla call per segment plus two per bridge.  ``matched_df`` and
+    ``shapes`` come back empty.
+
+    When *collect_shapes* is true, each sub-segment uses
+    ``map_match_dataframe_full`` (``trace_attributes`` + ``trace_route``)
+    so ``matched_df`` carries snapped coordinates and ``shapes`` carries
+    road geometry — useful for visualization but doubles the Valhalla
+    call count per segment.
 
     On any bridging failure (``/route`` returns no path, ``edge_walk``
     fails), the function falls back to a single full-HMM call with
@@ -255,13 +267,26 @@ def map_match_dataframe_with_bridges(
     """
     df = df.sort(time_col)
 
-    def _match(
+    def _segment_points(seg: pl.DataFrame) -> list[tuple[float, float]]:
+        return list(zip(seg[lat_col].to_list(), seg[lon_col].to_list(), strict=True))
+
+    def _match_full(
         frame: pl.DataFrame, opts: dict[str, object] | None
     ) -> tuple[pl.DataFrame, list[int], list[list[tuple[float, float]]]]:
         return map_match_dataframe_full(
             frame,
             lat_col=lat_col,
             lon_col=lon_col,
+            costing=costing,
+            costing_options=costing_options,
+            config=config,
+            trace_options=opts,
+            max_breakage_m=bridges.max_dist_m,
+        )
+
+    def _match_ways(frame: pl.DataFrame, opts: dict[str, object] | None) -> list[int]:
+        return map_match_ways(
+            _segment_points(frame),
             costing=costing,
             costing_options=costing_options,
             config=config,
@@ -277,8 +302,13 @@ def map_match_dataframe_with_bridges(
         time_col=time_col,
     )
     if not gap_idxs:
-        matched_df, ways, shapes = _match(df, trace_options)
-        return BridgedMatchResult(matched_df=matched_df, way_ids=ways, shapes=shapes)
+        if collect_shapes:
+            matched_df, ways, shapes = _match_full(df, trace_options)
+            return BridgedMatchResult(
+                matched_df=matched_df, way_ids=ways, shapes=shapes
+            )
+        ways = _match_ways(df, trace_options)
+        return BridgedMatchResult(matched_df=df.head(0), way_ids=ways, shapes=[])
 
     segments = _split_at(df, gap_idxs)
     all_ways: list[int] = []
@@ -289,12 +319,16 @@ def map_match_dataframe_with_bridges(
     try:
         for k, seg in enumerate(segments):
             if len(seg) < 2:
-                matched_frames.append(_null_matched_frame(seg))
-            else:
-                seg_matched, seg_ways, seg_shapes = _match(seg, trace_options)
+                if collect_shapes:
+                    matched_frames.append(_null_matched_frame(seg))
+            elif collect_shapes:
+                seg_matched, seg_ways, seg_shapes = _match_full(seg, trace_options)
                 matched_frames.append(seg_matched)
                 _extend_dedup(all_ways, seg_ways)
                 all_shapes.extend(seg_shapes)
+            else:
+                seg_ways = _match_ways(seg, trace_options)
+                _extend_dedup(all_ways, seg_ways)
 
             if k < len(segments) - 1:
                 next_seg = segments[k + 1]
@@ -310,12 +344,18 @@ def map_match_dataframe_with_bridges(
                     config=config,
                 )
                 _extend_dedup(all_ways, bridge_ways)
-                all_shapes.append(bridge_shape)
+                if collect_shapes:
+                    all_shapes.append(bridge_shape)
                 fits.append(fit)
     except Exception:
         fallback_opts = dict(trace_options or {})
         fallback_opts["breakage_distance"] = _BASE_BREAKAGE_DISTANCE
-        matched_df, ways, shapes = _match(df, fallback_opts)
+        if collect_shapes:
+            matched_df, ways, shapes = _match_full(df, fallback_opts)
+        else:
+            matched_df = df.head(0)
+            ways = _match_ways(df, fallback_opts)
+            shapes = []
         return BridgedMatchResult(
             matched_df=matched_df,
             way_ids=ways,
@@ -324,8 +364,13 @@ def map_match_dataframe_with_bridges(
             fallback_used=True,
         )
 
+    matched_df = (
+        pl.concat(matched_frames, how="vertical_relaxed")
+        if collect_shapes and matched_frames
+        else df.head(0)
+    )
     return BridgedMatchResult(
-        matched_df=pl.concat(matched_frames, how="vertical_relaxed"),
+        matched_df=matched_df,
         way_ids=all_ways,
         shapes=all_shapes,
         fits=fits,

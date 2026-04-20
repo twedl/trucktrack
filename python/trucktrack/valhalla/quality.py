@@ -302,6 +302,7 @@ def evaluate_map_match_with_bridges(
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
     trace_options: dict[str, object] | None = None,
+    collect_shapes: bool = False,
 ) -> MapMatchQuality:
     """Bridged-match variant of :func:`evaluate_map_match_ways`.
 
@@ -331,6 +332,7 @@ def evaluate_map_match_with_bridges(
             costing_options=costing_options,
             config=config,
             trace_options=trace_options,
+            collect_shapes=collect_shapes,
         )
         return _MatchResult(
             shapes=result.shapes,

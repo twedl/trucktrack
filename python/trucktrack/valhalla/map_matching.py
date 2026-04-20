@@ -201,6 +201,7 @@ def map_match_ways(
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
     trace_options: dict[str, object] | None = None,
+    max_breakage_m: float = _MAX_BREAKAGE_DISTANCE,
 ) -> list[int]:
     """Return the deduplicated sequence of OSM way IDs for a matched trace.
 
@@ -214,6 +215,7 @@ def map_match_ways(
         costing_options,
         filters={"attributes": ["edge.way_id"], "action": "include"},
         trace_options=trace_options,
+        max_breakage_m=max_breakage_m,
     )
     resp = json.loads(actor.trace_attributes(json.dumps(body)))
     return _parse_way_ids(resp)
