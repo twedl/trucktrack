@@ -312,6 +312,17 @@ def run_map_matching(
     and bridges gaps via ``/route`` + ``edge_walk``.  Populates
     ``n_bridges``, ``max_detour_ratio``, ``total_bridge_m``,
     ``any_bridge_failed`` in the quality rows.
+
+    .. note::
+        For best CPU utilization, set ``POLARS_MAX_THREADS=1`` in your
+        environment before launching.  Each partition worker does its
+        own ``pl.scan_parquet().collect()`` on a small chunk; polars'
+        global rayon pool then fans that tiny work out across all
+        cores, and with ``max_workers`` partition threads doing it
+        simultaneously, every polars call fights every other one for
+        CPU.  Serializing polars means partition-level parallelism
+        runs cleanly.  A warning fires at startup if the env var isn't
+        set and ``max_workers > 4``.
     """
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
@@ -332,6 +343,15 @@ def run_map_matching(
     if max_workers is None:
         max_workers = os.cpu_count() or 1
     max_workers = min(max_workers, len(partition_dirs))
+
+    if max_workers > 4 and "POLARS_MAX_THREADS" not in os.environ:
+        print(
+            f"warning: POLARS_MAX_THREADS not set with max_workers={max_workers}. "
+            "Polars' global rayon pool will oversubscribe CPU as each partition "
+            "worker's scan_parquet/collect fans out across all cores. "
+            "Set POLARS_MAX_THREADS=1 before launching for best throughput.",
+            file=sys.stderr,
+        )
 
     # Parquet-footer reads are one RTT each; parallelize so networked
     # filesystems don't serialize thousands of tiny reads.
