@@ -117,28 +117,22 @@ def _quality_row(
     }
 
 
-def map_match_trip(
+def _map_match_trip_row(
     trip: pl.DataFrame,
     *,
     config: str | Path | None = None,
     debug: bool = False,
     bridges: BridgeConfig | None = None,
-) -> tuple[pl.DataFrame, pl.DataFrame]:
-    """Map-match a single trip and return (way_ids_df, quality_df).
+) -> tuple[pl.DataFrame, dict[str, object]]:
+    """Map-match one trip; return (way_ids_df, quality_row_dict).
 
-    Valhalla errors are captured in the quality row instead of crashing
-    the pipeline.
-
-    When *debug* is true, the quality row's ``elapsed_s`` column holds
-    the wall-clock time spent in the Valhalla call; otherwise it is null.
-
-    When *bridges* is supplied, the trip is split at large gaps,
-    matched segment-by-segment, and bridged via ``/route`` +
-    ``edge_walk`` (see
-    :func:`trucktrack.valhalla.quality.evaluate_map_match_with_bridges`).
+    The quality row is left as a dict so the caller can batch many rows
+    into a single ``pl.DataFrame`` construction — the per-trip list-of-
+    one-dict pattern hits polars' ``_sequence_of_dict_to_pydf`` under the
+    GIL and shows up as a hotspot in py-spy.
     """
     trip = trip.sort("time")
-    trip_id = trip["id"][0]
+    trip_id = trip.item(0, "id")
     date = cast(datetime, trip["time"].min()).date()
     t0 = perf_counter() if debug else 0.0
     if len(trip) < 2:
@@ -164,9 +158,33 @@ def map_match_trip(
         )
     else:
         way_df = _null_way_result(trip_id, date)
-    quality_df = pl.DataFrame(
-        [_quality_row(trip_id, date, q, elapsed)], schema=_QUALITY_SCHEMA
+    return way_df, _quality_row(trip_id, date, q, elapsed)
+
+
+def map_match_trip(
+    trip: pl.DataFrame,
+    *,
+    config: str | Path | None = None,
+    debug: bool = False,
+    bridges: BridgeConfig | None = None,
+) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Map-match a single trip and return (way_ids_df, quality_df).
+
+    Valhalla errors are captured in the quality row instead of crashing
+    the pipeline.
+
+    When *debug* is true, the quality row's ``elapsed_s`` column holds
+    the wall-clock time spent in the Valhalla call; otherwise it is null.
+
+    When *bridges* is supplied, the trip is split at large gaps,
+    matched segment-by-segment, and bridged via ``/route`` +
+    ``edge_walk`` (see
+    :func:`trucktrack.valhalla.quality.evaluate_map_match_with_bridges`).
+    """
+    way_df, quality_row = _map_match_trip_row(
+        trip, config=config, debug=debug, bridges=bridges
     )
+    quality_df = pl.DataFrame([quality_row], schema=_QUALITY_SCHEMA)
     return way_df, quality_df
 
 
@@ -236,14 +254,14 @@ def _process_partition(
             if progress is not None:
                 progress.update(raw_rows)
             continue
-        way_dfs = []
-        quality_dfs = []
+        way_dfs: list[pl.DataFrame] = []
+        quality_rows: list[dict[str, object]] = []
         for _, trip in df.group_by("id"):
-            way_df, quality_df = map_match_trip(
+            way_df, quality_row = _map_match_trip_row(
                 trip, config=config, debug=debug, bridges=bridges
             )
             way_dfs.append(way_df)
-            quality_dfs.append(quality_df)
+            quality_rows.append(quality_row)
             total_trips += 1
             if progress is not None:
                 progress.update(len(trip))
@@ -257,7 +275,7 @@ def _process_partition(
             continue
 
         matched = pl.concat(way_dfs)
-        quality = pl.concat(quality_dfs)
+        quality = pl.DataFrame(quality_rows, schema=_QUALITY_SCHEMA)
         total_rows += len(matched)
 
         _atomic_write_parquet(matched, out_path)
