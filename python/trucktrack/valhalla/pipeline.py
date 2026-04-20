@@ -8,8 +8,12 @@ Resumable: the output directory mirrors the input hive layout. On
 restart, chunks whose output file already exists are skipped. Writes
 use atomic temp-file-then-rename to avoid partial output from crashes.
 
-Partitions are processed in parallel using threads, assigned in
-contiguous spatial blocks to keep Valhalla's tile cache warm.
+Partitions are processed in parallel using worker processes
+(ProcessPoolExecutor), assigned in contiguous spatial blocks to keep
+each worker's Valhalla tile cache warm.  Processes (not threads)
+because per-trip Python work, however thin, is GIL-serialized across
+workers — at 29 workers on a long run, active CPU plateaus around
+14/29 with threads no matter how much Python we trim.
 
 Usage::
 
@@ -23,8 +27,8 @@ import os
 import sys
 import tempfile
 from collections.abc import Iterator
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextlib import contextmanager, nullcontext
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
@@ -89,6 +93,18 @@ def _silence_stdout() -> Iterator[None]:
         os.dup2(saved, 1)
         os.close(devnull)
         os.close(saved)
+
+
+def _worker_init(quiet: bool) -> None:
+    """ProcessPoolExecutor initializer: silence pyvalhalla's C++ stdout per worker.
+
+    No restore — the worker never writes to stdout for its own output.
+    """
+    if quiet:
+        sys.stdout.flush()
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, 1)
+        os.close(devnull)
 
 
 def _null_way_result(trip_id: str, date: object) -> pl.DataFrame:
@@ -402,12 +418,12 @@ def run_map_matching(
     output_dir = Path(output_dir)
 
     all_chunk_paths: list[Path] = []
-    partition_dir_set: set[Path] = set()
+    partition_chunks: dict[Path, list[Path]] = {}
     for p in input_dir.rglob("*.parquet"):
         if p.parent.name.startswith("partition_id="):
-            partition_dir_set.add(p.parent)
+            partition_chunks.setdefault(p.parent, []).append(p)
             all_chunk_paths.append(p)
-    partition_dirs = sorted(partition_dir_set, key=_partition_sort_key)
+    partition_dirs = sorted(partition_chunks, key=_partition_sort_key)
     total_chunks = len(all_chunk_paths)
 
     if not partition_dirs:
@@ -461,17 +477,28 @@ def run_map_matching(
     total_trips = 0
     total_rows = 0
 
+    # Per-chunk row totals so the main-process tqdm can advance when each
+    # worker's chunk future completes; workers can't share tqdm across
+    # processes.
+    chunks_with_rows: list[tuple[list[Path], int]] = [
+        (pdirs, sum(row_counts[p] for pdir in pdirs for p in partition_chunks[pdir]))
+        for pdirs in chunks
+    ]
+
     with (
-        _silence_stdout() if quiet else nullcontext(),
         tqdm(
             total=total_input_rows,
             unit="row",
             unit_scale=True,
             desc="Map matching",
         ) as progress,
-        ThreadPoolExecutor(max_workers=max_workers) as pool,
+        ProcessPoolExecutor(
+            max_workers=max_workers,
+            initializer=_worker_init,
+            initargs=(quiet,),
+        ) as pool,
     ):
-        futures = [
+        future_to_rows = {
             pool.submit(
                 _process_chunk,
                 chunk,
@@ -479,16 +506,17 @@ def run_map_matching(
                 output_dir,
                 config,
                 row_counts,
-                progress,
+                None,
                 debug=debug,
                 bridges=bridges,
-            )
-            for chunk in chunks
-        ]
+            ): rows
+            for chunk, rows in chunks_with_rows
+        }
 
         partition_results: list[tuple[str, int, int, int, int, float]] = []
-        for future in as_completed(futures):
+        for future in as_completed(future_to_rows):
             partition_results.extend(future.result())
+            progress.update(future_to_rows[future])
 
     for _tier, _pid, skipped, trips, rows, _elapsed in partition_results:
         total_skipped += skipped
