@@ -57,6 +57,10 @@ CONFIG_OPTIONS: dict[str, bool | int | float] = {
     "mjolnir-use-lru-mem-cache": True,
     "mjolnir-lru-mem-cache-hard-control": True,
     "mjolnir-use-simple-mem-cache": False,
+    # Raise from the default 1 so concurrent map-match threads don't
+    # serialize through a single reader.  Matches the parallelism of
+    # run_map_matching(max_workers=...) with headroom.
+    "mjolnir-max-concurrent-reader-users": 32,
     "mjolnir-include-bicycle": False,
     "mjolnir-include-pedestrian": False,
     "mjolnir-include-driving": True,
