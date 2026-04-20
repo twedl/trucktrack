@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -11,6 +10,8 @@ import polars as pl
 
 from trucktrack.generate.interpolator import haversine_m
 from trucktrack.valhalla._actor import get_actor
+from trucktrack.valhalla._json import dumps as _json_dumps
+from trucktrack.valhalla._json import loads as _json_loads
 from trucktrack.valhalla._parsing import concat_leg_shapes
 
 # Base breakage distance for typical 60-second GPS intervals.  The adaptive
@@ -190,7 +191,7 @@ def map_match(
     body = _build_trace_body(
         points, costing, costing_options, trace_options=trace_options
     )
-    resp = json.loads(actor.trace_attributes(json.dumps(body)))
+    resp = _json_loads(actor.trace_attributes(_json_dumps(body)))
     return _parse_matched_points(resp, points)
 
 
@@ -217,7 +218,7 @@ def map_match_ways(
         trace_options=trace_options,
         max_breakage_m=max_breakage_m,
     )
-    resp = json.loads(actor.trace_attributes(json.dumps(body)))
+    resp = _json_loads(actor.trace_attributes(_json_dumps(body)))
     return _parse_way_ids(resp)
 
 
@@ -252,8 +253,8 @@ def map_match_full(
         trace_options=trace_options,
         max_breakage_m=max_breakage_m,
     )
-    attrs_resp = json.loads(actor.trace_attributes(json.dumps(body)))
-    route_resp = json.loads(actor.trace_route(json.dumps(body)))
+    attrs_resp = _json_loads(actor.trace_attributes(_json_dumps(body)))
+    route_resp = _json_loads(actor.trace_route(_json_dumps(body)))
     return (
         _parse_matched_points(attrs_resp, points),
         _parse_way_ids(attrs_resp),
@@ -284,7 +285,7 @@ def map_match_route_shape(
     body = _build_trace_body(
         points, costing, costing_options, trace_options=trace_options
     )
-    resp = json.loads(actor.trace_route(json.dumps(body)))
+    resp = _json_loads(actor.trace_route(_json_dumps(body)))
 
     shapes: list[list[tuple[float, float]]] = []
 

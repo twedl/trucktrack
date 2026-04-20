@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from trucktrack.generate.models import RouteSegment
 from trucktrack.valhalla._actor import DEFAULT_TRUCK_COSTING, get_actor
+from trucktrack.valhalla._json import dumps as _json_dumps
+from trucktrack.valhalla._json import loads as _json_loads
 from trucktrack.valhalla._parsing import parse_valhalla_response
 
 
@@ -30,5 +31,5 @@ def route(
         },
         "units": "km",
     }
-    resp = json.loads(actor.route(json.dumps(body)))
+    resp = _json_loads(actor.route(_json_dumps(body)))
     return parse_valhalla_response(resp)

@@ -266,33 +266,6 @@ def _process_partition(
     return tier, partition_id, skipped, total_trips, total_rows, perf_counter() - t0
 
 
-def _process_block(
-    partition_dirs: list[Path],
-    input_dir: Path,
-    output_dir: Path,
-    config: str | Path | None,
-    row_counts: dict[Path, int],
-    progress: tqdm[None] | None = None,
-    *,
-    debug: bool = False,
-    bridges: BridgeConfig | None = None,
-) -> list[tuple[str, int, int, int, int, float]]:
-    """Process a contiguous block of spatially adjacent partitions sequentially."""
-    return [
-        _process_partition(
-            pdir,
-            input_dir,
-            output_dir,
-            config,
-            row_counts,
-            progress,
-            debug=debug,
-            bridges=bridges,
-        )
-        for pdir in partition_dirs
-    ]
-
-
 def _partition_sort_key(path: Path) -> tuple[str, int]:
     """Extract (tier, partition_id) for spatial sort order."""
     tier = path.parent.name.removeprefix("tier=")
@@ -371,24 +344,12 @@ def run_map_matching(
     row_counts = dict(zip(all_chunk_paths, counts, strict=True))
     total_input_rows = sum(counts)
 
-    # Split into contiguous blocks so each thread covers a geographic
-    # region and Valhalla's tile cache stays warm.
     n = len(partition_dirs)
-    block_size = n // max_workers
-    remainder = n % max_workers
-    blocks: list[list[Path]] = []
-    start = 0
-    for i in range(max_workers):
-        end = start + block_size + (1 if i < remainder else 0)
-        blocks.append(partition_dirs[start:end])
-        start = end
-
-    size_str = f"{block_size}\u2013{block_size + 1}" if remainder else str(block_size)
     print(
         f"Found {n} partition(s) "
         f"({total_chunks:,} chunks, {total_input_rows:,} rows), "
         f"processing with {max_workers} worker(s) "
-        f"({size_str} partitions per worker)",
+        "(shared work queue)",
         file=sys.stderr,
     )
 
@@ -396,6 +357,10 @@ def run_map_matching(
     total_trips = 0
     total_rows = 0
 
+    # Submit each partition as its own future so fast workers steal
+    # from slow ones.  Partitions are sorted spatially; the executor
+    # dispatches them in submission order, which approximates tile-cache
+    # warmth without wasting idle threads on the tail of a slow block.
     with (
         _silence_stdout() if quiet else nullcontext(),
         tqdm(
@@ -408,8 +373,8 @@ def run_map_matching(
     ):
         futures = [
             pool.submit(
-                _process_block,
-                block,
+                _process_partition,
+                pdir,
                 input_dir,
                 output_dir,
                 config,
@@ -418,12 +383,12 @@ def run_map_matching(
                 debug=debug,
                 bridges=bridges,
             )
-            for block in blocks
+            for pdir in partition_dirs
         ]
 
         partition_results: list[tuple[str, int, int, int, int, float]] = []
         for future in as_completed(futures):
-            partition_results.extend(future.result())
+            partition_results.append(future.result())
 
     for _tier, _pid, skipped, trips, rows, _elapsed in partition_results:
         total_skipped += skipped

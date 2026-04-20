@@ -20,7 +20,6 @@ value, letting Meili itself break the trace at the gap.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -29,6 +28,8 @@ import polars as pl
 
 from trucktrack.generate.interpolator import haversine_m
 from trucktrack.valhalla._actor import get_actor
+from trucktrack.valhalla._json import dumps as _json_dumps
+from trucktrack.valhalla._json import loads as _json_loads
 from trucktrack.valhalla._parsing import concat_leg_shapes
 from trucktrack.valhalla.map_matching import (
     _BASE_BREAKAGE_DISTANCE,
@@ -176,7 +177,7 @@ def bridge_gap(
         costing_options,
     )
     try:
-        route_resp = json.loads(actor.route(json.dumps(route_body)))
+        route_resp = _json_loads(actor.route(_json_dumps(route_body)))
     except Exception as exc:
         raise BridgeFailure(f"route {a} -> {b}: {type(exc).__name__}: {exc}") from exc
 
@@ -195,7 +196,7 @@ def bridge_gap(
         costing_options,
     )
     try:
-        walk_resp = json.loads(actor.trace_attributes(json.dumps(walk_body)))
+        walk_resp = _json_loads(actor.trace_attributes(_json_dumps(walk_body)))
     except Exception as exc:
         raise BridgeFailure(
             f"edge_walk {a} -> {b}: {type(exc).__name__}: {exc}"
