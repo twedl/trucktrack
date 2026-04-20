@@ -266,6 +266,41 @@ def _process_partition(
     return tier, partition_id, skipped, total_trips, total_rows, perf_counter() - t0
 
 
+def _process_chunk(
+    partition_dirs: list[Path],
+    input_dir: Path,
+    output_dir: Path,
+    config: str | Path | None,
+    row_counts: dict[Path, int],
+    progress: tqdm[None] | None = None,
+    *,
+    debug: bool = False,
+    bridges: BridgeConfig | None = None,
+) -> list[tuple[str, int, int, int, int, float]]:
+    """Process a contiguous chunk of spatially adjacent partitions sequentially.
+
+    One chunk owns a geographically-coherent slice of Ontario, so the
+    Valhalla tile LRU and the OS page cache over the mmapped tile tar
+    stay hot across successive partitions.  With many chunks per
+    worker, fast workers still steal from the queue after finishing
+    their own chunk — we get locality within a chunk and load balance
+    across chunks.
+    """
+    return [
+        _process_partition(
+            pdir,
+            input_dir,
+            output_dir,
+            config,
+            row_counts,
+            progress,
+            debug=debug,
+            bridges=bridges,
+        )
+        for pdir in partition_dirs
+    ]
+
+
 def _partition_sort_key(path: Path) -> tuple[str, int]:
     """Extract (tier, partition_id) for spatial sort order."""
     tier = path.parent.name.removeprefix("tier=")
@@ -279,6 +314,7 @@ def run_map_matching(
     *,
     config: str | Path | None = None,
     max_workers: int | None = None,
+    chunks_per_worker: int = 4,
     quiet: bool = False,
     debug: bool = False,
     bridges: BridgeConfig | None = None,
@@ -312,6 +348,16 @@ def run_map_matching(
     and bridges gaps via ``/route`` + ``edge_walk``.  Populates
     ``n_bridges``, ``max_detour_ratio``, ``total_bridge_m``,
     ``any_bridge_failed`` in the quality rows.
+
+    *chunks_per_worker* controls how many chunks of
+    spatially-contiguous partitions each worker sees on average
+    (default 4).  Partitions are sorted spatially and sliced into
+    ``max_workers * chunks_per_worker`` chunks; workers claim whole
+    chunks so the Valhalla tile LRU and OS page cache stay hot across
+    a chunk's partitions, and the queue's extra chunks let fast
+    workers steal from slow ones to trim the tail.  Lower values
+    (1-2) bias toward locality; higher values (8+) bias toward
+    balance.
 
     .. note::
         For best CPU utilization, set ``POLARS_MAX_THREADS=1`` in your
@@ -365,11 +411,21 @@ def run_map_matching(
     total_input_rows = sum(counts)
 
     n = len(partition_dirs)
+
+    # Slice partitions into spatially-contiguous chunks.  More chunks
+    # than workers so the executor queue can still smooth out
+    # imbalance after a worker finishes its first chunk.
+    target_chunks = max(max_workers, max_workers * chunks_per_worker)
+    chunk_size = max(1, (n + target_chunks - 1) // target_chunks)
+    chunks: list[list[Path]] = [
+        partition_dirs[i : i + chunk_size] for i in range(0, n, chunk_size)
+    ]
+
     print(
         f"Found {n} partition(s) "
         f"({total_chunks:,} chunks, {total_input_rows:,} rows), "
         f"processing with {max_workers} worker(s) "
-        "(shared work queue)",
+        f"over {len(chunks)} chunk(s) of ~{chunk_size} partition(s) each",
         file=sys.stderr,
     )
 
@@ -377,10 +433,6 @@ def run_map_matching(
     total_trips = 0
     total_rows = 0
 
-    # Submit each partition as its own future so fast workers steal
-    # from slow ones.  Partitions are sorted spatially; the executor
-    # dispatches them in submission order, which approximates tile-cache
-    # warmth without wasting idle threads on the tail of a slow block.
     with (
         _silence_stdout() if quiet else nullcontext(),
         tqdm(
@@ -393,8 +445,8 @@ def run_map_matching(
     ):
         futures = [
             pool.submit(
-                _process_partition,
-                pdir,
+                _process_chunk,
+                chunk,
                 input_dir,
                 output_dir,
                 config,
@@ -403,12 +455,12 @@ def run_map_matching(
                 debug=debug,
                 bridges=bridges,
             )
-            for pdir in partition_dirs
+            for chunk in chunks
         ]
 
         partition_results: list[tuple[str, int, int, int, int, float]] = []
         for future in as_completed(futures):
-            partition_results.append(future.result())
+            partition_results.extend(future.result())
 
     for _tier, _pid, skipped, trips, rows, _elapsed in partition_results:
         total_skipped += skipped
