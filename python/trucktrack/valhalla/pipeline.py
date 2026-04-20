@@ -65,6 +65,11 @@ _TIMING_SCHEMA = {
     "elapsed_s": pl.Float64,
 }
 
+# Rows to accumulate per worker before calling tqdm.update().  tqdm's
+# thread-safe .update() takes an RLock; with 29 workers each calling
+# per-trip, the lock was ~8% of wall time in py-spy.
+_PROGRESS_BATCH_ROWS = 10_000
+
 
 @contextmanager
 def _silence_stdout() -> Iterator[None]:
@@ -256,6 +261,9 @@ def _process_partition(
             continue
         way_dfs: list[pl.DataFrame] = []
         quality_rows: list[dict[str, object]] = []
+        # Batch tqdm updates to amortize its RLock — per-trip update()
+        # calls from many threads are a measurable contention point.
+        rows_pending = 0
         for _, trip in df.group_by("id"):
             way_df, quality_row = _map_match_trip_row(
                 trip, config=config, debug=debug, bridges=bridges
@@ -263,13 +271,15 @@ def _process_partition(
             way_dfs.append(way_df)
             quality_rows.append(quality_row)
             total_trips += 1
-            if progress is not None:
-                progress.update(len(trip))
+            rows_pending += len(trip)
+            if progress is not None and rows_pending >= _PROGRESS_BATCH_ROWS:
+                progress.update(rows_pending)
+                rows_pending = 0
 
         # Rows dropped by the is_stop filter still count as processed.
         filtered_out = raw_rows - len(df)
-        if progress is not None and filtered_out:
-            progress.update(filtered_out)
+        if progress is not None:
+            progress.update(rows_pending + filtered_out)
 
         if not way_dfs:
             continue
