@@ -31,7 +31,7 @@ from time import perf_counter
 
 import polars as pl
 
-from trucktrack import generate_trace
+from trucktrack import filter_impossible_speeds, generate_trace
 from trucktrack.generate.models import ErrorConfig, TripConfig
 from trucktrack.valhalla import BridgeConfig, find_config
 from trucktrack.valhalla.quality import (
@@ -71,7 +71,9 @@ TRIPS: list[TripSpec] = [
 ]
 
 
-def _build_trip(spec: TripSpec, config_path: Path) -> pl.DataFrame:
+def _build_trip(
+    spec: TripSpec, config_path: Path, max_speed_kmh: float
+) -> pl.DataFrame:
     errors = (
         [
             ErrorConfig(
@@ -93,7 +95,7 @@ def _build_trip(spec: TripSpec, config_path: Path) -> pl.DataFrame:
         errors=errors,
     )
     points = generate_trace(trip)
-    return pl.DataFrame(
+    df = pl.DataFrame(
         {
             "id": [spec.name] * len(points),
             "time": [p.timestamp for p in points],
@@ -101,6 +103,10 @@ def _build_trip(spec: TripSpec, config_path: Path) -> pl.DataFrame:
             "lon": [p.lon for p in points],
         }
     )
+    # Drop points whose implied speed from the previous kept fix exceeds
+    # *max_speed_kmh* — removes generator artifacts where the interpolator
+    # produces multi-km jumps in a single 60 s sample.
+    return filter_impossible_speeds(df, max_speed_kmh=max_speed_kmh)
 
 
 def _time_baseline(df: pl.DataFrame, config_path: Path) -> tuple[float, int, bool]:
@@ -142,6 +148,12 @@ def main() -> int:
     parser.add_argument("--bridges-max-dist-m", type=float, default=5000.0)
     parser.add_argument("--bridges-time-s", type=float, default=240.0)
     parser.add_argument("--bridges-min-dist-m", type=float, default=1000.0)
+    parser.add_argument(
+        "--max-speed-kmh",
+        type=float,
+        default=140.0,
+        help="Pre-filter threshold for impossible-speed generator artifacts.",
+    )
     args = parser.parse_args()
 
     config_path = find_config()
@@ -154,11 +166,12 @@ def main() -> int:
         min_dist_m=args.bridges_min_dist_m,
     )
     print(f"Bridges: {bridges}")
+    print(f"Max speed filter: {args.max_speed_kmh} km/h")
     print(f"Iterations per trip/strategy: {args.iterations}")
 
     # Warm the actor so tile-load latency doesn't bias the first trip.
     print("Warming actor with a throwaway match...")
-    warm_df = _build_trip(TRIPS[0], config_path)
+    warm_df = _build_trip(TRIPS[0], config_path, args.max_speed_kmh)
     _time_baseline(warm_df, config_path)
     _time_bridges(warm_df, config_path, bridges)
 
@@ -166,7 +179,7 @@ def main() -> int:
 
     print("\nGenerating traces + running matches...")
     for spec in TRIPS:
-        df = _build_trip(spec, config_path)
+        df = _build_trip(spec, config_path, args.max_speed_kmh)
         base_times: list[float] = []
         bridge_times: list[float] = []
         base_ways = 0

@@ -2,9 +2,23 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from trucktrack.generate.models import RouteSegment
+
+
+def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Distance in meters between two lat/lon points."""
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (
+        math.sin(dlat / 2) ** 2
+        + math.cos(math.radians(lat1))
+        * math.cos(math.radians(lat2))
+        * math.sin(dlon / 2) ** 2
+    )
+    return 6_371_000 * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
 def decode_polyline6(encoded: str) -> list[tuple[float, float]]:
@@ -52,49 +66,60 @@ def concat_leg_shapes(legs: list[dict[str, Any]]) -> list[tuple[float, float]]:
 
 
 def parse_valhalla_response(data: dict[str, Any]) -> RouteSegment:
-    """Parse a Valhalla route response into a RouteSegment."""
+    """Parse a Valhalla route response into a RouteSegment.
+
+    ``distances_m[i]`` is the true haversine distance between
+    consecutive shape coords, not a uniform share of the maneuver
+    length.  Uniform distances produced discontinuities when the
+    downstream interpolator (``generate.interpolator``) interpolated
+    linearly across shape coords that were unevenly spaced along a
+    maneuver — short curves padded with many dense vertices and long
+    straights with just a few, so "uniform per-segment" rescaling
+    could teleport a sample several km inside a single 60 s step.
+    """
     trip = data["trip"]
     legs = trip["legs"]
 
-    all_coords = concat_leg_shapes(legs)
-    all_speeds: list[float] = []
-    all_distances: list[float] = []
-
-    for leg in legs:
-        for maneuver in leg["maneuvers"]:
-            length_m = maneuver["length"] * 1000
-            time_s = maneuver["time"]
-            begin = maneuver["begin_shape_index"]
-            end = maneuver["end_shape_index"]
-            n_segs = max(end - begin, 1)
-            seg_dist = length_m / n_segs
-            seg_speed = length_m / time_s if time_s > 0 else 25.0
-
-            for _ in range(n_segs):
-                all_speeds.append(seg_speed)
-                all_distances.append(seg_dist)
+    coords = concat_leg_shapes(legs)
+    n_segs = max(len(coords) - 1, 0)
 
     summary = trip["summary"]
     total_distance_m = summary["length"] * 1000
     total_duration_s = summary["time"]
 
-    n_segments = len(all_coords) - 1
-    if len(all_speeds) > n_segments:
-        all_speeds = all_speeds[:n_segments]
-        all_distances = all_distances[:n_segments]
-    elif len(all_speeds) < n_segments:
-        avg_speed = (
-            total_distance_m / total_duration_s if total_duration_s > 0 else 25.0
-        )
-        avg_dist = total_distance_m / n_segments if n_segments > 0 else 100.0
-        while len(all_speeds) < n_segments:
-            all_speeds.append(avg_speed)
-            all_distances.append(avg_dist)
+    distances = [
+        _haversine_m(coords[i - 1][0], coords[i - 1][1], coords[i][0], coords[i][1])
+        for i in range(1, len(coords))
+    ]
+
+    avg_speed = total_distance_m / total_duration_s if total_duration_s > 0 else 25.0
+    speeds = [avg_speed] * n_segs
+
+    # Each maneuver carries a single length/time ratio; apply it to the
+    # global segment indices it covers.  ``concat_leg_shapes`` drops the
+    # duplicate first coord of each non-initial leg, so leg-local shape
+    # index k maps to global coord index ``leg_start + k``.
+    leg_start = 0
+    for leg in legs:
+        leg_shape_len = len(decode_polyline6(leg.get("shape", "")))
+        for maneuver in leg["maneuvers"]:
+            length_m = maneuver["length"] * 1000
+            time_s = maneuver["time"]
+            if time_s <= 0:
+                continue
+            seg_speed = length_m / time_s
+            begin = maneuver["begin_shape_index"]
+            end = maneuver["end_shape_index"]
+            for local_seg in range(begin, end):
+                global_seg = leg_start + local_seg
+                if 0 <= global_seg < n_segs:
+                    speeds[global_seg] = seg_speed
+        leg_start += max(leg_shape_len - 1, 0)
 
     return RouteSegment(
-        coords=all_coords,
-        speeds_mps=all_speeds,
-        distances_m=all_distances,
+        coords=coords,
+        speeds_mps=speeds,
+        distances_m=distances,
         total_distance_m=total_distance_m,
         total_duration_s=total_duration_s,
     )
