@@ -23,6 +23,7 @@ Usage::
 
 from __future__ import annotations
 
+import multiprocessing as mp
 import os
 import sys
 import tempfile
@@ -483,6 +484,14 @@ def run_map_matching(
         ) as progress,
         ProcessPoolExecutor(
             max_workers=max_workers,
+            # spawn, not the Linux fork default: the main process has
+            # polars/tokio/jemalloc background threads whose mutexes get
+            # inherited-locked-but-ownerless across fork, deadlocking
+            # every child inside its first polars call.  Spawn starts
+            # each worker from a fresh Python process with no inherited
+            # thread state.  Re-imports cost a few seconds per worker at
+            # startup, parallelised across the pool.
+            mp_context=mp.get_context("spawn"),
             initializer=_worker_init,
             initargs=(quiet,),
         ) as pool,
