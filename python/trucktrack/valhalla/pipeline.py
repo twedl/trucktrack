@@ -37,6 +37,7 @@ from typing import cast
 import polars as pl
 from tqdm import tqdm
 
+from trucktrack.pipeline import parquet_row_count, partition_sort_key
 from trucktrack.valhalla._bridge import BridgeConfig
 from trucktrack.valhalla.quality import (
     MapMatchQuality,
@@ -221,11 +222,6 @@ def _atomic_write_parquet(df: pl.DataFrame, dest: Path) -> None:
         raise
 
 
-def _parquet_row_count(path: Path) -> int:
-    """Row count from parquet footer — no row-group read."""
-    return int(pl.scan_parquet(path).select(pl.len()).collect().item())
-
-
 def _process_partition(
     partition_dir: Path,
     input_dir: Path,
@@ -345,13 +341,6 @@ def _process_chunk(
     ]
 
 
-def _partition_sort_key(path: Path) -> tuple[str, int]:
-    """Extract (tier, partition_id) for spatial sort order."""
-    tier = path.parent.name.removeprefix("tier=")
-    pid = int(path.name.removeprefix("partition_id="))
-    return (tier, pid)
-
-
 def run_map_matching(
     input_dir: Path,
     output_dir: Path,
@@ -423,7 +412,7 @@ def run_map_matching(
         if p.parent.name.startswith("partition_id="):
             partition_chunks.setdefault(p.parent, []).append(p)
             all_chunk_paths.append(p)
-    partition_dirs = sorted(partition_chunks, key=_partition_sort_key)
+    partition_dirs = sorted(partition_chunks, key=partition_sort_key)
     total_chunks = len(all_chunk_paths)
 
     if not partition_dirs:
@@ -450,7 +439,7 @@ def run_map_matching(
         file=sys.stderr,
     )
     with ThreadPoolExecutor(max_workers=max_workers) as count_pool:
-        counts = list(count_pool.map(_parquet_row_count, all_chunk_paths))
+        counts = list(count_pool.map(parquet_row_count, all_chunk_paths))
     row_counts = dict(zip(all_chunk_paths, counts, strict=True))
     total_input_rows = sum(counts)
 

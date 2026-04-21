@@ -28,6 +28,7 @@ Usage::
 from __future__ import annotations
 
 import os
+import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import timedelta
 from pathlib import Path
@@ -45,6 +46,25 @@ TRAFFIC_MAX_ANGLE = 30.0  # degrees
 IMPOSSIBLE_SPEED_KMH = 200.0  # km/h; drop GPS points implying travel above this
 MIN_SEGMENT_LENGTH = 2
 MAX_PARTITION_BYTES = 1_000_000_000  # 1 GB
+TARGET_PARTITION_ROWS = 500_000
+SPLIT_THRESHOLD = 1.5
+
+
+def parquet_row_count(path: Path) -> int:
+    """Row count from parquet footer — no row-group read."""
+    return int(pl.scan_parquet(path).select(pl.len()).collect().item())
+
+
+def partition_sort_key(path: Path) -> tuple[str, int]:
+    """Extract (tier, partition_id) from a ``tier=.../partition_id=...`` dir.
+
+    Sort order is Hilbert-like because partition_id encodes the tier in
+    its high bits and the tile's Hilbert key (or, post-rebalance, a
+    sequential bucket assigned in Hilbert order) in the low bits.
+    """
+    tier = path.parent.name.removeprefix("tier=")
+    pid = int(path.name.removeprefix("partition_id="))
+    return (tier, pid)
 
 
 def _write_chunk(
@@ -200,6 +220,10 @@ def compact_partitions(
 
     Safe: writes to a temp file, renames to ``data.parquet``
     (atomic on the same filesystem), then deletes originals.
+
+    In-place merge only — does not rebalance sizes across partitions.
+    Prefer :func:`rebalance_partitions` when the goal is even work
+    assignment for downstream per-partition processing.
     """
     data_dir = Path(data_dir)
 
@@ -232,6 +256,173 @@ def compact_partitions(
     return compacted
 
 
+def _plan_buckets(
+    entries: list[tuple[int, list[Path], int]],
+    target_rows: int,
+    split_threshold: float,
+) -> list[tuple[list[Path], int | None]]:
+    """Greedy-pack Hilbert-ordered partitions into ~target_rows buckets.
+
+    Each ``entries`` item is ``(partition_id, files, rows)`` in Hilbert
+    order.  Returns one plan entry per output partition:
+
+    - ``(files, None)`` = concatenate + sort these files as-is (a
+      normal or merged bucket).
+    - ``(files, n_slices)`` = the files belong to a single oversized
+      source partition that should be split into *n_slices* row-window
+      peers after sorting.
+
+    Oversized partitions always flush the current bucket first, then
+    stand alone.  They are never packed with neighbours, so the split
+    is self-contained.
+    """
+    plan: list[tuple[list[Path], int | None]] = []
+    cur_files: list[Path] = []
+    cur_rows = 0
+
+    for _, files, rows in entries:
+        if rows > target_rows * split_threshold:
+            if cur_files:
+                plan.append((cur_files, None))
+                cur_files, cur_rows = [], 0
+            n_slices = max(2, (rows + target_rows - 1) // target_rows)
+            plan.append((files, n_slices))
+            continue
+        if cur_files and cur_rows + rows > target_rows:
+            plan.append((cur_files, None))
+            cur_files, cur_rows = [], 0
+        cur_files.extend(files)
+        cur_rows += rows
+
+    if cur_files:
+        plan.append((cur_files, None))
+    return plan
+
+
+def _write_bucket(
+    files: list[Path],
+    n_slices: int | None,
+    staging: Path,
+    start_idx: int,
+) -> int:
+    """Write one plan entry; return the number of output partitions."""
+    lf = pl.scan_parquet(files).sort("hilbert_idx")
+    if n_slices is None:
+        new_dir = staging / f"partition_id={start_idx:06d}"
+        new_dir.mkdir()
+        lf.sink_parquet(new_dir / "data.parquet")
+        return 1
+
+    # Oversized split: materialize once, slice N ways.  sort + sink
+    # can't stream anyway, so collect-once beats N repeated sorts.
+    df = lf.collect()
+    n = len(df)
+    slice_rows = (n + n_slices - 1) // n_slices
+    for i in range(n_slices):
+        new_dir = staging / f"partition_id={start_idx + i:06d}"
+        new_dir.mkdir()
+        df.slice(i * slice_rows, slice_rows).write_parquet(new_dir / "data.parquet")
+    return n_slices
+
+
+def rebalance_partitions(
+    data_dir: str | Path,
+    *,
+    target_rows: int = TARGET_PARTITION_ROWS,
+    split_threshold: float = SPLIT_THRESHOLD,
+    max_workers: int | None = None,
+) -> tuple[int, int]:
+    """Rewrite partitions so each holds roughly *target_rows* rows.
+
+    For each tier under *data_dir* (``tier=local``, ``tier=regional``,
+    ``tier=longhaul``):
+
+    1. Enumerate ``partition_id=*`` dirs in Hilbert order (the
+       partition_id encoding is tile-Hilbert in its low bits).
+    2. Greedy-pack the sequence into buckets whose total row count is
+       ≤ *target_rows*.
+    3. A single partition whose rows exceed
+       ``target_rows * split_threshold`` is split into row-window peers
+       — one Hilbert-sorted ``data.parquet`` per slice.
+    4. Atomically swap the tier's contents: old partitions move into
+       ``tier=.../_rebalance.old/``, new partitions move in, then the
+       ``.old`` tree is deleted.
+
+    Downtown cells coalesce into many peers, rural cells merge into a
+    super-partition.  The ``partition_id`` number after rebalance is an
+    opaque sequential index per tier, zero-padded to 6 digits.
+
+    Crash recovery: a mid-run crash leaves ``_rebalance.new`` or
+    ``_rebalance.old`` in the tier dir.  ``_rebalance.new`` alone is
+    safe to delete (data still lives in the old partitions).  If both
+    exist, the swap was mid-way and the tier needs manual attention.
+
+    Returns ``(n_partitions_out, n_rows_total)``.
+    """
+    data_dir = Path(data_dir)
+    max_workers = max_workers or os.cpu_count() or 1
+
+    total_out = 0
+    total_rows = 0
+
+    for tier_dir in sorted(data_dir.glob("tier=*")):
+        staging = tier_dir / "_rebalance.new"
+        retired = tier_dir / "_rebalance.old"
+        if retired.exists():
+            raise RuntimeError(
+                f"{retired} exists — previous rebalance crashed mid-swap; "
+                "inspect before retrying"
+            )
+        if staging.exists():
+            # Incomplete previous run: old data is still in place, drop staging.
+            shutil.rmtree(staging)
+
+        parts = sorted(tier_dir.glob("partition_id=*"))
+        if not parts:
+            continue
+
+        all_files = [f for pdir in parts for f in sorted(pdir.glob("*.parquet"))]
+        if not all_files:
+            continue
+
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            counts = list(pool.map(parquet_row_count, all_files))
+        row_counts = dict(zip(all_files, counts, strict=True))
+
+        entries: list[tuple[int, list[Path], int]] = []
+        for pdir in parts:
+            files = sorted(pdir.glob("*.parquet"))
+            if not files:
+                continue
+            pid = int(pdir.name.removeprefix("partition_id="))
+            entries.append((pid, files, sum(row_counts[f] for f in files)))
+        entries.sort(key=lambda e: e[0])
+
+        tier_rows = sum(r for _, _, r in entries)
+        plan = _plan_buckets(entries, target_rows, split_threshold)
+
+        staging.mkdir()
+        new_idx = 0
+        for files, n_slices in plan:
+            new_idx += _write_bucket(files, n_slices, staging, new_idx)
+
+        # Swap: move all old partition dirs into _rebalance.old (single
+        # rename each — atomic within a filesystem), then move staging
+        # contents into tier_dir, then drop .old.
+        retired.mkdir()
+        for pdir in parts:
+            pdir.rename(retired / pdir.name)
+        for new_dir in sorted(staging.glob("partition_id=*")):
+            new_dir.rename(tier_dir / new_dir.name)
+        staging.rmdir()
+        shutil.rmtree(retired)
+
+        total_out += new_idx
+        total_rows += tier_rows
+
+    return total_out, total_rows
+
+
 def run_pipeline(
     input_dir: Path,
     output_dir: Path,
@@ -246,6 +437,8 @@ def run_pipeline(
     group_size: int = 1,
     compact: bool = False,
     max_partition_bytes: int = MAX_PARTITION_BYTES,
+    rebalance: bool = False,
+    target_rows: int = TARGET_PARTITION_ROWS,
 ) -> dict[str, int]:
     """Run the full gap+stop+partition pipeline in parallel.
 
@@ -269,6 +462,13 @@ def run_pipeline(
     max_partition_bytes
         Partitions whose total file size exceeds this limit are skipped
         during compaction to avoid OOM.  Default 1 GB.
+    rebalance
+        If ``True``, run :func:`rebalance_partitions` after processing
+        to repack partitions to ~*target_rows* each (merging small
+        partitions, splitting oversized ones).  Prefer this over
+        *compact* when downstream stages work per-partition.
+    target_rows
+        Target rows per partition when *rebalance* is ``True``.
 
     Returns a {tier_name: partition_count} summary.
     """
@@ -323,7 +523,11 @@ def run_pipeline(
             progress.update(1)
             progress.set_postfix_str(f"{n_in:,} -> {n_out:,} rows")
 
-    if compact:
+    if rebalance:
+        print(f"\nRebalancing partitions to ~{target_rows:,} rows each...")
+        n_out, n_rows = rebalance_partitions(output_dir, target_rows=target_rows)
+        print(f"  Wrote {n_out} partition(s), {n_rows:,} row(s)")
+    elif compact:
         print("\nCompacting partitions...")
         n_compacted = compact_partitions(
             output_dir, max_partition_bytes=max_partition_bytes
