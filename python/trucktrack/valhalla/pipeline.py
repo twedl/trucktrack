@@ -487,20 +487,28 @@ def run_map_matching(
             initargs=(quiet,),
         ) as pool,
     ):
-        future_to_rows = {
-            pool.submit(
+        # Each future is pickled across a mp pipe — pass only the row
+        # counts this worker actually needs, not the whole dataset dict.
+        # With hundreds of thousands of chunks, the full dict pickles to
+        # tens of MB × N workers and stalls the submit queue before any
+        # worker starts.
+        future_to_rows = {}
+        for chunk, rows in chunks_with_rows:
+            sub_counts = {
+                f: row_counts[f] for pdir in chunk for f in partition_chunks[pdir]
+            }
+            fut = pool.submit(
                 _process_chunk,
                 chunk,
                 input_dir,
                 output_dir,
                 config,
-                row_counts,
+                sub_counts,
                 None,
                 debug=debug,
                 bridges=bridges,
-            ): rows
-            for chunk, rows in chunks_with_rows
-        }
+            )
+            future_to_rows[fut] = rows
 
         partition_results: list[tuple[str, int, int, int, int, float]] = []
         for future in as_completed(future_to_rows):
