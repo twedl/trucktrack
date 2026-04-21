@@ -33,13 +33,25 @@ from pathlib import Path
 import polars as pl
 from tqdm import tqdm
 
-_CHUNK_ID_LEN = 2
+_RAW_CHUNK_ID_LEN = 2  # fixed: hive layout of raw data is chunk_id=XX
+_INDEX_CHUNK_ID_LEN = 3  # ChunkIndex resolution (16x finer than raw buckets)
 _INDEX_FILENAME = ".chunk_index.json"
+_INDEX_VERSION = 2  # bump when _INDEX_CHUNK_ID_LEN changes
 
 
-def _chunk_id(truck_id: str) -> str:
-    """Derive the chunk_id (last 2 hex chars) from a truck UUID."""
-    return truck_id[-_CHUNK_ID_LEN:]
+def _raw_chunk_id(truck_id: str) -> str:
+    """Derive the raw-hive chunk_id (last 2 hex chars) from a truck UUID."""
+    return truck_id[-_RAW_CHUNK_ID_LEN:]
+
+
+def _index_chunk_id(truck_id: str) -> str:
+    """Derive the ChunkIndex key (last 3 hex chars) from a truck UUID.
+
+    Finer-grained than the raw-data hive key, so each bucket holds ~1/16
+    as many trucks and ``ChunkIndex.scan_truck`` opens ~1/16 as many files.
+    Independent of the hive layout — the index just stores file paths.
+    """
+    return truck_id[-_INDEX_CHUNK_ID_LEN:]
 
 
 def truck_id_from_trip(trip_id: str) -> str:
@@ -118,7 +130,7 @@ class ChunkIndex:
             pl.col("id")
             .str.split("_gap")
             .list.first()
-            .str.slice(-_CHUNK_ID_LEN)
+            .str.slice(-_INDEX_CHUNK_ID_LEN)
             .unique()
         )
 
@@ -146,18 +158,43 @@ class ChunkIndex:
         return cls(data_dir, index)
 
     def save(self, path: str | Path | None = None) -> Path:
-        """Write the index to disk. Defaults to ``data_dir/.chunk_index.json``."""
+        """Write the index to disk. Defaults to ``data_dir/.chunk_index.json``.
+
+        Stores the chunk_id length so :meth:`load` can reject a file built
+        under a different resolution.
+        """
         out = Path(path) if path is not None else self._data_dir / _INDEX_FILENAME
-        out.write_text(json.dumps(self._index, sort_keys=True))
+        payload = {
+            "version": _INDEX_VERSION,
+            "chunk_id_len": _INDEX_CHUNK_ID_LEN,
+            "index": self._index,
+        }
+        out.write_text(json.dumps(payload, sort_keys=True))
         return out
 
     @classmethod
     def load(cls, data_dir: str | Path, path: str | Path | None = None) -> ChunkIndex:
-        """Load a previously saved index."""
+        """Load a previously saved index.
+
+        Raises :class:`ValueError` if the saved index was built with a
+        different chunk_id resolution than the current code — rebuild with
+        :meth:`build` in that case.
+        """
         data_dir = Path(data_dir)
         src = Path(path) if path is not None else data_dir / _INDEX_FILENAME
-        index = json.loads(src.read_text())
-        return cls(data_dir, index)
+        payload = json.loads(src.read_text())
+        if not isinstance(payload, dict) or "index" not in payload:
+            raise ValueError(
+                f"{src} is a legacy ChunkIndex; rebuild with ChunkIndex.build()"
+            )
+        saved_len = payload.get("chunk_id_len")
+        if saved_len != _INDEX_CHUNK_ID_LEN:
+            raise ValueError(
+                f"{src} was built with chunk_id_len={saved_len}, "
+                f"current code uses {_INDEX_CHUNK_ID_LEN}; "
+                "rebuild with ChunkIndex.build()"
+            )
+        return cls(data_dir, payload["index"])
 
     def _files_for_chunk(self, cid: str) -> list[Path]:
         """Resolve relative paths for a chunk_id."""
@@ -165,7 +202,7 @@ class ChunkIndex:
 
     def scan_truck(self, truck_id: str) -> pl.LazyFrame:
         """Scan files for a truck and filter on composite trip ID prefix."""
-        cid = _chunk_id(truck_id)
+        cid = _index_chunk_id(truck_id)
         files = self._files_for_chunk(cid)
         if not files:
             raise FileNotFoundError(f"No files for chunk_id={cid} in index")
@@ -175,7 +212,7 @@ class ChunkIndex:
 
     def scan_trip(self, trip_id: str) -> pl.LazyFrame:
         """Scan files for a single trip by composite trip ID."""
-        cid = _chunk_id(truck_id_from_trip(trip_id))
+        cid = _index_chunk_id(truck_id_from_trip(trip_id))
         files = self._files_for_chunk(cid)
         if not files:
             raise FileNotFoundError(f"No files for chunk_id={cid} in index")
@@ -221,7 +258,7 @@ def scan_raw_truck(
     truck_id
         Full truck UUID (hex string).
     """
-    cid = _chunk_id(truck_id)
+    cid = _raw_chunk_id(truck_id)
     return _scan_chunk_glob(
         data_dir, f"**/chunk_id={cid}/*.parquet", pl.col("id") == truck_id
     )
