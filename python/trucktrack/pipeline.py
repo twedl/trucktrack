@@ -307,32 +307,54 @@ def _write_bucket(
 ) -> int:
     """Write one plan entry; return the number of output partitions.
 
-    Uses the polars streaming engine so the sort spills to disk rather
-    than materializing the whole bucket in RAM — a downtown tile with
-    millions of rows does not fit as a DataFrame.
+    Packed buckets are bounded to roughly ``target_rows`` and can be
+    sorted directly.  Oversized partitions are split by hilbert_idx
+    quantile cuts — the global sort on tens of millions of wide rows
+    does not reliably fit even with the polars streaming engine, so
+    we avoid it entirely: cut boundaries come from the single
+    ``hilbert_idx`` column (8 bytes/row) and each output slice filters
+    + sorts only its own ``~target_rows``-sized chunk.
     """
-    lf = pl.scan_parquet(files).sort("hilbert_idx")
     if n_slices is None:
         new_dir = staging / f"partition_id={start_idx:06d}"
         new_dir.mkdir()
-        lf.sink_parquet(new_dir / "data.parquet", engine="streaming")
-        return 1
-
-    # Oversized split: sort once to a tmp file (spill-sort), then slice
-    # via scan + sink so peak RAM is one slice, not the whole partition.
-    tmp = staging / f"_split_tmp_{start_idx:06d}.parquet"
-    lf.sink_parquet(tmp, engine="streaming")
-    total = int(pl.scan_parquet(tmp).select(pl.len()).collect().item())
-    slice_rows = (total + n_slices - 1) // n_slices
-    for i in range(n_slices):
-        new_dir = staging / f"partition_id={start_idx + i:06d}"
-        new_dir.mkdir()
         (
-            pl.scan_parquet(tmp)
-            .slice(i * slice_rows, slice_rows)
+            pl.scan_parquet(files)
+            .sort("hilbert_idx")
             .sink_parquet(new_dir / "data.parquet", engine="streaming")
         )
-    tmp.unlink()
+        return 1
+
+    # Oversized split: derive cut points from the hilbert_idx column
+    # alone, then write each slice with a bounded sort.
+    hilbert = (
+        pl.scan_parquet(files).select("hilbert_idx").collect()["hilbert_idx"].sort()
+    )
+    n_rows = len(hilbert)
+    slice_rows = (n_rows + n_slices - 1) // n_slices
+    cuts: list[int] = [
+        int(hilbert[min(i * slice_rows, n_rows - 1)]) for i in range(1, n_slices)
+    ]
+
+    prev: int | None = None
+    for i in range(n_slices):
+        nxt = cuts[i] if i < len(cuts) else None
+        expr: pl.Expr | None = None
+        if prev is not None:
+            expr = pl.col("hilbert_idx") >= prev
+        if nxt is not None:
+            hi = pl.col("hilbert_idx") < nxt
+            expr = hi if expr is None else (expr & hi)
+
+        new_dir = staging / f"partition_id={start_idx + i:06d}"
+        new_dir.mkdir()
+        lf = pl.scan_parquet(files)
+        if expr is not None:
+            lf = lf.filter(expr)
+        lf.sort("hilbert_idx").sink_parquet(
+            new_dir / "data.parquet", engine="streaming"
+        )
+        prev = nxt
     return n_slices
 
 
