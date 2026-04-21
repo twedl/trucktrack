@@ -46,7 +46,7 @@ TRAFFIC_MAX_ANGLE = 30.0  # degrees
 IMPOSSIBLE_SPEED_KMH = 200.0  # km/h; drop GPS points implying travel above this
 MIN_SEGMENT_LENGTH = 2
 MAX_PARTITION_BYTES = 1_000_000_000  # 1 GB
-TARGET_PARTITION_ROWS = 500_000
+TARGET_PARTITION_ROWS = 1_000_000
 SPLIT_THRESHOLD = 1.5
 
 
@@ -305,23 +305,34 @@ def _write_bucket(
     staging: Path,
     start_idx: int,
 ) -> int:
-    """Write one plan entry; return the number of output partitions."""
+    """Write one plan entry; return the number of output partitions.
+
+    Uses the polars streaming engine so the sort spills to disk rather
+    than materializing the whole bucket in RAM — a downtown tile with
+    millions of rows does not fit as a DataFrame.
+    """
     lf = pl.scan_parquet(files).sort("hilbert_idx")
     if n_slices is None:
         new_dir = staging / f"partition_id={start_idx:06d}"
         new_dir.mkdir()
-        lf.sink_parquet(new_dir / "data.parquet")
+        lf.sink_parquet(new_dir / "data.parquet", engine="streaming")
         return 1
 
-    # Oversized split: materialize once, slice N ways.  sort + sink
-    # can't stream anyway, so collect-once beats N repeated sorts.
-    df = lf.collect()
-    n = len(df)
-    slice_rows = (n + n_slices - 1) // n_slices
+    # Oversized split: sort once to a tmp file (spill-sort), then slice
+    # via scan + sink so peak RAM is one slice, not the whole partition.
+    tmp = staging / f"_split_tmp_{start_idx:06d}.parquet"
+    lf.sink_parquet(tmp, engine="streaming")
+    total = int(pl.scan_parquet(tmp).select(pl.len()).collect().item())
+    slice_rows = (total + n_slices - 1) // n_slices
     for i in range(n_slices):
         new_dir = staging / f"partition_id={start_idx + i:06d}"
         new_dir.mkdir()
-        df.slice(i * slice_rows, slice_rows).write_parquet(new_dir / "data.parquet")
+        (
+            pl.scan_parquet(tmp)
+            .slice(i * slice_rows, slice_rows)
+            .sink_parquet(new_dir / "data.parquet", engine="streaming")
+        )
+    tmp.unlink()
     return n_slices
 
 
