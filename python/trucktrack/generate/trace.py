@@ -135,8 +135,7 @@ def traces_to_parquet(
     trips: list[tuple[list[TracePoint], str]], output_path: str | None = None
 ) -> bytes:
     """Write multiple trips to a single Parquet file. Returns the bytes."""
-    import pyarrow as pa
-    import pyarrow.parquet as pq
+    import polars as pl
 
     ids: list[str] = []
     lats: list[float] = []
@@ -156,7 +155,8 @@ def traces_to_parquet(
     # Column name `time` matches the schema used elsewhere in trucktrack
     # (see splitters.py defaults), so generated parquets feed straight into
     # split-stops / split-gap without requiring --time-col overrides.
-    table = pa.table(
+    buf = BytesIO()
+    pl.DataFrame(
         {
             "id": ids,
             "lat": lats,
@@ -165,10 +165,7 @@ def traces_to_parquet(
             "heading": headings,
             "time": timestamps,
         }
-    )
-
-    buf = BytesIO()
-    pq.write_table(table, buf)
+    ).write_parquet(buf)
     data = buf.getvalue()
 
     if output_path:
