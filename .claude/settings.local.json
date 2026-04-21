@@ -37,7 +37,11 @@
       "Bash(gh run:*)",
       "Bash(cp .git/hooks/pre-push scripts/pre-push)",
       "Bash(rm .git/hooks/pre-push)",
-      "Bash(ln -s ../../scripts/pre-push .git/hooks/pre-push)"
+      "Bash(ln -s ../../scripts/pre-push .git/hooks/pre-push)",
+      "Bash(uv run:*)",
+      "Bash(bash scripts/pre-push)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
     ]
   }
 }

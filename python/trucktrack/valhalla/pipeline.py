@@ -27,13 +27,14 @@ import multiprocessing as mp
 import os
 import sys
 import tempfile
+import threading
 from collections.abc import Iterator
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
-from typing import cast
+from typing import Any, cast
 
 import polars as pl
 from tqdm import tqdm
@@ -71,10 +72,22 @@ _TIMING_SCHEMA = {
     "elapsed_s": pl.Float64,
 }
 
-# Rows to accumulate per worker before calling tqdm.update().  tqdm's
-# thread-safe .update() takes an RLock; with 29 workers each calling
-# per-trip, the lock was ~8% of wall time in py-spy.
+# Rows to accumulate per worker before pushing a progress update.
+# Was ~8% of wall time via tqdm's RLock when we hit it per-trip from 29
+# workers; batching amortizes both the mp.Queue round-trip and the
+# main-thread tqdm.update().
 _PROGRESS_BATCH_ROWS = 10_000
+
+# Per-worker handle to the main-process progress queue, set in
+# _worker_init.  None in the parent and in tests that call the helpers
+# directly.
+_PROGRESS_QUEUE: Any = None
+
+
+def _report_progress(rows: int) -> None:
+    """Ship a row-count increment to the main process' tqdm drainer."""
+    if _PROGRESS_QUEUE is not None and rows:
+        _PROGRESS_QUEUE.put(rows)
 
 
 @contextmanager
@@ -97,11 +110,17 @@ def _silence_stdout() -> Iterator[None]:
         os.close(saved)
 
 
-def _worker_init(quiet: bool) -> None:
-    """ProcessPoolExecutor initializer: silence pyvalhalla's C++ stdout per worker.
+def _worker_init(quiet: bool, progress_queue: Any) -> None:
+    """ProcessPoolExecutor initializer: silence stdout, wire progress queue.
 
-    No restore — the worker never writes to stdout for its own output.
+    Stashes the shared progress queue in a module global so
+    ``_report_progress`` can stream per-partition updates back to the
+    main process' tqdm drainer without round-tripping through each
+    future's result.  No stdout restore — the worker never writes to
+    stdout for its own output.
     """
+    global _PROGRESS_QUEUE
+    _PROGRESS_QUEUE = progress_queue
     if quiet:
         sys.stdout.flush()
         devnull = os.open(os.devnull, os.O_WRONLY)
@@ -229,7 +248,6 @@ def _process_partition(
     output_dir: Path,
     config: str | Path | None,
     row_counts: dict[Path, int],
-    progress: tqdm[None] | None = None,
     *,
     debug: bool = False,
     bridges: BridgeConfig | None = None,
@@ -260,8 +278,7 @@ def _process_partition(
         quality_path = quality_dir / chunk_path.name
         if out_path.exists():
             skipped += 1
-            if progress is not None:
-                progress.update(raw_rows)
+            _report_progress(raw_rows)
             continue
 
         lf = pl.scan_parquet(chunk_path)
@@ -269,13 +286,10 @@ def _process_partition(
             lf = lf.filter(~pl.col("is_stop"))
         df = lf.select(["id", "time", "lat", "lon"]).collect()
         if df.is_empty():
-            if progress is not None:
-                progress.update(raw_rows)
+            _report_progress(raw_rows)
             continue
         way_dfs: list[pl.DataFrame] = []
         quality_rows: list[dict[str, object]] = []
-        # Batch tqdm updates to amortize its RLock — per-trip update()
-        # calls from many threads are a measurable contention point.
         rows_pending = 0
         for _, trip in df.group_by("id"):
             way_df, quality_row = _map_match_trip_row(
@@ -285,14 +299,13 @@ def _process_partition(
             quality_rows.append(quality_row)
             total_trips += 1
             rows_pending += len(trip)
-            if progress is not None and rows_pending >= _PROGRESS_BATCH_ROWS:
-                progress.update(rows_pending)
+            if rows_pending >= _PROGRESS_BATCH_ROWS:
+                _report_progress(rows_pending)
                 rows_pending = 0
 
         # Rows dropped by the is_stop filter still count as processed.
         filtered_out = raw_rows - len(df)
-        if progress is not None:
-            progress.update(rows_pending + filtered_out)
+        _report_progress(rows_pending + filtered_out)
 
         if not way_dfs:
             continue
@@ -313,7 +326,6 @@ def _process_chunk(
     output_dir: Path,
     config: str | Path | None,
     row_counts: dict[Path, int],
-    progress: tqdm[None] | None = None,
     *,
     debug: bool = False,
     bridges: BridgeConfig | None = None,
@@ -334,7 +346,6 @@ def _process_chunk(
             output_dir,
             config,
             row_counts,
-            progress,
             debug=debug,
             bridges=bridges,
         )
@@ -403,6 +414,16 @@ def run_map_matching(
         CPU.  Serializing polars means partition-level parallelism
         runs cleanly.  A warning fires at startup if the env var isn't
         set and ``max_workers > 4``.
+
+    .. note::
+        Workers are launched with the ``spawn`` start method (required
+        because polars keeps background threads in the parent that
+        would otherwise deadlock across ``fork``).  Call this function
+        from inside an ``if __name__ == "__main__":`` guard — without
+        it, each spawned worker re-imports your script at top level
+        and Python raises ``RuntimeError: An attempt has been made to
+        start a new process before the current process has finished
+        its bootstrapping phase``.
     """
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
@@ -475,6 +496,16 @@ def run_map_matching(
         for pdirs in chunks
     ]
 
+    # Shared queue — workers stream per-batch row counts; a main-process
+    # drainer thread forwards them to tqdm so the bar advances inside
+    # each chunk, not only when a whole chunk-future completes.
+    ctx = mp.get_context("spawn")
+    progress_queue: Any = ctx.Queue()
+
+    def _drain_progress(bar: tqdm[None]) -> None:
+        while (item := progress_queue.get()) is not None:
+            bar.update(item)
+
     with (
         tqdm(
             total=total_input_rows,
@@ -491,11 +522,16 @@ def run_map_matching(
             # each worker from a fresh Python process with no inherited
             # thread state.  Re-imports cost a few seconds per worker at
             # startup, parallelised across the pool.
-            mp_context=mp.get_context("spawn"),
+            mp_context=ctx,
             initializer=_worker_init,
-            initargs=(quiet,),
+            initargs=(quiet, progress_queue),
         ) as pool,
     ):
+        drainer = threading.Thread(
+            target=_drain_progress, args=(progress,), daemon=True
+        )
+        drainer.start()
+
         # Each future is pickled across a mp pipe — pass only the row
         # counts this worker actually needs, not the whole dataset dict.
         # With hundreds of thousands of chunks, the full dict pickles to
@@ -513,16 +549,18 @@ def run_map_matching(
                 output_dir,
                 config,
                 sub_counts,
-                None,
                 debug=debug,
                 bridges=bridges,
             )
             future_to_rows[fut] = rows
 
         partition_results: list[tuple[str, int, int, int, int, float]] = []
-        for future in as_completed(future_to_rows):
-            partition_results.extend(future.result())
-            progress.update(future_to_rows[future])
+        try:
+            for future in as_completed(future_to_rows):
+                partition_results.extend(future.result())
+        finally:
+            progress_queue.put(None)
+            drainer.join(timeout=5)
 
     for _tier, _pid, skipped, trips, rows, _elapsed in partition_results:
         total_skipped += skipped
