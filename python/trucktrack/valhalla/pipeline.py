@@ -488,13 +488,18 @@ def run_map_matching(
     total_trips = 0
     total_rows = 0
 
-    # Per-chunk row totals so the main-process tqdm can advance when each
-    # worker's chunk future completes; workers can't share tqdm across
-    # processes.
-    chunks_with_rows: list[tuple[list[Path], int]] = [
-        (pdirs, sum(row_counts[p] for pdir in pdirs for p in partition_chunks[pdir]))
-        for pdirs in chunks
-    ]
+    # Longest-Processing-Time-first: submit the heaviest chunk-futures
+    # earliest so the longest tasks start when the pool is full and
+    # shorter tasks fill idle workers at the end.  Cuts the long tail
+    # when partitions have skewed row counts (downtown vs rural).
+    def _chunk_rows(pdirs: list[Path]) -> int:
+        return sum(row_counts[p] for pdir in pdirs for p in partition_chunks[pdir])
+
+    chunks_with_rows: list[tuple[list[Path], int]] = sorted(
+        ((pdirs, _chunk_rows(pdirs)) for pdirs in chunks),
+        key=lambda cr: cr[1],
+        reverse=True,
+    )
 
     # Shared queue — workers stream per-batch row counts; a main-process
     # drainer thread forwards them to tqdm so the bar advances inside
