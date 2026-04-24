@@ -51,6 +51,10 @@ def matched_files(matched_dir: Path) -> list[str]:
     return files
 
 
+def _sql_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
 def run(matched_dir: Path, osm_parquet: Path, output_path: Path) -> None:
     files = matched_files(matched_dir)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -58,12 +62,17 @@ def run(matched_dir: Path, osm_parquet: Path, output_path: Path) -> None:
     tmp_dir.mkdir(exist_ok=True)
 
     con = duckdb.connect()
-    con.execute(f"PRAGMA memory_limit='{MEMORY_LIMIT}'")
-    con.execute(f"PRAGMA temp_directory='{tmp_dir}'")
-    con.execute("PRAGMA preserve_insertion_order=false")
+    # DuckDB requires string literals (not ?-parameters) for COPY targets,
+    # temp_directory, and ``read_parquet`` filenames at bind time, so we
+    # inline quoted paths via ``_sql_literal``.
+    con.execute(f"PRAGMA memory_limit = '{MEMORY_LIMIT}'")
+    con.execute(f"PRAGMA temp_directory = {_sql_literal(str(tmp_dir))}")
+    con.execute("PRAGMA preserve_insertion_order = false")
+
+    matched_literal = "[" + ", ".join(_sql_literal(f) for f in files) + "]"
 
     con.execute(
-        """
+        f"""
         COPY (
             WITH counts AS (
                 SELECT
@@ -72,7 +81,7 @@ def run(matched_dir: Path, osm_parquet: Path, output_path: Path) -> None:
                     MIN(date)          AS first_date,
                     MAX(date)          AS last_date
                 FROM read_parquet(
-                    ?::VARCHAR[],
+                    {matched_literal},
                     hive_partitioning = true,
                     union_by_name     = true
                 )
@@ -85,7 +94,7 @@ def run(matched_dir: Path, osm_parquet: Path, output_path: Path) -> None:
                 SELECT
                     CAST(substr(feature_id, 5) AS BIGINT) AS way_id,
                     geometry
-                FROM read_parquet(?)
+                FROM read_parquet({_sql_literal(str(osm_parquet))})
                 WHERE feature_id LIKE 'way/%'
             )
             SELECT
@@ -97,14 +106,13 @@ def run(matched_dir: Path, osm_parquet: Path, output_path: Path) -> None:
             FROM counts c
             LEFT JOIN osm o USING (way_id)
             ORDER BY c.trip_count DESC
-        ) TO ? (FORMAT PARQUET, COMPRESSION ZSTD)
-        """,
-        [files, str(osm_parquet), str(output_path)],
+        ) TO {_sql_literal(str(output_path))} (FORMAT PARQUET, COMPRESSION ZSTD)
+        """
     )
 
     total, with_geom = con.execute(
-        "SELECT COUNT(*), COUNT(geometry) FROM read_parquet(?)",
-        [str(output_path)],
+        f"SELECT COUNT(*), COUNT(geometry) "
+        f"FROM read_parquet({_sql_literal(str(output_path))})"
     ).fetchone()
     size_mb = output_path.stat().st_size / 1e6
     print(f"{total:,} ways traversed, {with_geom:,} with OSM geometry")
