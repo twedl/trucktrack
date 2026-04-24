@@ -5,7 +5,15 @@ OSM parquet (e.g. a quackosm export) to attach geometry.
 
 Only ``feature_id`` and ``geometry`` are read from the OSM parquet, so
 unfiltered exports with a MAP-typed ``tags`` column work without help
-(polars-arrow currently can't decode that column).
+(DuckDB prunes unused columns at the parquet reader).
+
+Uses DuckDB to stream the aggregation + join + sort through a single
+``COPY ... TO`` so the result is never materialized in RAM. Spills to
+``<output_parent>/.duckdb_tmp/`` when memory pressure demands.
+
+Requires (not in pyproject.toml)::
+
+    pip install duckdb
 
 Usage::
 
@@ -13,47 +21,94 @@ Usage::
         data/matched \\
         /path/to/north-america-latest.osm.parquet \\
         data/way_counts.parquet
+
+    uv run python examples/way_id_counts.py \\
+        "/home/jovyan/bmp-datavol-1/atri-match" \\
+        "/home/jovyan/bmp-datavol-1/north-america-latest.osm.parquet" \\
+        temp/way_counts.parquet
 """
 
 from __future__ import annotations
 
 import sys
+from glob import glob
 from pathlib import Path
 
-import polars as pl
+import duckdb
+
+# Leaves headroom on a 120GB host; DuckDB spills the rest to ``temp_directory``.
+MEMORY_LIMIT = "64GB"
 
 
-def aggregate_way_counts(matched_dir: Path) -> pl.LazyFrame:
-    return (
-        pl.scan_parquet(matched_dir / "**/*.parquet", hive_partitioning=True)
-        .drop_nulls("way_id")
-        .group_by("way_id")
-        .agg(
-            pl.col("id").n_unique().alias("trip_count"),
-            pl.col("date").min().alias("first_date"),
-            pl.col("date").max().alias("last_date"),
-        )
+def matched_files(matched_dir: Path) -> list[str]:
+    files = [
+        f
+        for f in glob(str(matched_dir / "**/*.parquet"), recursive=True)
+        if "_quality" not in f
+    ]
+    if not files:
+        raise SystemExit(f"No matched parquet files under {matched_dir}")
+    return files
+
+
+def run(matched_dir: Path, osm_parquet: Path, output_path: Path) -> None:
+    files = matched_files(matched_dir)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_dir = output_path.parent / ".duckdb_tmp"
+    tmp_dir.mkdir(exist_ok=True)
+
+    con = duckdb.connect()
+    con.execute(f"PRAGMA memory_limit='{MEMORY_LIMIT}'")
+    con.execute(f"PRAGMA temp_directory='{tmp_dir}'")
+    con.execute("PRAGMA preserve_insertion_order=false")
+
+    con.execute(
+        """
+        COPY (
+            WITH counts AS (
+                SELECT
+                    way_id,
+                    COUNT(DISTINCT id) AS trip_count,
+                    MIN(date)          AS first_date,
+                    MAX(date)          AS last_date
+                FROM read_parquet(
+                    ?::VARCHAR[],
+                    hive_partitioning = true,
+                    union_by_name     = true
+                )
+                WHERE way_id IS NOT NULL
+                GROUP BY way_id
+            ),
+            osm AS (
+                -- quackosm writes feature_id as 'way/<id>'; strip the
+                -- 4-char prefix and cast to match Valhalla's int64 way_id.
+                SELECT
+                    CAST(substr(feature_id, 5) AS BIGINT) AS way_id,
+                    geometry
+                FROM read_parquet(?)
+                WHERE feature_id LIKE 'way/%'
+            )
+            SELECT
+                c.way_id,
+                c.trip_count,
+                c.first_date,
+                c.last_date,
+                o.geometry
+            FROM counts c
+            LEFT JOIN osm o USING (way_id)
+            ORDER BY c.trip_count DESC
+        ) TO ? (FORMAT PARQUET, COMPRESSION ZSTD)
+        """,
+        [files, str(osm_parquet), str(output_path)],
     )
 
-
-def join_osm(counts: pl.LazyFrame, osm_parquet: Path) -> pl.LazyFrame:
-    # quackosm writes feature_id as "way/<id>"; strip and cast to match
-    # Valhalla's int64 way_id.
-    osm = (
-        pl.scan_parquet(osm_parquet)
-        .select(["feature_id", "geometry"])
-        .filter(pl.col("feature_id").str.starts_with("way/"))
-        .with_columns(
-            pl.col("feature_id")
-            .str.strip_prefix("way/")
-            .cast(pl.Int64)
-            .alias("way_id")
-        )
-        .drop("feature_id")
-    )
-    return counts.join(osm, on="way_id", how="left").sort(
-        "trip_count", descending=True
-    )
+    total, with_geom = con.execute(
+        "SELECT COUNT(*), COUNT(geometry) FROM read_parquet(?)",
+        [str(output_path)],
+    ).fetchone()
+    size_mb = output_path.stat().st_size / 1e6
+    print(f"{total:,} ways traversed, {with_geom:,} with OSM geometry")
+    print(f"Wrote {output_path} ({size_mb:.1f} MB)")
 
 
 def main() -> None:
@@ -63,17 +118,7 @@ def main() -> None:
             file=sys.stderr,
         )
         sys.exit(1)
-    matched_dir = Path(sys.argv[1])
-    osm_parquet = Path(sys.argv[2])
-    output_path = Path(sys.argv[3])
-
-    enriched = join_osm(aggregate_way_counts(matched_dir), osm_parquet).collect()
-    matched_geom = enriched["geometry"].is_not_null().sum()
-    print(f"{len(enriched):,} ways traversed, {matched_geom:,} with OSM geometry")
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    enriched.write_parquet(output_path)
-    print(f"Wrote {output_path} ({output_path.stat().st_size / 1e6:.1f} MB)")
+    run(Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3]))
 
 
 if __name__ == "__main__":
