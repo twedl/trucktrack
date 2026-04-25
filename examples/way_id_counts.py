@@ -91,7 +91,7 @@ def _stage_counts(
         COPY (
             SELECT
                 way_id,
-                COUNT(DISTINCT id) AS trip_count
+                COUNT(*) AS trip_count
             FROM read_parquet(
                 {matched_literal},
                 hive_partitioning = true,
