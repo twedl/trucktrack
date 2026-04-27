@@ -1,23 +1,35 @@
-"""Aggregate map-matched way_ids and join OSM geometry.
+"""Aggregate map-matched way_ids, join OSM geometry, build a bbox index.
 
-Counts trips per way across the matched dataset and joins against an
-OSM parquet (e.g. a quackosm export) to attach geometry.
+Counts trips per way across the matched dataset, joins against an OSM
+parquet (e.g. a quackosm export) to attach geometry, and adds bbox /
+centroid columns so downstream zoom queries can prune without decoding
+geometry.
 
 Only ``feature_id`` and ``geometry`` are read from the OSM parquet, so
 unfiltered exports with a MAP-typed ``tags`` column work without help
 (DuckDB prunes unused columns at the parquet reader).
 
-The work is split across two ``COPY ... TO`` queries:
+The work is split across three cached ``COPY ... TO`` stages so re-runs
+(e.g. iterating on a zoom-in plot) skip work that's already done:
 
-    Stage 1: matched/**/*.parquet  -> counts (way_id, trip_count)
-    Stage 2: counts + OSM-by-way_id -> output with geometry, sorted
+    Stage 1: matched/**/*.parquet     -> <cache>/counts.parquet
+    Stage 2: counts + OSM by way_id   -> <cache>/way_counts_geom.parquet
+    Stage 3: + bbox / centroid + sort -> <output>
 
-Stage 2 pushes a semi-join filter into the OSM scan on ``feature_id``
-(no CAST, so DuckDB can use parquet row-group / Bloom pruning) — only
-ways that actually appear in matched have their geometry decoded. Each
-stage gets the full memory budget instead of contending with the other.
+Each stage skips itself if its output file already exists. Use
+``--force`` to rebuild everything or ``--force-stage N`` to rebuild
+stage N and every stage after it. The cache does not auto-invalidate
+when ``matched/`` changes — pass ``--force`` (or rm the cache dir)
+after re-matching.
 
-Spills to ``<output_parent>/.duckdb_tmp/`` when memory pressure demands.
+Stage 2 pushes a semi-join filter into the OSM scan via ``feature_id``
+(no CAST, so DuckDB can prune row groups by min/max stats and Bloom
+filters) — geometry is decoded only for ways the matched data touched.
+
+Stage 3 uses the DuckDB ``spatial`` extension; it installs on first run
+(needs network) and is cached locally afterwards.
+
+Spills to ``<cache>/.duckdb_tmp/`` when memory pressure demands.
 
 Requires (not in pyproject.toml)::
 
@@ -30,10 +42,9 @@ Usage::
         /path/to/north-america-latest.osm.parquet \\
         data/way_counts.parquet
 
+    # Re-render with a different bbox-aware plot? Stages 1-2 stay cached:
     uv run python examples/way_id_counts.py \\
-        "/home/jovyan/bmp-datavol-1/atri-match" \\
-        "/home/jovyan/bmp-datavol-1/north-america-latest.osm.parquet" \\
-        temp/way_counts.parquet
+        data/matched osm.parquet temp/way_counts.parquet --force-stage 3
 
 Knobs (env vars)::
 
@@ -43,8 +54,8 @@ Knobs (env vars)::
 
 from __future__ import annotations
 
+import argparse
 import os
-import sys
 import time
 from glob import glob
 from pathlib import Path
@@ -108,7 +119,7 @@ def _stage_join(
     con: duckdb.DuckDBPyConnection,
     counts_path: Path,
     osm_parquet: Path,
-    output_path: Path,
+    joined_path: Path,
 ) -> None:
     con.execute(
         f"""
@@ -132,35 +143,96 @@ def _stage_join(
             SELECT c.way_id, c.trip_count, o.geometry
             FROM counts c
             LEFT JOIN osm o USING (way_id)
-            ORDER BY c.trip_count DESC
+        ) TO {_sql_literal(str(joined_path))} (FORMAT PARQUET, COMPRESSION ZSTD)
+        """
+    )
+
+
+def _stage_index(
+    con: duckdb.DuckDBPyConnection, joined_path: Path, output_path: Path
+) -> None:
+    con.execute("INSTALL spatial")
+    con.execute("LOAD spatial")
+    con.execute(
+        f"""
+        COPY (
+            WITH src AS (
+                SELECT
+                    way_id,
+                    trip_count,
+                    geometry,
+                    ST_GeomFromWKB(geometry) AS geom
+                FROM read_parquet({_sql_literal(str(joined_path))})
+            )
+            SELECT
+                way_id,
+                trip_count,
+                geometry,
+                ST_XMin(geom)           AS bbox_xmin,
+                ST_YMin(geom)           AS bbox_ymin,
+                ST_XMax(geom)           AS bbox_xmax,
+                ST_YMax(geom)           AS bbox_ymax,
+                ST_X(ST_Centroid(geom)) AS centroid_x,
+                ST_Y(ST_Centroid(geom)) AS centroid_y
+            FROM src
+            ORDER BY trip_count DESC
         ) TO {_sql_literal(str(output_path))} (FORMAT PARQUET, COMPRESSION ZSTD)
         """
     )
 
 
-def run(matched_dir: Path, osm_parquet: Path, output_path: Path) -> None:
-    files = matched_files(matched_dir)
+def _should_run(stage: int, output: Path, force: bool, force_stage: int | None) -> bool:
+    if force:
+        return True
+    if force_stage is not None and stage >= force_stage:
+        return True
+    return not output.exists()
+
+
+def run(
+    matched_dir: Path,
+    osm_parquet: Path,
+    output_path: Path,
+    cache_dir: Path | None = None,
+    force: bool = False,
+    force_stage: int | None = None,
+) -> None:
+    if cache_dir is None:
+        cache_dir = output_path.parent / ".way_counts_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_dir = output_path.parent / ".duckdb_tmp"
+
+    counts_path = cache_dir / "counts.parquet"
+    joined_path = cache_dir / "way_counts_geom.parquet"
+    tmp_dir = cache_dir / ".duckdb_tmp"
     tmp_dir.mkdir(exist_ok=True)
-    counts_path = output_path.with_suffix(".counts.parquet")
 
     con = _connect(tmp_dir)
 
-    t0 = time.perf_counter()
-    print(f"[1/2] aggregating counts over {len(files):,} matched files ...")
-    _stage_counts(con, files, counts_path)
-    n_ways = con.execute(
-        f"SELECT COUNT(*) FROM read_parquet({_sql_literal(str(counts_path))})"
-    ).fetchone()[0]
-    print(f"      {n_ways:,} ways in {time.perf_counter() - t0:.1f}s")
+    if _should_run(1, counts_path, force, force_stage):
+        files = matched_files(matched_dir)
+        t0 = time.perf_counter()
+        print(f"[1/3] aggregating counts over {len(files):,} matched files ...")
+        _stage_counts(con, files, counts_path)
+        print(f"      wrote {counts_path} in {time.perf_counter() - t0:.1f}s")
+    else:
+        print(f"[1/3] cached: {counts_path}")
 
-    t1 = time.perf_counter()
-    print("[2/2] joining OSM geometry + sorting ...")
-    _stage_join(con, counts_path, osm_parquet, output_path)
-    print(f"      done in {time.perf_counter() - t1:.1f}s")
+    if _should_run(2, joined_path, force, force_stage):
+        t1 = time.perf_counter()
+        print("[2/3] joining OSM geometry ...")
+        _stage_join(con, counts_path, osm_parquet, joined_path)
+        print(f"      wrote {joined_path} in {time.perf_counter() - t1:.1f}s")
+    else:
+        print(f"[2/3] cached: {joined_path}")
 
-    counts_path.unlink(missing_ok=True)
+    if _should_run(3, output_path, force, force_stage):
+        t2 = time.perf_counter()
+        print("[3/3] computing bbox / centroid + sorting ...")
+        _stage_index(con, joined_path, output_path)
+        print(f"      wrote {output_path} in {time.perf_counter() - t2:.1f}s")
+    else:
+        print(f"[3/3] cached: {output_path}")
 
     total, with_geom = con.execute(
         f"SELECT COUNT(*), COUNT(geometry) "
@@ -168,17 +240,45 @@ def run(matched_dir: Path, osm_parquet: Path, output_path: Path) -> None:
     ).fetchone()
     size_mb = output_path.stat().st_size / 1e6
     print(f"{total:,} ways traversed, {with_geom:,} with OSM geometry")
-    print(f"Wrote {output_path} ({size_mb:.1f} MB)")
+    print(f"Output: {output_path} ({size_mb:.1f} MB)")
 
 
 def main() -> None:
-    if len(sys.argv) != 4:
-        print(
-            f"Usage: {sys.argv[0]} <matched_dir> <osm_parquet> <output_parquet>",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-    run(Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3]))
+    parser = argparse.ArgumentParser(
+        description="Map-matched way counts joined to OSM geometry, "
+        "with bbox/centroid index. Cached three-stage pipeline."
+    )
+    parser.add_argument("matched_dir", type=Path)
+    parser.add_argument("osm_parquet", type=Path)
+    parser.add_argument("output_parquet", type=Path)
+    parser.add_argument(
+        "--cache-dir",
+        type=Path,
+        default=None,
+        help="Intermediate parquet location "
+        "(default: <output>.parent/.way_counts_cache)",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Rebuild every stage from scratch",
+    )
+    parser.add_argument(
+        "--force-stage",
+        type=int,
+        choices=[1, 2, 3],
+        default=None,
+        help="Rebuild this stage and every stage after it",
+    )
+    args = parser.parse_args()
+    run(
+        args.matched_dir,
+        args.osm_parquet,
+        args.output_parquet,
+        cache_dir=args.cache_dir,
+        force=args.force,
+        force_stage=args.force_stage,
+    )
 
 
 if __name__ == "__main__":
