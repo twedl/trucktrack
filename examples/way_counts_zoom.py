@@ -46,6 +46,7 @@ def load_zoom(
     parquet_path: Path | str,
     bbox: Bbox | None = None,
     bbox_crs: str | int = 4326,
+    bbox_pad: float = 0.25,
     min_trip_count: int | None = None,
     top_n: int | None = None,
     to_crs: str | int | None = None,
@@ -63,6 +64,16 @@ def load_zoom(
     bbox_crs:
         CRS of ``bbox``. Anything other than EPSG:4326 is transformed
         back to 4326 with 21-point edge densification before filtering.
+    bbox_pad:
+        Fraction to inflate ``bbox`` by on each side before transforming
+        and filtering. Filtering by an axis-aligned bbox in one CRS
+        produces data whose footprint is a *tilted* quadrilateral in
+        another CRS — which doesn't fill the corners of the target-CRS
+        plot rectangle. Padding the source bbox first makes the
+        reprojected footprint enclose your target rectangle with
+        overflow on all sides. Default 0.25 (25% per side, ~2.25× area)
+        is enough to cover EPSG:3347's worst-case rotation across NA.
+        Pass ``0`` for tight filtering when you don't reproject.
     min_trip_count:
         Drop ways below this trip count.
     top_n:
@@ -80,7 +91,7 @@ def load_zoom(
     clauses: list[str] = []
     params: list[Any] = []
     if bbox is not None:
-        x0, y0, x1, y1 = _bbox_to_wgs84(bbox, bbox_crs)
+        x0, y0, x1, y1 = _bbox_to_wgs84(_pad(bbox, bbox_pad), bbox_crs)
         clauses.append(
             "bbox_xmax >= ? AND bbox_xmin <= ? AND bbox_ymax >= ? AND bbox_ymin <= ?"
         )
@@ -115,6 +126,14 @@ def load_zoom(
     if to_crs is not None:
         gdf = gdf.to_crs(to_crs)
     return gdf
+
+
+def _pad(bbox: Bbox, frac: float) -> Bbox:
+    if not frac:
+        return bbox
+    x0, y0, x1, y1 = bbox
+    dx, dy = (x1 - x0) * frac, (y1 - y0) * frac
+    return (x0 - dx, y0 - dy, x1 + dx, y1 + dy)
 
 
 def _bbox_to_wgs84(bbox: Bbox, bbox_crs: str | int) -> Bbox:
