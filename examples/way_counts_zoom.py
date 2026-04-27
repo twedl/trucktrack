@@ -104,9 +104,9 @@ def load_zoom(
     """
 
     con = duckdb.connect()
-    arrow_tbl = con.execute(sql, params).arrow()
-    df = arrow_tbl.to_pandas()
-    geom = gpd.GeoSeries.from_wkb(df["geometry"], crs="EPSG:4326")
+    df = con.execute(sql, params).df()
+    # DuckDB's .df() materializes BLOB as bytearray; from_wkb wants bytes.
+    geom = gpd.GeoSeries.from_wkb(df["geometry"].map(bytes), crs="EPSG:4326")
     gdf = gpd.GeoDataFrame(
         df.drop(columns=["geometry"]),
         geometry=geom,
