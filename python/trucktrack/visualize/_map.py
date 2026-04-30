@@ -13,17 +13,20 @@ if TYPE_CHECKING:
     from trucktrack.generate.models import TracePoint
 
 # Qualitative palette for distinguishing segments.
+# High-saturation hues chosen to stay legible on the OSM Mapnik basemap
+# (where pastel greens, beiges and pale yellows dominate the background).
+# Blue is reserved for map-matched routes, so this palette skips it.
 _SEGMENT_COLORS = [
-    "#1f77b4",
-    "#ff7f0e",
-    "#2ca02c",
-    "#d62728",
-    "#9467bd",
-    "#8c564b",
-    "#e377c2",
-    "#7f7f7f",
-    "#bcbd22",
-    "#17becf",
+    "#ff1493",  # deep pink
+    "#ff8c00",  # dark orange
+    "#9400d3",  # dark violet
+    "#00ced1",  # dark turquoise
+    "#7cfc00",  # lawn green
+    "#dc143c",  # crimson
+    "#00fa9a",  # medium spring green
+    "#ff00ff",  # magenta
+    "#ff4500",  # orange red
+    "#c71585",  # medium violet red
 ]
 
 
@@ -268,13 +271,13 @@ def plot_trace(
     data: pl.DataFrame | list[TracePoint],
     *,
     color_by: str | None = None,
-    tile_layer: str = "CartoDB Positron",
+    tile_layer: str = "OpenStreetMap",
     width: str | int = "100%",
     height: str | int = "100%",
     max_points: int | None = 5000,
     stop_color: str = "red",
     stop_radius: int = 8,
-    matched_color: str = "#1f77b4",
+    matched_color: str = "#1e90ff",
     trace_color: str = "gray",
 ) -> Any:
     """Plot a trace on an interactive Leaflet map.
@@ -467,12 +470,12 @@ def plot_trace_layers(
     segments: pl.DataFrame | None = None,
     matched: pl.DataFrame | None = None,
     matched_shape: list[list[tuple[float, float]]] | None = None,
-    tile_layer: str = "CartoDB Positron",
+    tile_layer: str = "OpenStreetMap",
     width: str | int = "100%",
     height: str | int = "100%",
     max_points: int | None = 5000,
     raw_color: str = "black",
-    matched_color: str = "#e31a1c",
+    matched_color: str = "#1e90ff",
     stop_color: str = "red",
     stop_radius: int = 8,
 ) -> Any:
