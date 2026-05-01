@@ -81,6 +81,29 @@ class TestObservationGapSplitter:
         )
         assert result["segment_id"].n_unique() == naive_result["segment_id"].n_unique()
 
+    @pytest.mark.parametrize("unit", ["ms", "us", "ns"])
+    def test_split_independent_of_time_unit(self, unit: str) -> None:
+        """Splitting must be invariant to the column's Datetime TimeUnit.
+
+        Regression: previously the Rust side cast the time column to Int64
+        directly, yielding integers in the column's native TimeUnit and
+        silently miscomparing against the microsecond gap threshold for
+        Datetime[ms] inputs.
+        """
+        base = datetime(2025, 6, 15, 8, 0)
+        df = pl.DataFrame(
+            {
+                "id": ["A", "A"],
+                "lat": [43.65, 43.66],
+                "lon": [-79.38, -79.37],
+                "time": [base, base + timedelta(hours=3, minutes=30)],
+            }
+        ).with_columns(pl.col("time").cast(pl.Datetime(unit)))
+        result = trucktrack.split_by_observation_gap(df, timedelta(hours=1))
+        assert result["segment_id"].to_list() == [0, 1], (
+            f"3.5h gap not detected with Datetime[{unit}]"
+        )
+
     def test_min_length_filters_short_segments(self, truck_a: pl.DataFrame) -> None:
         """With min_length=20, segments < 20 rows should be dropped."""
         result = trucktrack.split_by_observation_gap(

@@ -14,14 +14,17 @@ pub fn split_by_observation_gap(
     gap_us: i64,
     min_length: usize,
 ) -> PolarsResult<DataFrame> {
-    // Cast to Int64 (microseconds since epoch) before diffing so that
-    // both tz-aware and naive datetime columns are handled uniformly.
+    // Extract microsecond timestamps regardless of the column's underlying
+    // TimeUnit (ms / us / ns) so the gap_us threshold compares like-with-like.
+    // Plain `cast(Int64)` would yield the column's native TimeUnit integers
+    // and silently miscompare against a microsecond threshold.
     let result = df
         .lazy()
         .sort([id_col, time_col], SortMultipleOptions::default())
         .with_column(
             col(time_col)
-                .cast(DataType::Int64)
+                .dt()
+                .timestamp(TimeUnit::Microseconds)
                 .diff(lit(1), NullBehavior::Ignore)
                 .over([col(id_col)])
                 .gt(lit(gap_us))

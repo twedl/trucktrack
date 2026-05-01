@@ -48,8 +48,22 @@ pub fn filter_impossible_speeds(
         let n = group.height();
         let lats = group.column(lat_col)?.f64()?;
         let lons = group.column(lon_col)?.f64()?;
-        // Cast time to Int64 microseconds to handle tz-aware and tz-naive uniformly.
-        let times_col = group.column(time_col)?.cast(&DataType::Int64)?;
+        // Normalise the time column to microsecond TimeUnit before casting to
+        // Int64 so the resulting integers are microseconds-since-epoch
+        // regardless of input TimeUnit (ms / us / ns).  Without this, a
+        // `Datetime[ms]` column would silently miscompute speed.
+        let time_col_data = group.column(time_col)?;
+        let tz = match time_col_data.dtype() {
+            DataType::Datetime(_, tz) => tz.clone(),
+            other => {
+                return Err(PolarsError::ComputeError(
+                    format!("'{time_col}' is not a datetime column (got {other})").into(),
+                ));
+            }
+        };
+        let times_col = time_col_data
+            .cast(&DataType::Datetime(TimeUnit::Microseconds, tz))?
+            .cast(&DataType::Int64)?;
         let times = times_col.i64()?;
 
         let mut keep = vec![true; n];

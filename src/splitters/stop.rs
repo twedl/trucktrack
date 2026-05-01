@@ -126,22 +126,27 @@ pub fn split_by_stops(
 
 /// Extract microsecond timestamps from a datetime column.
 ///
+/// Normalises the column's TimeUnit to microseconds before casting to Int64
+/// so the result is microseconds-since-epoch regardless of input TimeUnit
+/// (ms / us / ns).  Without this normalisation, a `Datetime[ms]` column
+/// would yield millisecond integers and silently miscompare against the
+/// microsecond `min_duration_us` threshold.
+///
 /// Returns an error if the column is not a datetime type.
 /// Null timestamps are mapped to `i64::MIN` so they sort before all valid times
 /// and never satisfy duration checks in `detect_stops`.
 fn datetime_to_microseconds(col: &Column) -> PolarsResult<Vec<i64>> {
+    let tz = match col.dtype() {
+        DataType::Datetime(_, tz) => tz.clone(),
+        other => {
+            return Err(PolarsError::ComputeError(
+                format!("'{}' is not a datetime column (got {other})", col.name()).into(),
+            ));
+        }
+    };
     let series = col
-        .cast(&DataType::Int64)
-        .map_err(|e| {
-            PolarsError::ComputeError(
-                format!(
-                    "cannot cast '{}' ({}) to Int64: {e}",
-                    col.name(),
-                    col.dtype()
-                )
-                .into(),
-            )
-        })?
+        .cast(&DataType::Datetime(TimeUnit::Microseconds, tz))?
+        .cast(&DataType::Int64)?
         .take_materialized_series();
     let i64_ca = series.i64()?;
     Ok(i64_ca
