@@ -150,7 +150,13 @@ def split_trips(
     Mirrors the pipeline's per-chunk processing so inspect results match
     what ``run_pipeline`` produces for the same input.
 
-    Returns the input rows annotated with ``segment_id`` and ``is_stop``.
+    Returns the input rows annotated with ``gap_segment_id``,
+    ``segment_id`` and ``is_stop``.  ``segment_id`` is a composite ID
+    that is unique per ``(gap_segment_id, stop-split id)`` pair, so each
+    sub-trip carved out by either an observation gap or a stop has its
+    own ID — needed because the stop splitter would otherwise erase gap
+    boundaries when a trace contains no stops to mark a transition.
+
     Pass ``traffic_max_angle_change=None`` to skip the traffic filter
     (useful for with/without comparisons).  Pass ``stale_window=None``
     to skip the stale-ping filter.
@@ -158,15 +164,30 @@ def split_trips(
     if stale_window is not None:
         df = filter_stale_pings(df, window=stale_window)
     gapped = split_by_observation_gap(df, gap, min_length=min_length)
+    # Preserve gap-split boundaries through the stop split, which would
+    # otherwise overwrite ``segment_id`` with its own stop-transition ids.
+    gapped = gapped.rename({"segment_id": "gap_segment_id"})
     stopped = split_by_stops(
         gapped, stop_max_diameter, stop_min_duration, min_length=min_length
     )
-    if traffic_max_angle_change is None:
-        return stopped
-    return filter_traffic_stops(
-        stopped,
-        max_angle_change=traffic_max_angle_change,
-        min_distance=traffic_min_distance,
+    if traffic_max_angle_change is not None:
+        stopped = filter_traffic_stops(
+            stopped,
+            max_angle_change=traffic_max_angle_change,
+            min_distance=traffic_min_distance,
+        )
+    # Compose a unique ``segment_id`` per ``(gap_segment_id, segment_id)``
+    # pair so downstream consumers like ``map_match_trips`` (which groups
+    # by segment_id) treat rows from different gap-segments as separate
+    # trips even when no stop transition separated them.
+    return stopped.with_columns(
+        (
+            pl.col("gap_segment_id").cast(pl.UInt64) * pl.lit(1_000_000)
+            + pl.col("segment_id").cast(pl.UInt64)
+        )
+        .rank(method="dense")
+        .cast(pl.UInt32)
+        .alias("segment_id")
     )
 
 

@@ -87,8 +87,22 @@ class TestSplitTrips:
     def test_skip_traffic_filter_equals_split_by_stops(self) -> None:
         df = _moving_then_stop_then_moving()
         gap = timedelta(minutes=5)
-        gapped = split_by_observation_gap(df, gap, min_length=3)
-        baseline = split_by_stops(gapped, 30.0, timedelta(minutes=2), min_length=3)
+        # Replicate split_trips' composition manually: rename so the stop
+        # splitter can't clobber the gap-segment column, then mint a
+        # composite segment_id unique per (gap_segment_id, segment_id).
+        gapped = split_by_observation_gap(df, gap, min_length=3).rename(
+            {"segment_id": "gap_segment_id"}
+        )
+        stopped = split_by_stops(gapped, 30.0, timedelta(minutes=2), min_length=3)
+        baseline = stopped.with_columns(
+            (
+                pl.col("gap_segment_id").cast(pl.UInt64) * pl.lit(1_000_000)
+                + pl.col("segment_id").cast(pl.UInt64)
+            )
+            .rank(method="dense")
+            .cast(pl.UInt32)
+            .alias("segment_id")
+        )
         out = tti.split_trips(
             df,
             gap=gap,
@@ -98,6 +112,41 @@ class TestSplitTrips:
             stale_window=None,
         )
         assert_frame_equal(out, baseline)
+
+    def test_gap_alone_splits_when_no_stops_present(self) -> None:
+        """An observation gap with no stop must still produce two segments.
+
+        Regression: the stop splitter writes its own segment_id derived
+        only from stop transitions, so without renaming the gap-split
+        column upstream, a trace with no stops collapses every row into
+        segment_id=0 even when a clear gap is present.
+        """
+        base = datetime(2022, 6, 27, 18, 0, tzinfo=UTC)
+        # Four pre-gap fixes, then a 3.75-hour jump, then four more fixes.
+        # Each side is well above min_length=3 so neither gets filtered.
+        times = [base + timedelta(minutes=i * 4) for i in range(4)] + [
+            base + timedelta(hours=3, minutes=44 + i * 4) for i in range(4)
+        ]
+        df = pl.DataFrame(
+            {
+                "id": ["X"] * 8,
+                "time": times,
+                "lat": [43.0 + i * 0.001 for i in range(8)],
+                "lon": [-79.0 + i * 0.001 for i in range(8)],
+            }
+        )
+        out = tti.split_trips(
+            df,
+            gap=timedelta(hours=2),
+            stop_max_diameter=20.0,
+            stop_min_duration=timedelta(minutes=2),
+            traffic_max_angle_change=None,
+            stale_window=None,
+        )
+        # No stops in the trace, so the only segment boundary comes from
+        # the gap — exactly two distinct movement segments expected.
+        assert out.filter(pl.col("is_stop")).height == 0
+        assert out["segment_id"].n_unique() == 2
 
 
 # ---------------------------------------------------------------------------
