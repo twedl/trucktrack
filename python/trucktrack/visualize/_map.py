@@ -265,6 +265,29 @@ def _full_segment_id(group: pl.DataFrame) -> str:
     return "_".join(parts) if parts else "unknown"
 
 
+def _segment_endpoints(df: pl.DataFrame) -> dict[tuple[Any, int], dict[str, Any]]:
+    """Map ``(id, segment_id)`` → first/last lat/lon for every segment.
+
+    `id` is included in the key when present so multi-truck DataFrames don't
+    collide on shared segment_ids; otherwise a sentinel ``None`` is used.
+    """
+    has_id = "id" in df.columns
+    group_cols = ["id", "segment_id"] if has_id else ["segment_id"]
+    agg = df.group_by(group_cols, maintain_order=True).agg(
+        pl.col("lat").first().alias("first_lat"),
+        pl.col("lon").first().alias("first_lon"),
+        pl.col("lat").last().alias("last_lat"),
+        pl.col("lon").last().alias("last_lon"),
+        pl.col("is_stop").first().alias("is_stop"),
+    )
+    out: dict[tuple[Any, int], dict[str, Any]] = {}
+    for row in agg.iter_rows(named=True):
+        seg_id = int(row["segment_id"])
+        key = (row["id"], seg_id) if has_id else (None, seg_id)
+        out[key] = row
+    return out
+
+
 def _add_stop_markers(
     folium: Any,
     fg: Any,
@@ -272,19 +295,57 @@ def _add_stop_markers(
     stop_color: str,
     stop_radius: int,
 ) -> None:
-    """Add circle markers for stop segments."""
+    """Render bbox + interior polyline + centroid + neighbour connectors per stop."""
+    if df.height == 0 or "is_stop" not in df.columns:
+        return
+    has_id = "id" in df.columns
+    group_cols = ["id", "segment_id"] if has_id else ["segment_id"]
+
+    endpoints = _segment_endpoints(df)
     stops = df.filter(pl.col("is_stop"))
     if stops.height == 0:
         return
-    for _, group in stops.group_by("segment_id", maintain_order=True):
-        lat = group["lat"].mean()
-        lon = group["lon"].mean()
+
+    for _, group in stops.group_by(group_cols, maintain_order=True):
+        seg_id = int(group["segment_id"][0])
+        truck_id = group["id"][0] if has_id else None
+        lats = group["lat"].to_list()
+        lons = group["lon"].to_list()
         n_pts = group.height
+
+        lat_min, lat_max = min(lats), max(lats)
+        lon_min, lon_max = min(lons), max(lons)
+        centroid_lat = sum(lats) / n_pts
+        centroid_lon = sum(lons) / n_pts
+
         full_id = _full_segment_id(group)
         popup_text = f"Stop: {full_id}<br>{n_pts} points"
         popup_text += _time_range_html(group, include_duration=True)
+
+        # Bounding box of the GPS points within the stop — visualises the
+        # max_diameter constraint that fired the splitter.
+        if lat_min != lat_max or lon_min != lon_max:
+            folium.Rectangle(
+                bounds=[(lat_min, lon_min), (lat_max, lon_max)],
+                color=stop_color,
+                weight=1,
+                fill=True,
+                fill_color=stop_color,
+                fill_opacity=0.1,
+            ).add_to(fg)
+
+        # Interior polyline through the time-ordered stop points so jitter
+        # / wandering inside the stop area is visible.
+        if n_pts >= 2:
+            folium.PolyLine(
+                list(zip(lats, lons, strict=True)),
+                color=stop_color,
+                weight=2,
+                opacity=0.6,
+            ).add_to(fg)
+
         folium.CircleMarker(
-            location=(lat, lon),
+            location=(centroid_lat, centroid_lon),
             radius=stop_radius,
             color=stop_color,
             fill=True,
@@ -293,13 +354,35 @@ def _add_stop_markers(
             popup=folium.Popup(popup_text, max_width=300),
         ).add_to(fg)
 
+        # Connectors: bridge the gap between the movement polyline and the
+        # stop endpoints so the trace doesn't visually fragment.
+        prev = endpoints.get((truck_id, seg_id - 1)) if seg_id > 0 else None
+        if prev is not None and not prev["is_stop"]:
+            folium.PolyLine(
+                [(prev["last_lat"], prev["last_lon"]), (lats[0], lons[0])],
+                color=stop_color,
+                weight=1,
+                opacity=0.4,
+                dash_array="4 4",
+            ).add_to(fg)
+
+        nxt = endpoints.get((truck_id, seg_id + 1))
+        if nxt is not None and not nxt["is_stop"]:
+            folium.PolyLine(
+                [(lats[-1], lons[-1]), (nxt["first_lat"], nxt["first_lon"])],
+                color=stop_color,
+                weight=1,
+                opacity=0.4,
+                dash_array="4 4",
+            ).add_to(fg)
+
 
 def plot_trace(
     data: pl.DataFrame | list[TracePoint],
     *,
     color_by: str | None = None,
     tile_layer: str = "OpenStreetMap",
-    satellite: bool = False,
+    satellite: bool = True,
     width: str | int = "100%",
     height: str | int = "100%",
     max_points: int | None = 5000,
@@ -328,9 +411,10 @@ def plot_trace(
     tile_layer
         Folium tile layer name.
     satellite
-        If ``True``, register Esri World Imagery as an additional, off-by-
-        default basemap.  Tiles are not fetched until the user toggles it on
-        in the layer control.
+        Register Esri World Imagery as an additional basemap (default
+        ``True``).  Unchecked on load — no satellite tiles are fetched
+        until the user toggles it on in the layer control.  Pass
+        ``False`` to omit the option entirely.
     width, height
         Map dimensions.
     max_points
@@ -512,7 +596,7 @@ def plot_trace_layers(
     matched: pl.DataFrame | None = None,
     matched_shape: list[list[tuple[float, float]]] | None = None,
     tile_layer: str = "OpenStreetMap",
-    satellite: bool = False,
+    satellite: bool = True,
     width: str | int = "100%",
     height: str | int = "100%",
     max_points: int | None = 5000,
@@ -546,9 +630,10 @@ def plot_trace_layers(
     tile_layer
         Folium tile layer name.
     satellite
-        If ``True``, register Esri World Imagery as an additional, off-by-
-        default basemap.  Tiles are not fetched until the user toggles it on
-        in the layer control.
+        Register Esri World Imagery as an additional basemap (default
+        ``True``).  Unchecked on load — no satellite tiles are fetched
+        until the user toggles it on in the layer control.  Pass
+        ``False`` to omit the option entirely.
     width, height
         Map dimensions.
     max_points

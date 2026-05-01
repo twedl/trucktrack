@@ -100,6 +100,28 @@ class TestPlotTraceStopSplit:
         html = m._repr_html_()
         assert "Stop" in html
 
+    def test_stop_renders_bbox_polyline_and_connectors(self) -> None:
+        # The fixture has segments 0 (move) → 1 (stop, 3 pts) → 2 (move),
+        # so the stop should produce a bbox rectangle, an interior polyline,
+        # and dashed connectors on both sides.
+        html = plot_trace(_make_stop_split_df())._repr_html_()
+        assert "L.rectangle" in html
+        # dashArray "4 4" comes from the connector polylines (HTML-escaped).
+        assert "dashArray&quot;: &quot;4 4" in html
+
+    def test_single_point_stop_skips_bbox(self) -> None:
+        # All-equal coords ⇒ degenerate bbox; Rectangle should be skipped
+        # but the centroid CircleMarker still renders.
+        df = _make_raw_df(3).with_columns(
+            pl.Series("segment_id", [0, 0, 0], dtype=pl.UInt32),
+            pl.Series("is_stop", [True, True, True]),
+            pl.Series("lat", [43.65, 43.65, 43.65]),
+            pl.Series("lon", [-79.38, -79.38, -79.38]),
+        )
+        html = plot_trace(df)._repr_html_()
+        assert "L.rectangle" not in html
+        assert "circle_marker" in html.lower()
+
 
 class TestPlotTraceMatched:
     def test_matched_trace(self) -> None:
@@ -146,20 +168,20 @@ class TestPlotTraceLayers:
 
 
 class TestSatelliteBasemap:
-    def test_plot_trace_registers_off_by_default(self) -> None:
-        m = plot_trace(_make_raw_df(), satellite=True)
-        html = m._repr_html_()
-        assert "Satellite (Esri)" in html
-        assert "World_Imagery" in html
-
-    def test_plot_trace_layers_registers_off_by_default(self) -> None:
-        m = plot_trace_layers(raw=_make_raw_df(), satellite=True)
-        html = m._repr_html_()
-        assert "Satellite (Esri)" in html
-        assert "World_Imagery" in html
-
-    def test_disabled_by_default(self) -> None:
+    def test_plot_trace_registered_by_default(self) -> None:
         html = plot_trace(_make_raw_df())._repr_html_()
+        assert "Satellite (Esri)" in html
+        assert "World_Imagery" in html
+
+    def test_plot_trace_layers_registered_by_default(self) -> None:
+        html = plot_trace_layers(raw=_make_raw_df())._repr_html_()
+        assert "Satellite (Esri)" in html
+        assert "World_Imagery" in html
+
+    def test_can_be_disabled(self) -> None:
+        html = plot_trace(_make_raw_df(), satellite=False)._repr_html_()
+        assert "World_Imagery" not in html
+        html = plot_trace_layers(raw=_make_raw_df(), satellite=False)._repr_html_()
         assert "World_Imagery" not in html
 
 
