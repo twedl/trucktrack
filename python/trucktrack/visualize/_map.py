@@ -123,6 +123,33 @@ def _import_folium() -> tuple[Any, Any]:
     return folium, cm
 
 
+# Esri World Imagery — free satellite tiles requiring attribution only.
+# Registered as an alternate basemap (overlay=False) so the layer control
+# shows it as a radio option alongside the default Mapnik tiles.  show=False
+# keeps it unchecked on load so no satellite tiles are fetched until the
+# user opts in.
+_ESRI_IMAGERY_TILES = (
+    "https://server.arcgisonline.com/ArcGIS/rest/services/"
+    "World_Imagery/MapServer/tile/{z}/{y}/{x}"
+)
+_ESRI_IMAGERY_ATTR = (
+    "Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, "
+    "and the GIS User Community"
+)
+
+
+def _add_satellite_basemap(folium: Any, m: Any) -> None:
+    """Register Esri World Imagery as an off-by-default alternate basemap."""
+    folium.TileLayer(
+        tiles=_ESRI_IMAGERY_TILES,
+        attr=_ESRI_IMAGERY_ATTR,
+        name="Satellite (Esri)",
+        overlay=False,
+        control=True,
+        show=False,
+    ).add_to(m)
+
+
 def _downsample(df: pl.DataFrame, max_points: int) -> pl.DataFrame:
     """Take every Nth row, preserving segment boundaries."""
     if df.height <= max_points:
@@ -272,6 +299,7 @@ def plot_trace(
     *,
     color_by: str | None = None,
     tile_layer: str = "OpenStreetMap",
+    satellite: bool = False,
     width: str | int = "100%",
     height: str | int = "100%",
     max_points: int | None = 5000,
@@ -299,6 +327,10 @@ def plot_trace(
         Column name to color movement segments by (e.g. ``"speed"``).
     tile_layer
         Folium tile layer name.
+    satellite
+        If ``True``, register Esri World Imagery as an additional, off-by-
+        default basemap.  Tiles are not fetched until the user toggles it on
+        in the layer control.
     width, height
         Map dimensions.
     max_points
@@ -324,6 +356,9 @@ def plot_trace(
 
     if df.height == 0:
         m = folium.Map(tiles=tile_layer, width=width, height=height)
+        if satellite:
+            _add_satellite_basemap(folium, m)
+            folium.LayerControl().add_to(m)
         return m
 
     sorted_df = _sort_by_time(df)
@@ -347,6 +382,8 @@ def plot_trace(
         width=width,
         height=height,
     )
+    if satellite:
+        _add_satellite_basemap(folium, m)
 
     bounds = [
         [df["lat"].min(), df["lon"].min()],
@@ -411,6 +448,8 @@ def plot_trace(
         seg_fg = folium.FeatureGroup(name="Segments")
         _render_segments(folium, cm, seg_fg, m, df, color_by, matched_color)
         seg_fg.add_to(m)
+        if satellite:
+            folium.LayerControl().add_to(m)
         return m
 
     # --- Raw mode ---
@@ -429,6 +468,8 @@ def plot_trace(
         for row, lat, lon in zip(rows, lats, lons, strict=True):
             _add_raw_marker(folium, fg, lat, lon, matched_color, row)
     fg.add_to(m)
+    if satellite:
+        folium.LayerControl().add_to(m)
     return m
 
 
@@ -471,6 +512,7 @@ def plot_trace_layers(
     matched: pl.DataFrame | None = None,
     matched_shape: list[list[tuple[float, float]]] | None = None,
     tile_layer: str = "OpenStreetMap",
+    satellite: bool = False,
     width: str | int = "100%",
     height: str | int = "100%",
     max_points: int | None = 5000,
@@ -503,6 +545,10 @@ def plot_trace_layers(
         this is drawn instead of straight lines between matched points.
     tile_layer
         Folium tile layer name.
+    satellite
+        If ``True``, register Esri World Imagery as an additional, off-by-
+        default basemap.  Tiles are not fetched until the user toggles it on
+        in the layer control.
     width, height
         Map dimensions.
     max_points
@@ -545,7 +591,11 @@ def plot_trace_layers(
             has_data = True
 
     if not has_data:
-        return folium.Map(tiles=tile_layer, width=width, height=height)
+        m = folium.Map(tiles=tile_layer, width=width, height=height)
+        if satellite:
+            _add_satellite_basemap(folium, m)
+            folium.LayerControl().add_to(m)
+        return m
 
     center_lat = (lat_min + lat_max) / 2
     center_lon = (lon_min + lon_max) / 2
@@ -555,6 +605,8 @@ def plot_trace_layers(
         width=width,
         height=height,
     )
+    if satellite:
+        _add_satellite_basemap(folium, m)
     m.fit_bounds([[lat_min, lon_min], [lat_max, lon_max]])
 
     # Layer: raw trace.

@@ -145,6 +145,24 @@ class TestPlotTraceLayers:
         assert isinstance(m, folium.Map)
 
 
+class TestSatelliteBasemap:
+    def test_plot_trace_registers_off_by_default(self) -> None:
+        m = plot_trace(_make_raw_df(), satellite=True)
+        html = m._repr_html_()
+        assert "Satellite (Esri)" in html
+        assert "World_Imagery" in html
+
+    def test_plot_trace_layers_registers_off_by_default(self) -> None:
+        m = plot_trace_layers(raw=_make_raw_df(), satellite=True)
+        html = m._repr_html_()
+        assert "Satellite (Esri)" in html
+        assert "World_Imagery" in html
+
+    def test_disabled_by_default(self) -> None:
+        html = plot_trace(_make_raw_df())._repr_html_()
+        assert "World_Imagery" not in html
+
+
 class TestSaveMap:
     def test_save_html(self) -> None:
         df = _make_raw_df()
