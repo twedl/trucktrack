@@ -348,7 +348,9 @@ def plot_inspection(
         matched = pl.concat(
             [tm.matched_df for tm in trips.values()], how="vertical_relaxed"
         )
-        matched_shape = [seg for tm in trips.values() for seg in tm.shape] or None
+        # One outer entry per trip so all sub-shapes (including bridges)
+        # within a trip share a single palette colour in plot_trace_layers.
+        matched_shape = [list(tm.shape) for tm in trips.values() if tm.shape] or None
     else:
         matched = None
         matched_shape = None

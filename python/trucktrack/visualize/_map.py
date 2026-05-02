@@ -632,7 +632,7 @@ def plot_trace_layers(
     raw: pl.DataFrame | list[TracePoint] | None = None,
     segments: pl.DataFrame | None = None,
     matched: pl.DataFrame | None = None,
-    matched_shape: list[list[tuple[float, float]]] | None = None,
+    matched_shape: list[list[list[tuple[float, float]]]] | None = None,
     tile_layer: str = "OpenStreetMap",
     satellite: bool = True,
     width: str | int = "100%",
@@ -662,9 +662,12 @@ def plot_trace_layers(
         Used for bounds calculation.  Ignored for rendering when
         ``matched_shape`` is provided.
     matched_shape
-        Road-snapped polyline as ``(lat, lon)`` tuples, e.g. from
-        :func:`~trucktrack.valhalla.map_match_full`.  When provided,
-        this is drawn instead of straight lines between matched points.
+        Road-snapped polylines, grouped per trip:
+        ``list[trip][sub_shape][(lat, lon)]``.  All shapes inside a trip
+        share one palette colour so a bridged trip stays visually
+        contiguous; different trips cycle through ``_SEGMENT_COLORS`` by
+        outer index.  When provided, this is drawn instead of straight
+        lines between matched points.
     tile_layer
         Folium tile layer name.
     satellite
@@ -768,13 +771,14 @@ def plot_trace_layers(
     # Layer: map-matched trace.
     if matched_shape:
         fg = folium.FeatureGroup(name="Map-matched")
-        # No segment_id linkage available for raw shape lists, so cycle the
-        # palette by shape index — at least adjacent trips render distinct.
-        for i, shape in enumerate(matched_shape):
-            lats = [p[0] for p in shape]
-            lons = [p[1] for p in shape]
-            color = _SEGMENT_COLORS[i % len(_SEGMENT_COLORS)]
-            _add_polyline(folium, fg, lats, lons, color=color, weight=4)
+        # All sub-shapes within a trip share one colour so bridged trips
+        # render as a single visual unit; trips cycle by outer index.
+        for trip_idx, trip_shapes in enumerate(matched_shape):
+            color = _SEGMENT_COLORS[trip_idx % len(_SEGMENT_COLORS)]
+            for shape in trip_shapes:
+                lats = [p[0] for p in shape]
+                lons = [p[1] for p in shape]
+                _add_polyline(folium, fg, lats, lons, color=color, weight=4)
         fg.add_to(m)
     elif matched is not None and matched.height > 0:
         m_df = matched

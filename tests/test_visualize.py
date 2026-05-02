@@ -197,6 +197,24 @@ class TestPlotTraceLayers:
         m = plot_trace_layers()
         assert isinstance(m, folium.Map)
 
+    def test_matched_shape_groups_share_color_across_subshapes(self) -> None:
+        # Two trips, the first has two sub-shapes (e.g. main + bridge).
+        # All shapes in trip 0 get palette[0] (#ff1493); trip 1 gets
+        # palette[1] (#ff8c00).  Default matched_color (#1e90ff) should
+        # not appear.  A matched DataFrame is supplied for bounds.
+        trip0 = [
+            [(43.65, -79.38), (43.66, -79.37)],
+            [(43.66, -79.37), (43.67, -79.36)],
+        ]
+        trip1 = [[(43.70, -79.40), (43.71, -79.39)]]
+        html = plot_trace_layers(
+            matched=_make_matched_df(),
+            matched_shape=[trip0, trip1],
+        )._repr_html_()
+        assert "ff1493" in html.lower()
+        assert "ff8c00" in html.lower()
+        assert "1e90ff" not in html.lower()
+
 
 class TestSatelliteBasemap:
     def test_plot_trace_registered_by_default(self) -> None:
