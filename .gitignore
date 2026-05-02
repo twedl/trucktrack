@@ -38,3 +38,7 @@ data/osm/
 duplicateways.txt
 *.osm.pbf
 *.pbf
+
+# Quarto build artifacts (slides/ holds source; docs/ holds rendered output)
+slides/_freeze/
+slides/.quarto/

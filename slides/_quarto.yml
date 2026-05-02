@@ -1,0 +1,15 @@
+project:
+  type: default
+  output-dir: ../docs
+  render:
+    - index.qmd
+
+format:
+  revealjs:
+    theme: default
+    slide-number: true
+    chalkboard: true
+    transition: slide
+    code-line-numbers: true
+    highlight-style: github
+    history: true

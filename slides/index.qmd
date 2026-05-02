@@ -1,0 +1,59 @@
+---
+title: "trucktrack"
+subtitle: "High-performance trajectory analysis in Rust + Python"
+author: "Jesse Tweedle"
+date: today
+format:
+  revealjs:
+    theme: default
+---
+
+## What is trucktrack?
+
+- Rust hot-path splitters: gap, stop, traffic
+- Python orchestration: trace generation, map-matching, visualization
+- Built on `polars` zero-copy DataFrames + PyO3
+- Map-matching via Valhalla
+
+## Pipeline
+
+`raw → gap-split → stop-split → traffic-filter → partitioned → map-matched`
+
+::: {.callout-note}
+Each stage writes a different hive layout; map-matching runs per-trip.
+:::
+
+## Splitters
+
+```python
+from datetime import timedelta
+from trucktrack import split_by_observation_gap, split_by_stops
+
+gaps = split_by_observation_gap(df, gap=timedelta(minutes=10))
+stops = split_by_stops(gaps, max_diameter=50.0,
+                      min_duration=timedelta(minutes=5))
+```
+
+All splitters add a `segment_id` column; `split_by_stops` also adds `is_stop`.
+
+## Visualization {.smaller}
+
+```python
+from trucktrack.visualize import inspect_trip
+
+inspect_trip("data/matched/", trip_id="abc123_gap0_trip2")
+```
+
+- Stops + matched routes share the segment palette so a trip stays one
+  colour end-to-end (including bridged sub-segments).
+
+## Status
+
+- Pre-PyPI **0.1.34**
+- 144 tests passing
+- Bridge orchestrator for slow Valhalla calls
+- TODO: PyPI release, historical OSM tile builds, time slider for inspection map
+
+## Thanks
+
+[github.com/twedl/trucktrack](https://github.com/twedl/trucktrack)
