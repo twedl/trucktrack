@@ -288,14 +288,59 @@ def _segment_endpoints(df: pl.DataFrame) -> dict[tuple[Any, int], dict[str, Any]
     return out
 
 
+def _add_matched_segments(
+    folium: Any,
+    fg: Any,
+    df: pl.DataFrame,
+    fallback_color: str,
+    weight: int = 4,
+) -> None:
+    """Render the matched polyline split by ``segment_id``, palette-coloured.
+
+    Stop-segment rows are skipped because map-matching only spans movement.
+    Falls back to a single ``fallback_color`` polyline if ``segment_id`` is
+    absent.
+    """
+    if "segment_id" not in df.columns:
+        _add_polyline(
+            folium,
+            fg,
+            df["matched_lat"].to_list(),
+            df["matched_lon"].to_list(),
+            color=fallback_color,
+            weight=weight,
+        )
+        return
+
+    has_is_stop = "is_stop" in df.columns
+    for _, seg in df.group_by("segment_id", maintain_order=True):
+        if has_is_stop and bool(seg["is_stop"][0]):
+            continue
+        seg_id = int(seg["segment_id"][0])
+        color = _SEGMENT_COLORS[seg_id % len(_SEGMENT_COLORS)]
+        _add_polyline(
+            folium,
+            fg,
+            seg["matched_lat"].to_list(),
+            seg["matched_lon"].to_list(),
+            color=color,
+            weight=weight,
+        )
+
+
 def _add_stop_markers(
     folium: Any,
     fg: Any,
     df: pl.DataFrame,
-    stop_color: str,
+    stop_color: str | None,
     stop_radius: int,
 ) -> None:
-    """Render bbox + interior polyline + centroid + neighbour connectors per stop."""
+    """Render interior polyline + centroid + neighbour connectors per stop.
+
+    When ``stop_color`` is ``None`` each stop picks its colour from
+    ``_SEGMENT_COLORS`` keyed by ``segment_id`` so it shares the cycle with
+    movement segments.  An explicit ``stop_color`` overrides every stop.
+    """
     if df.height == 0 or "is_stop" not in df.columns:
         return
     has_id = "id" in df.columns
@@ -313,33 +358,25 @@ def _add_stop_markers(
         lons = group["lon"].to_list()
         n_pts = group.height
 
-        lat_min, lat_max = min(lats), max(lats)
-        lon_min, lon_max = min(lons), max(lons)
         centroid_lat = sum(lats) / n_pts
         centroid_lon = sum(lons) / n_pts
+
+        color = (
+            stop_color
+            if stop_color is not None
+            else _SEGMENT_COLORS[seg_id % len(_SEGMENT_COLORS)]
+        )
 
         full_id = _full_segment_id(group)
         popup_text = f"Stop: {full_id}<br>{n_pts} points"
         popup_text += _time_range_html(group, include_duration=True)
-
-        # Bounding box of the GPS points within the stop — visualises the
-        # max_diameter constraint that fired the splitter.
-        if lat_min != lat_max or lon_min != lon_max:
-            folium.Rectangle(
-                bounds=[(lat_min, lon_min), (lat_max, lon_max)],
-                color=stop_color,
-                weight=1,
-                fill=True,
-                fill_color=stop_color,
-                fill_opacity=0.1,
-            ).add_to(fg)
 
         # Interior polyline through the time-ordered stop points so jitter
         # / wandering inside the stop area is visible.
         if n_pts >= 2:
             folium.PolyLine(
                 list(zip(lats, lons, strict=True)),
-                color=stop_color,
+                color=color,
                 weight=2,
                 opacity=0.6,
             ).add_to(fg)
@@ -347,9 +384,9 @@ def _add_stop_markers(
         folium.CircleMarker(
             location=(centroid_lat, centroid_lon),
             radius=stop_radius,
-            color=stop_color,
+            color=color,
             fill=True,
-            fill_color=stop_color,
+            fill_color=color,
             fill_opacity=0.6,
             popup=folium.Popup(popup_text, max_width=300),
         ).add_to(fg)
@@ -360,7 +397,7 @@ def _add_stop_markers(
         if prev is not None and not prev["is_stop"]:
             folium.PolyLine(
                 [(prev["last_lat"], prev["last_lon"]), (lats[0], lons[0])],
-                color=stop_color,
+                color=color,
                 weight=1,
                 opacity=0.4,
                 dash_array="4 4",
@@ -370,7 +407,7 @@ def _add_stop_markers(
         if nxt is not None and not nxt["is_stop"]:
             folium.PolyLine(
                 [(lats[-1], lons[-1]), (nxt["first_lat"], nxt["first_lon"])],
-                color=stop_color,
+                color=color,
                 weight=1,
                 opacity=0.4,
                 dash_array="4 4",
@@ -386,7 +423,7 @@ def plot_trace(
     width: str | int = "100%",
     height: str | int = "100%",
     max_points: int | None = 5000,
-    stop_color: str = "red",
+    stop_color: str | None = None,
     stop_radius: int = 8,
     matched_color: str = "#1e90ff",
     trace_color: str = "gray",
@@ -420,7 +457,9 @@ def plot_trace(
     max_points
         Downsample traces with more points than this.  ``None`` to disable.
     stop_color
-        Color for stop markers.
+        Override colour for every stop.  Default ``None`` cycles each
+        stop through the segment palette by ``segment_id``, matching the
+        movement segments.
     stop_radius
         Radius of stop circle markers in pixels.
     matched_color
@@ -490,19 +529,17 @@ def plot_trace(
         trace_fg.add_to(m)
 
         matched_fg = folium.FeatureGroup(name="Matched trace")
-        m_lats = df["matched_lat"].to_list()
-        m_lons = df["matched_lon"].to_list()
 
         if color_by is not None and color_by in df.columns:
+            m_lats = df["matched_lat"].to_list()
+            m_lons = df["matched_lon"].to_list()
             vals = df[color_by].cast(pl.Float64).to_list()
             caption = (
                 f"{color_by} (m)" if color_by == "distance_from_trace" else color_by
             )
             _add_colored_layer(folium, cm, matched_fg, m, m_lats, m_lons, vals, caption)
         else:
-            _add_polyline(
-                folium, matched_fg, m_lats, m_lons, color=matched_color, weight=4
-            )
+            _add_matched_segments(folium, matched_fg, df, matched_color)
         matched_fg.add_to(m)
 
         if has_is_stop and has_segment_id:
@@ -574,8 +611,9 @@ def _render_segments(
         )
         return
 
-    for i, (_, seg) in enumerate(df.group_by("segment_id", maintain_order=True)):
-        color = _SEGMENT_COLORS[i % len(_SEGMENT_COLORS)]
+    for _, seg in df.group_by("segment_id", maintain_order=True):
+        seg_id = int(seg["segment_id"][0])
+        color = _SEGMENT_COLORS[seg_id % len(_SEGMENT_COLORS)]
         full_id = _full_segment_id(seg)
         popup_text = f"Segment: {full_id}"
         popup_text += _time_range_html(seg)
@@ -602,7 +640,7 @@ def plot_trace_layers(
     max_points: int | None = 5000,
     raw_color: str = "black",
     matched_color: str = "#1e90ff",
-    stop_color: str = "red",
+    stop_color: str | None = None,
     stop_radius: int = 8,
 ) -> Any:
     """Plot multiple pipeline stages on a single map with togglable layers.
@@ -643,7 +681,9 @@ def plot_trace_layers(
     matched_color
         Color for the map-matched polyline.
     stop_color
-        Color for stop circle markers.
+        Override colour for every stop.  Default ``None`` cycles each
+        stop through the segment palette by ``segment_id``, matching the
+        movement segments.
     stop_radius
         Radius of stop circle markers in pixels.
 
@@ -728,24 +768,20 @@ def plot_trace_layers(
     # Layer: map-matched trace.
     if matched_shape:
         fg = folium.FeatureGroup(name="Map-matched")
-        for shape in matched_shape:
+        # No segment_id linkage available for raw shape lists, so cycle the
+        # palette by shape index — at least adjacent trips render distinct.
+        for i, shape in enumerate(matched_shape):
             lats = [p[0] for p in shape]
             lons = [p[1] for p in shape]
-            _add_polyline(folium, fg, lats, lons, color=matched_color, weight=4)
+            color = _SEGMENT_COLORS[i % len(_SEGMENT_COLORS)]
+            _add_polyline(folium, fg, lats, lons, color=color, weight=4)
         fg.add_to(m)
     elif matched is not None and matched.height > 0:
         m_df = matched
         if max_points is not None:
             m_df = _downsample(m_df, max_points)
         fg = folium.FeatureGroup(name="Map-matched")
-        _add_polyline(
-            folium,
-            fg,
-            m_df["matched_lat"].to_list(),
-            m_df["matched_lon"].to_list(),
-            color=matched_color,
-            weight=4,
-        )
+        _add_matched_segments(folium, fg, m_df, matched_color)
         fg.add_to(m)
 
     folium.LayerControl().add_to(m)

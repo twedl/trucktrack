@@ -100,27 +100,25 @@ class TestPlotTraceStopSplit:
         html = m._repr_html_()
         assert "Stop" in html
 
-    def test_stop_renders_bbox_polyline_and_connectors(self) -> None:
+    def test_stop_renders_interior_polyline_and_connectors(self) -> None:
         # The fixture has segments 0 (move) → 1 (stop, 3 pts) → 2 (move),
-        # so the stop should produce a bbox rectangle, an interior polyline,
-        # and dashed connectors on both sides.
+        # so the stop should produce an interior polyline plus dashed
+        # connectors on both sides.
         html = plot_trace(_make_stop_split_df())._repr_html_()
-        assert "L.rectangle" in html
         # dashArray "4 4" comes from the connector polylines (HTML-escaped).
         assert "dashArray&quot;: &quot;4 4" in html
-
-    def test_single_point_stop_skips_bbox(self) -> None:
-        # All-equal coords ⇒ degenerate bbox; Rectangle should be skipped
-        # but the centroid CircleMarker still renders.
-        df = _make_raw_df(3).with_columns(
-            pl.Series("segment_id", [0, 0, 0], dtype=pl.UInt32),
-            pl.Series("is_stop", [True, True, True]),
-            pl.Series("lat", [43.65, 43.65, 43.65]),
-            pl.Series("lon", [-79.38, -79.38, -79.38]),
-        )
-        html = plot_trace(df)._repr_html_()
-        assert "L.rectangle" not in html
         assert "circle_marker" in html.lower()
+
+    def test_stops_default_to_segment_palette(self) -> None:
+        # Stop sits at segment_id=1 → second palette entry (#ff8c00, dark
+        # orange).  Default red should not appear.
+        html = plot_trace(_make_stop_split_df())._repr_html_()
+        assert "ff8c00" in html.lower()
+        assert "&quot;red&quot;" not in html.lower()
+
+    def test_stop_color_override_applies_to_all_stops(self) -> None:
+        html = plot_trace(_make_stop_split_df(), stop_color="red")._repr_html_()
+        assert "&quot;red&quot;" in html.lower()
 
 
 class TestPlotTraceMatched:
@@ -134,6 +132,39 @@ class TestPlotTraceMatched:
         m = plot_trace(df, color_by="distance_from_trace")
         html = m._repr_html_()
         assert "distance_from_trace" in html
+
+    def test_matched_falls_back_to_matched_color_without_segment_id(self) -> None:
+        # Default fallback color "#1e90ff" should appear on the matched
+        # polyline since the fixture has no segment_id column.
+        html = plot_trace(_make_matched_df())._repr_html_()
+        assert "1e90ff" in html.lower()
+
+    def test_matched_uses_palette_per_segment_id(self) -> None:
+        df = _make_matched_df().with_columns(
+            pl.Series("segment_id", [0] * 5 + [2] * 5, dtype=pl.UInt32),
+        )
+        html = plot_trace(df)._repr_html_()
+        # Segment 0 → palette[0] (#ff1493), segment 2 → palette[2] (#9400d3).
+        # Default matched_color (#1e90ff) should be absent.
+        assert "ff1493" in html.lower()
+        assert "9400d3" in html.lower()
+        assert "1e90ff" not in html.lower()
+
+    def test_matched_skips_stop_segments(self) -> None:
+        df = _make_matched_df().with_columns(
+            pl.Series("segment_id", [0] * 3 + [1] * 4 + [2] * 3, dtype=pl.UInt32),
+            pl.Series("is_stop", [False] * 3 + [True] * 4 + [False] * 3),
+        )
+        html = plot_trace(df)._repr_html_()
+        # Movement segments 0 and 2 contribute palette polylines; the stop
+        # segment 1 (palette[1] = #ff8c00) must not appear in the matched
+        # layer — but it *will* show in the stop markers, so this just
+        # confirms _add_matched_segments doesn't draw it as a polyline.
+        # We can't easily disambiguate the two contexts from raw HTML, so
+        # this test is mostly a smoke check that the code path runs.
+        assert isinstance(plot_trace(df), folium.Map)
+        assert "ff1493" in html.lower()  # segment 0
+        assert "9400d3" in html.lower()  # segment 2
 
 
 class TestPlotTraceLayers:
