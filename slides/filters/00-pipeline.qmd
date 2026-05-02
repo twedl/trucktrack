@@ -1,0 +1,44 @@
+# Pipeline overview
+
+## The problem
+
+Raw truck GPS streams arrive dirty:
+
+- Devices re-emit buffered readings verbatim
+- Bad fixes imply physically impossible motion
+- Signal drops create ragged temporal gaps
+- Long idles need to be separated from driving
+- Some "stops" are actually traffic, not real stops
+
+The pipeline turns a noisy per-truck stream into clean, segmented trajectories.
+
+## Stage order
+
+```{mermaid}
+flowchart LR
+  A[raw pings] --> B[filter_stale_pings]
+  B --> C[filter_impossible_speeds]
+  C --> D[split_by_observation_gap]
+  D --> E[split_by_stops]
+  E --> F[filter_traffic_stops]
+  F --> G[clean segmented trajectories]
+```
+
+Each stage is per-truck and independent across trucks.
+
+## What each stage adds
+
+| Stage | Drops rows | Adds column |
+|---|---|---|
+| `filter_stale_pings` | yes | — |
+| `filter_impossible_speeds` | yes | — |
+| `split_by_observation_gap` | (via `min_length`) | `segment_id` |
+| `split_by_stops` | (via `min_length`) | `segment_id`, `is_stop` |
+| `filter_traffic_stops` | no | (reclassifies `is_stop`) |
+
+## Why this order
+
+- **Stale before speed** — re-emissions have tiny `dt` against the real prior row; they'd look like huge speeds, and speed would drop them for the wrong reason.
+- **Speed before gap** — removing impossible points first keeps gap segments from being artificially fragmented.
+- **Stop after gap** — stops are detected inside a temporally continuous window; gaps break that assumption.
+- **Traffic last** — needs the `is_stop` labels that `split_by_stops` produces.

@@ -1,0 +1,61 @@
+# `split_by_observation_gap`
+
+## What / why
+
+A trajectory is only physically meaningful within a window of continuous observation. Yard dwells with the device shut off, privacy toggles, coverage holes — any of these leave a large `dt` between two otherwise-unremarkable pings.
+
+```python
+from datetime import timedelta
+
+segmented = trucktrack.split_by_observation_gap(
+    df,
+    gap=timedelta(minutes=2),
+    min_length=0,
+)
+```
+
+Per truck, start a new `segment_id` whenever the time delta to the previous row exceeds `gap`.
+
+## Five rows straddling a 10-hour shutoff
+
+**Before** — moving truck, `dt` jumps to 36060 s
+
+![](figures/gap-before.png){.nostretch fig-align="center" width="45%"}
+
+**After** — `segment_id` splits at the gap
+
+![](figures/gap-after.png){.nostretch fig-align="center" width="45%"}
+
+## What changed
+
+Truck cruising westbound at ~63 mph, heading around 256°. The device reports normally at 60-second cadence, goes dark for 10 hours, then resumes — further down the route, still moving. Every column looks like normal driving; only `dt` tells you anything happened. With a 2-minute threshold, the splitter inserts a new segment at the 36060-second row.
+
+This is what makes the gap distinct from a stop: the pings aren't clustered, speeds aren't zero, headings aren't frozen. A stop detector would see nothing; the gap splitter reads `dt` and segments.
+
+## What the matcher sees
+
+::: {style="text-align:center;"}
+**Before** — matcher invents a U-turn · **After** — split, two clean legs
+:::
+
+```{=html}
+<div style="text-align:center;">
+<img src="figures/gap-map-before.png" style="display:inline-block; width:45%; vertical-align:top; margin-right:1%;">
+<img src="figures/gap-map-after.png" style="display:inline-block; width:45%; vertical-align:top; margin-left:1%;">
+</div>
+```
+
+## Why the U-turn
+
+A → near-B → A out-and-back trip. The device fell silent on the WB carriageway at the Hespeler Rd interchange and resumed 10 hours later on the EB carriageway, ~370 m away.
+
+Without splitting, the matcher has no clue this isn't a continuous trip and invents a U-turn through the on/off ramps. Splitting first ends one trip at ping (2) and starts a new one at ping (3); both legs match cleanly along their own carriageway.
+
+## Params and gotchas
+
+- **`gap: timedelta`** — the only tuning knob for segmentation.
+- **`min_length`** — drops whole segments shorter than N rows. Set aggressively and the output can be empty; in the test suite, `min_length=20` on 15-row segments drops everything.
+- **Tz-aware datetimes** — handled identically to naive; no panic, same segment count.
+- **Per-truck independence** — vehicle A's gaps cannot affect vehicle B's segmentation.
+- **Tiny thresholds fragment everything** — a 1-second threshold on 30-second pings gives every row its own segment.
+- **Space is irrelevant** — the filter never looks at `lat` / `lon`. A truck that drove 500 km during a dropout and a truck that sat still are treated identically; only the time delta matters.

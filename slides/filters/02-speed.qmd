@@ -1,0 +1,40 @@
+# `filter_impossible_speeds`
+
+## What / why
+
+GPS glitches produce fixes that imply motion faster than any truck can move.
+
+```python
+clean = trucktrack.filter_impossible_speeds(df, max_speed_kmh=200.0)
+```
+
+Per truck, sorted by `(id, time)`. For each row, compute Haversine distance and `dt` against the **last kept point** — not the previous row. If the implied speed exceeds the threshold, drop the row and hold the anchor.
+
+Threshold is on *computed* speed (distance ÷ time), not the device-reported `speed` column: glitched GPS often emits a self-consistently wrong reported speed.
+
+## Off-route spike on 401 westbound
+
+::: {style="text-align:center;"}
+**Before** — spike 5.5 km north · **After** — dropped
+:::
+
+```{=html}
+<div style="text-align:center;">
+<img src="figures/speed-before.png" style="display:inline-block; width:45%; vertical-align:top; margin-right:1%;">
+<img src="figures/speed-after.png" style="display:inline-block; width:45%; vertical-align:top; margin-left:1%;">
+</div>
+```
+
+## Why the detour
+
+Truck cruising westbound on Highway 401 at 60-second cadence. Ping 25 lands ~5.5 km north of the corridor — that's ~330 km/h of implied motion from its predecessor, well past the 200 km/h ceiling.
+
+The matcher tries to honor the off-route fix and bends the route north to reach it. With the spike dropped, ping 26 is evaluated against ping 24 (the last kept anchor) and the route stays on 401.
+
+## Params and gotchas
+
+- **`max_speed_kmh`** — default 200. Converted internally to m/s.
+- **Anchor held across drops** — consecutive spikes collapse against the last clean fix; one bad point cannot drag subsequent evaluation with it.
+- **First valid point per truck always kept** — no prior anchor to compare against.
+- **Nulls pass through without advancing the anchor** — a null `lat`/`lon`/`time` can't be evaluated, so the row survives and the next row still compares against the last clean fix.
+- **`dt == 0` is safe** — duplicate timestamps do not divide by zero; the row is kept.

@@ -1,0 +1,47 @@
+# `filter_traffic_stops`
+
+## What / why
+
+Not every detected stop is a real stop. Trucks also halt at red lights, in congestion, and behind queued traffic — all on the road corridor they were already following.
+
+```python
+cleaned = trucktrack.filter_traffic_stops(
+    df,                           # output of split_by_stops
+    max_angle_change=30.0,        # degrees
+    min_distance=10.0,            # meters
+)
+```
+
+For each stop segment, compute the **approach bearing** (points before the stop) and the **departure bearing** (points after). If the angular change is below `max_angle_change`, the truck stayed on the same corridor — reclassify the stop as movement and merge segments.
+
+## Construction halt on 401 westbound
+
+::: {style="text-align:center;"}
+**Before** — blue leg / orange ring / orange leg · **After** — single continuous blue, no break
+:::
+
+```{=html}
+<div style="text-align:center;">
+<img src="figures/traffic-before.png" style="display:inline-block; width:45%; vertical-align:top; margin-right:1%;">
+<img src="figures/traffic-after.png" style="display:inline-block; width:45%; vertical-align:top; margin-left:1%;">
+</div>
+```
+
+## Contrast — real stop preserved
+
+::: {.columns}
+::: {.column width="50%"}
+![](figures/traffic-real-stop.png){.nostretch}
+:::
+::: {.column width="50%"}
+The Comber Petro Canada dwell from the previous slide. Same shape (cluster of pings, >2 min, <50 m), but the truck approaches from 401 and leaves at a sharp angle onto the driveway. Bearing change ≈ 90°, above threshold. Stop survives.
+:::
+:::
+
+## Params and gotchas
+
+- **Requires `split_by_stops` output schema** — expects `segment_id` and `is_stop`. Hard dependency.
+- **`max_angle_change` (degrees)** — default 30. Lower = stricter (more stops kept); higher = more reclassification.
+- **`min_distance` (m)** — minimum separation between point pairs used for bearing computation. Filters GPS jitter out of an otherwise noisy bearing signal.
+- **Bearings from positions, not device `heading`** — device heading can freeze or lag; positions are ground truth.
+- **Segment IDs are renumbered** — after reclassification, IDs are sequential again, so downstream code doesn't see gaps in the segment_id space.

@@ -1,0 +1,52 @@
+# Trucktrack partitioning
+
+## Tier by trip extent
+
+::: {.columns}
+::: {.column width="55%"}
+Cleaned trips are bucketed by bbox diagonal — picks the Valhalla tile size we shard against, so a longhaul is never chopped into many tiny partitions.
+
+| Tier | Diagonal | Example |
+|---|---|---|
+| `local` | < 100 km | T → Mississauga |
+| `regional` | 100–800 km | T → Ottawa |
+| `longhaul` | > 800 km | T → Vancouver |
+:::
+::: {.column width="45%"}
+![](figures/tier-classification.png){.nostretch}
+:::
+:::
+
+## Partition cells
+
+::: {.columns}
+::: {.column width="50%"}
+A partition key is `(tier << 60) | tile_id`. The tile is computed at the tier's level using Valhalla's grid math, anchored on a representative point of the trip.
+
+Reading "all local trips through Mississauga" → one partition lookup. "All longhaul trips through southern Ontario" → a few. The same trip never lives in two partitions.
+:::
+::: {.column width="50%"}
+![](figures/partition-cells.png){.nostretch}
+:::
+:::
+
+## Hilbert order inside a partition
+
+::: {.columns}
+::: {.column width="50%"}
+Inside one partition, trips are sorted by a Hilbert index over their anchor point.
+
+The Hilbert curve is a 2D → 1D mapping that keeps spatially close points close in the linear order. Trips physically near each other end up adjacent on disk, so a small file scan pulls trips from a small geographic patch — warming the same Valhalla tile cache entries for the next match.
+:::
+::: {.column width="50%"}
+![](figures/hilbert-locality.png){.nostretch}
+:::
+:::
+
+## Why this stack matters
+
+- **Tier** keeps partitions roughly balanced across trip sizes
+- **Tile** lines partition boundaries up with what Valhalla loads
+- **Hilbert** keeps adjacent reads spatially adjacent
+
+Without any of the three, batch map-matching either over-partitions (many small files, lots of opens) or under-partitions (one giant file, no parallelism, and a cold tile cache for every record).

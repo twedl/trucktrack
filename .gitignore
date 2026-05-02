@@ -40,5 +40,8 @@ duplicateways.txt
 *.pbf
 
 # Quarto build artifacts (slides/ holds source; docs/ holds rendered output)
-slides/_freeze/
-slides/.quarto/
+slides/**/_freeze/
+slides/**/.quarto/
+slides/**/index_files/
+slides/**/index.html
+slides/**/index.pdf

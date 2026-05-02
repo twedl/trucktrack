@@ -40,6 +40,7 @@ trucktrack = "trucktrack.cli:main"
 [project.optional-dependencies]
 valhalla = ["pyvalhalla>=3.6", "orjson>=3.9"]
 viz = ["folium>=0.15", "branca>=0.7"]
+slides = ["matplotlib>=3.8", "contextily>=1.6"]
 dev = [
     "pytest>=8.0",
     "pytest-benchmark>=4.0",

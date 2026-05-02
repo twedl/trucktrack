@@ -1,0 +1,17 @@
+---
+title: "Trucktrack filter pipeline"
+subtitle: "Cleaning and segmenting truck GPS traces"
+author: "Jesse Tweedle"
+---
+
+{{< include 00-pipeline.qmd >}}
+
+{{< include 01-stale.qmd >}}
+
+{{< include 02-speed.qmd >}}
+
+{{< include 03-gap.qmd >}}
+
+{{< include 04-stop.qmd >}}
+
+{{< include 05-traffic.qmd >}}

@@ -1,0 +1,34 @@
+/* Maps are the main focus — let images fill their container and bump
+   them up to most of the slide height. */
+.reveal section img {
+    max-height: 82vh;
+    object-fit: contain;
+}
+
+/* Inside a column, image fills the column width. */
+.reveal section .column img {
+    width: 100%;
+    height: auto;
+    max-height: 80vh;
+}
+
+/* Smaller text inside columns so prose / tables fit beside a half-slide map. */
+.reveal section .column {
+    font-size: 0.72em;
+}
+
+.reveal section .column h2,
+.reveal section .column h3 {
+    font-size: 1.3em;
+}
+
+.reveal section .column table {
+    font-size: 0.85em;
+}
+
+/* Compact body text under inline-block side-by-side images. */
+.reveal section p,
+.reveal section ul,
+.reveal section ol {
+    font-size: 0.85em;
+}
