@@ -11,11 +11,15 @@ lightbox: auto
 ---
 
 ::: {layout-ncol=2}
-![1](figures/shapes%20at%2026-05-02%2013.07.34.png){group="how"}
+![1](figures/slide-1.png){group="how"}
 
-![2](figures/shapes%20at%2026-05-02%2013.14.17.png){group="how"}
+![2](figures/slide-2.png){group="how"}
 
-![3](figures/shapes%20at%2026-05-02%2013.20.04.png){group="how"}
+![3](figures/slide-3.png){group="how"}
 
-![4](figures/shapes%20at%2026-05-02%2013.32.13.png){group="how"}
+![4](figures/slide-4.png){group="how"}
+
+![5](figures/slide-5.png){group="how"}
+
+![6](figures/slide-6.png){group="how"}
 :::

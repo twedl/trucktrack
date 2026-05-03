@@ -12,6 +12,7 @@ format:
 
 ## Decks
 
+- [How](how/) — diagram gallery.
 - [Filter pipeline](filters/) — speed, observation gap, stop, traffic-jam, stale-ping filters with before/after maps.
 - [Valhalla & partitioning](valhalla/) — tile hierarchy, tier classification, map-matching, gap bridging.
 
