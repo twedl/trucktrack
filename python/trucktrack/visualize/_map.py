@@ -17,16 +17,17 @@ if TYPE_CHECKING:
 # (where pastel greens, beiges and pale yellows dominate the background).
 # Blue is reserved for map-matched routes, so this palette skips it.
 _SEGMENT_COLORS = [
-    "#ff1493",  # deep pink
-    "#ff8c00",  # dark orange
-    "#9400d3",  # dark violet
-    "#00ced1",  # dark turquoise
-    "#7cfc00",  # lawn green
-    "#dc143c",  # crimson
-    "#00fa9a",  # medium spring green
+    "#00ffff",  # cyan
+    "#ff2050",  # bright red
+    "#c020ff",  # bright purple
+    "#80ff00",  # chartreuse
+    "#ffa500",  # orange
+    "#00ff88",  # bright mint
     "#ff00ff",  # magenta
-    "#ff4500",  # orange red
-    "#c71585",  # medium violet red
+    "#ff5500",  # vivid orange-red
+    "#ff44b8",  # bright pink-violet
+    "#ff1493",  # deep pink — last because it clashes with OSM Mapnik's
+    # primary-highway pink at typical zooms
 ]
 
 

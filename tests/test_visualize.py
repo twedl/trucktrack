@@ -110,10 +110,10 @@ class TestPlotTraceStopSplit:
         assert "circle_marker" in html.lower()
 
     def test_stops_default_to_segment_palette(self) -> None:
-        # Stop sits at segment_id=1 → second palette entry (#ff8c00, dark
-        # orange).  Default red should not appear.
+        # Stop sits at segment_id=1 → second palette entry (#ff2050, bright
+        # red).  Default red should not appear.
         html = plot_trace(_make_stop_split_df())._repr_html_()
-        assert "ff8c00" in html.lower()
+        assert "ff2050" in html.lower()
         assert "&quot;red&quot;" not in html.lower()
 
     def test_stop_color_override_applies_to_all_stops(self) -> None:
@@ -144,10 +144,10 @@ class TestPlotTraceMatched:
             pl.Series("segment_id", [0] * 5 + [2] * 5, dtype=pl.UInt32),
         )
         html = plot_trace(df)._repr_html_()
-        # Segment 0 → palette[0] (#ff1493), segment 2 → palette[2] (#9400d3).
+        # Segment 0 → palette[0] (#00ffff), segment 2 → palette[2] (#c020ff).
         # Default matched_color (#1e90ff) should be absent.
-        assert "ff1493" in html.lower()
-        assert "9400d3" in html.lower()
+        assert "00ffff" in html.lower()
+        assert "c020ff" in html.lower()
         assert "1e90ff" not in html.lower()
 
     def test_matched_skips_stop_segments(self) -> None:
@@ -157,14 +157,14 @@ class TestPlotTraceMatched:
         )
         html = plot_trace(df)._repr_html_()
         # Movement segments 0 and 2 contribute palette polylines; the stop
-        # segment 1 (palette[1] = #ff8c00) must not appear in the matched
+        # segment 1 (palette[1] = #ff2050) must not appear in the matched
         # layer — but it *will* show in the stop markers, so this just
         # confirms _add_matched_segments doesn't draw it as a polyline.
         # We can't easily disambiguate the two contexts from raw HTML, so
         # this test is mostly a smoke check that the code path runs.
         assert isinstance(plot_trace(df), folium.Map)
-        assert "ff1493" in html.lower()  # segment 0
-        assert "9400d3" in html.lower()  # segment 2
+        assert "00ffff" in html.lower()  # segment 0
+        assert "c020ff" in html.lower()  # segment 2
 
 
 class TestPlotTraceLayers:
@@ -199,8 +199,8 @@ class TestPlotTraceLayers:
 
     def test_matched_shape_groups_share_color_across_subshapes(self) -> None:
         # Two trips, the first has two sub-shapes (e.g. main + bridge).
-        # All shapes in trip 0 get palette[0] (#ff1493); trip 1 gets
-        # palette[1] (#ff8c00).  Default matched_color (#1e90ff) should
+        # All shapes in trip 0 get palette[0] (#00ffff); trip 1 gets
+        # palette[1] (#ff2050).  Default matched_color (#1e90ff) should
         # not appear.  A matched DataFrame is supplied for bounds.
         trip0 = [
             [(43.65, -79.38), (43.66, -79.37)],
@@ -211,8 +211,8 @@ class TestPlotTraceLayers:
             matched=_make_matched_df(),
             matched_shape=[trip0, trip1],
         )._repr_html_()
-        assert "ff1493" in html.lower()
-        assert "ff8c00" in html.lower()
+        assert "00ffff" in html.lower()
+        assert "ff2050" in html.lower()
         assert "1e90ff" not in html.lower()
 
 
