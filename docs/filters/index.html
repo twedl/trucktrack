@@ -1,935 +1,664 @@
 <!DOCTYPE html>
-<html lang="en"><head>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en"><head>
+
+<meta charset="utf-8">
+<meta name="generator" content="quarto-1.9.37">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+
+<meta name="author" content="Jesse Tweedle">
+<meta name="dcterms.date" content="2026-05-03">
+
+<title>Trucktrack filter pipeline</title>
+<style>
+/* Default styles provided by pandoc.
+** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+*/
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+  width: 0.8em;
+  margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
+  vertical-align: middle;
+}
+</style>
+
+
 <script src="index_files/libs/clipboard/clipboard.min.js"></script>
-<script src="index_files/libs/quarto-html/tabby.min.js"></script>
+<script src="index_files/libs/quarto-html/quarto.js" type="module"></script>
+<script src="index_files/libs/quarto-html/tabsets/tabsets.js" type="module"></script>
 <script src="index_files/libs/quarto-html/popper.min.js"></script>
 <script src="index_files/libs/quarto-html/tippy.umd.min.js"></script>
+<script src="index_files/libs/quarto-html/anchor.min.js"></script>
 <link href="index_files/libs/quarto-html/tippy.css" rel="stylesheet">
-<link href="index_files/libs/quarto-html/light-border.css" rel="stylesheet">
-<link href="index_files/libs/quarto-html/quarto-syntax-highlighting-7f8f88aac4f3542376d5c11b86a4c14d.css" rel="stylesheet" id="quarto-text-highlighting-styles"><meta charset="utf-8">
-  <meta name="generator" content="quarto-1.9.37">
+<link href="index_files/libs/quarto-html/quarto-syntax-highlighting-7f8f88aac4f3542376d5c11b86a4c14d.css" rel="stylesheet" id="quarto-text-highlighting-styles">
+<script src="index_files/libs/bootstrap/bootstrap.min.js"></script>
+<link href="index_files/libs/bootstrap/bootstrap-icons.css" rel="stylesheet">
+<link href="index_files/libs/bootstrap/bootstrap-8ffd5f67044e5306d9846f29df41dda5.min.css" rel="stylesheet" append-hash="true" id="quarto-bootstrap" data-mode="light">
+<script src="index_files/libs/quarto-contrib/glightbox/glightbox.min.js"></script>
+<link href="index_files/libs/quarto-contrib/glightbox/glightbox.min.css" rel="stylesheet">
+<link href="index_files/libs/quarto-contrib/glightbox/lightbox.css" rel="stylesheet">
 
-  <meta name="author" content="Jesse Tweedle">
-  <title>Trucktrack filter pipeline</title>
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, minimal-ui">
-  <link rel="stylesheet" href="index_files/libs/revealjs/dist/reset.css">
-  <link rel="stylesheet" href="index_files/libs/revealjs/dist/reveal.css">
-  <style>
-    /* Default styles provided by pandoc.
-    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
-    */
-    code{white-space: pre-wrap;}
-    span.smallcaps{font-variant: small-caps;}
-    div.columns{display: flex; gap: min(4vw, 1.5em);}
-    div.column{flex: auto; overflow-x: auto;}
-    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
-    ul.task-list{list-style: none;}
-    ul.task-list li input[type="checkbox"] {
-      width: 0.8em;
-      margin: 0 0.8em 0.2em -1em; /* quarto-specific, see https://github.com/quarto-dev/quarto-cli/issues/4556 */ 
-      vertical-align: middle;
-    }
-    /* CSS for syntax highlighting */
-    html { -webkit-text-size-adjust: 100%; }
-    pre > code.sourceCode { white-space: pre; position: relative; }
-    pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
-    pre > code.sourceCode > span:empty { height: 1.2em; }
-    .sourceCode { overflow: visible; }
-    code.sourceCode > span { color: inherit; text-decoration: inherit; }
-    div.sourceCode { margin: 1em 0; }
-    pre.sourceCode { margin: 0; }
-    @media screen {
-    div.sourceCode { overflow: auto; }
-    }
-    @media print {
-    pre > code.sourceCode { white-space: pre-wrap; }
-    pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
-    }
-    pre.numberSource code
-      { counter-reset: source-line 0; }
-    pre.numberSource code > span
-      { position: relative; left: -4em; counter-increment: source-line; }
-    pre.numberSource code > span > a:first-child::before
-      { content: counter(source-line);
-        position: relative; left: -1em; text-align: right; vertical-align: baseline;
-        border: none; display: inline-block;
-        -webkit-touch-callout: none; -webkit-user-select: none;
-        -khtml-user-select: none; -moz-user-select: none;
-        -ms-user-select: none; user-select: none;
-        padding: 0 4px; width: 4em;
-        color: #aaaaaa;
-      }
-    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
-    div.sourceCode
-      { color: #003b4f; background-color: #f1f3f5; }
-    @media screen {
-    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
-    }
-    code span { color: #003b4f; } /* Normal */
-    code span.al { color: #ad0000; } /* Alert */
-    code span.an { color: #5e5e5e; } /* Annotation */
-    code span.at { color: #657422; } /* Attribute */
-    code span.bn { color: #ad0000; } /* BaseN */
-    code span.bu { } /* BuiltIn */
-    code span.cf { color: #003b4f; font-weight: bold; } /* ControlFlow */
-    code span.ch { color: #20794d; } /* Char */
-    code span.cn { color: #8f5902; } /* Constant */
-    code span.co { color: #5e5e5e; } /* Comment */
-    code span.cv { color: #5e5e5e; font-style: italic; } /* CommentVar */
-    code span.do { color: #5e5e5e; font-style: italic; } /* Documentation */
-    code span.dt { color: #ad0000; } /* DataType */
-    code span.dv { color: #ad0000; } /* DecVal */
-    code span.er { color: #ad0000; } /* Error */
-    code span.ex { } /* Extension */
-    code span.fl { color: #ad0000; } /* Float */
-    code span.fu { color: #4758ab; } /* Function */
-    code span.im { color: #00769e; } /* Import */
-    code span.in { color: #5e5e5e; } /* Information */
-    code span.kw { color: #003b4f; font-weight: bold; } /* Keyword */
-    code span.op { color: #5e5e5e; } /* Operator */
-    code span.ot { color: #003b4f; } /* Other */
-    code span.pp { color: #ad0000; } /* Preprocessor */
-    code span.sc { color: #5e5e5e; } /* SpecialChar */
-    code span.ss { color: #20794d; } /* SpecialString */
-    code span.st { color: #20794d; } /* String */
-    code span.va { color: #111111; } /* Variable */
-    code span.vs { color: #20794d; } /* VerbatimString */
-    code span.wa { color: #5e5e5e; font-style: italic; } /* Warning */
-  </style>
-  <link rel="stylesheet" href="index_files/libs/revealjs/dist/theme/quarto-2740581606dc327e82f18f789b69d8a0.css">
-  <link rel="stylesheet" href="custom.css">
-  <link href="index_files/libs/revealjs/plugin/quarto-line-highlight/line-highlight.css" rel="stylesheet">
-  <link href="index_files/libs/revealjs/plugin/reveal-menu/menu.css" rel="stylesheet">
-  <link href="index_files/libs/revealjs/plugin/reveal-menu/quarto-menu.css" rel="stylesheet">
-  <link href="index_files/libs/revealjs/plugin/quarto-support/footer.css" rel="stylesheet">
-  <style type="text/css">
-    .reveal div.sourceCode {
-      margin: 0;
-      overflow: auto;
-    }
-    .reveal div.hanging-indent {
-      margin-left: 1em;
-      text-indent: -1em;
-    }
-    .reveal .slide:not(.center) {
-      height: 100%;
-    }
-    .reveal .slide.scrollable {
-      overflow-y: auto;
-    }
-    .reveal .footnotes {
-      height: 100%;
-      overflow-y: auto;
-    }
-    .reveal .slide .absolute {
-      position: absolute;
-      display: block;
-    }
-    .reveal .footnotes ol {
-      counter-reset: ol;
-      list-style-type: none; 
-      margin-left: 0;
-    }
-    .reveal .footnotes ol li:before {
-      counter-increment: ol;
-      content: counter(ol) ". "; 
-    }
-    .reveal .footnotes ol li > p:first-child {
-      display: inline-block;
-    }
-    .reveal .slide ul,
-    .reveal .slide ol {
-      margin-bottom: 0.5em;
-    }
-    .reveal .slide ul li,
-    .reveal .slide ol li {
-      margin-top: 0.4em;
-      margin-bottom: 0.2em;
-    }
-    .reveal .slide ul[role="tablist"] li {
-      margin-bottom: 0;
-    }
-    .reveal .slide ul li > *:first-child,
-    .reveal .slide ol li > *:first-child {
-      margin-block-start: 0;
-    }
-    .reveal .slide ul li > *:last-child,
-    .reveal .slide ol li > *:last-child {
-      margin-block-end: 0;
-    }
-    .reveal .slide .columns:nth-child(3) {
-      margin-block-start: 0.8em;
-    }
-    .reveal blockquote {
-      box-shadow: none;
-    }
-    .reveal .tippy-content>* {
-      margin-top: 0.2em;
-      margin-bottom: 0.7em;
-    }
-    .reveal .tippy-content>*:last-child {
-      margin-bottom: 0.2em;
-    }
-    .reveal .slide > img.stretch.quarto-figure-center,
-    .reveal .slide > img.r-stretch.quarto-figure-center {
-      display: block;
-      margin-left: auto;
-      margin-right: auto; 
-    }
-    .reveal .slide > img.stretch.quarto-figure-left,
-    .reveal .slide > img.r-stretch.quarto-figure-left  {
-      display: block;
-      margin-left: 0;
-      margin-right: auto; 
-    }
-    .reveal .slide > img.stretch.quarto-figure-right,
-    .reveal .slide > img.r-stretch.quarto-figure-right  {
-      display: block;
-      margin-left: auto;
-      margin-right: 0; 
-    }
-  </style>
-  <script src="index_files/libs/quarto-diagram/mermaid.min.js"></script>
-  <script src="index_files/libs/quarto-diagram/mermaid-init.js"></script>
-  <link href="index_files/libs/quarto-diagram/mermaid.css" rel="stylesheet">
+
 </head>
+
 <body class="quarto-light">
-  <div class="reveal">
-    <div class="slides">
 
-<section id="title-slide" class="quarto-title-block center">
-  <h1 class="title">Trucktrack filter pipeline</h1>
-  <p class="subtitle">Cleaning and segmenting truck GPS traces</p>
+<div id="quarto-content" class="page-columns page-rows-contents page-layout-full">
 
-<div class="quarto-title-authors">
-<div class="quarto-title-author">
-<div class="quarto-title-author-name">
-Jesse Tweedle 
-</div>
-</div>
+<main class="content column-page" id="quarto-document-content">
+
+<header id="title-block-header" class="quarto-title-block default">
+<div class="quarto-title">
+<h1 class="title">Trucktrack filter pipeline</h1>
 </div>
 
-</section>
-<section>
-<section id="pipeline-overview" class="title-slide slide level1 center">
-<h1>Pipeline overview</h1>
 
-</section>
-<section id="the-problem" class="slide level2">
-<h2>The problem</h2>
-<p>Raw truck GPS streams arrive dirty:</p>
-<ul>
-<li>Devices re-emit buffered readings verbatim</li>
-<li>Bad fixes imply physically impossible motion</li>
-<li>Signal drops create ragged temporal gaps</li>
-<li>Long idles need to be separated from driving</li>
-<li>Some “stops” are actually traffic, not real stops</li>
-</ul>
-<p>The pipeline turns a noisy per-truck stream into clean, segmented trajectories.</p>
-</section>
-<section id="stage-order" class="slide level2">
-<h2>Stage order</h2>
-<div class="cell" data-reveal="true" data-layout-align="default">
-<div class="cell-output-display">
-<div>
-<p></p><figure class=""><p></p>
-<div>
-<pre class="mermaid mermaid-js">flowchart LR
-  A[raw pings] --&gt; B[filter_stale_pings]
-  B --&gt; C[filter_impossible_speeds]
-  C --&gt; D[split_by_observation_gap]
-  D --&gt; E[split_by_stops]
-  E --&gt; F[filter_traffic_stops]
-  F --&gt; G[clean segmented trajectories]
-</pre>
-</div>
-<p></p></figure><p></p>
-</div>
-</div>
-</div>
-<p>Each stage is per-truck and independent across trucks.</p>
-</section>
-<section id="what-each-stage-adds" class="slide level2">
-<h2>What each stage adds</h2>
-<table class="caption-top">
-<thead>
-<tr class="header">
-<th>Stage</th>
-<th>Drops rows</th>
-<th>Adds column</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td><code>filter_stale_pings</code></td>
-<td>yes</td>
-<td>—</td>
-</tr>
-<tr class="even">
-<td><code>filter_impossible_speeds</code></td>
-<td>yes</td>
-<td>—</td>
-</tr>
-<tr class="odd">
-<td><code>split_by_observation_gap</code></td>
-<td>(via <code>min_length</code>)</td>
-<td><code>segment_id</code></td>
-</tr>
-<tr class="even">
-<td><code>split_by_stops</code></td>
-<td>(via <code>min_length</code>)</td>
-<td><code>segment_id</code>, <code>is_stop</code></td>
-</tr>
-<tr class="odd">
-<td><code>filter_traffic_stops</code></td>
-<td>no</td>
-<td>(reclassifies <code>is_stop</code>)</td>
-</tr>
-</tbody>
-</table>
-</section>
-<section id="why-this-order" class="slide level2">
-<h2>Why this order</h2>
-<ul>
-<li><strong>Stale before speed</strong> — re-emissions have tiny <code>dt</code> against the real prior row; they’d look like huge speeds, and speed would drop them for the wrong reason.</li>
-<li><strong>Speed before gap</strong> — removing impossible points first keeps gap segments from being artificially fragmented.</li>
-<li><strong>Stop after gap</strong> — stops are detected inside a temporally continuous window; gaps break that assumption.</li>
-<li><strong>Traffic last</strong> — needs the <code>is_stop</code> labels that <code>split_by_stops</code> produces.</li>
-</ul>
-</section></section>
-<section>
-<section id="filter_stale_pings" class="title-slide slide level1 center">
-<h1><code>filter_stale_pings</code></h1>
 
-</section>
-<section id="what-why" class="slide level2">
-<h2>What / why</h2>
-<p>Some devices buffer readings and later re-emit an earlier record with only the timestamp advanced.</p>
-<p>A sequence like <code>T1 → T2 → T3</code> appears, where <code>T3</code> has the same <code>(lat, lon, speed, heading)</code> as <code>T1</code> but a later time.</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb1"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb1-1"><a href="" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> trucktrack</span>
-<span id="cb1-2"><a href="" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-3"><a href="" aria-hidden="true" tabindex="-1"></a>clean <span class="op">=</span> trucktrack.filter_stale_pings(df, window<span class="op">=</span><span class="dv">5</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<p>Per truck, each row is compared bit-exactly against the last <code>window</code> distinct rows; matches are dropped.</p>
-</section>
-<section id="bit-identical-re-emission" class="slide level2">
-<h2>Bit-identical re-emission</h2>
-<p><strong>Before</strong> — source (blue) and stale copy (red)</p>
-<div class="quarto-figure quarto-figure-center">
-<figure>
-<p><img data-src="figures/stale-before.png" class="nostretch quarto-figure quarto-figure-center" style="width:45.0%"></p>
-</figure>
-</div>
-<p><strong>After</strong> — stale row dropped</p>
-<div class="quarto-figure quarto-figure-center">
-<figure>
-<p><img data-src="figures/stale-after.png" class="nostretch quarto-figure quarto-figure-center" style="width:45.0%"></p>
-</figure>
-</div>
-</section>
-<section id="what-changed" class="slide level2">
-<h2>What changed</h2>
-<p>The 08:04:00 source and the 08:05:30 re-emission share <code>(lat, lon, speed, heading)</code> exactly. The intermediate 08:05:00 ping has different lat/lon, speed, and heading — that’s what a real subsequent observation looks like.</p>
-<p>The filter’s only job is removing the duplicate; the rest passes through untouched.</p>
-</section>
-<section id="what-the-map-matcher-sees" class="slide level2">
-<h2>What the map matcher sees</h2>
-<div style="text-align:center;">
-<p><strong>Before</strong> — matcher loops the block · <strong>After</strong> — straight northbound, no detour</p>
-</div>
-<div style="text-align:center;">
-<img src="figures/stale-map-before.png" style="display:inline-block; width:45%; vertical-align:top; margin-right:1%;">
-<img src="figures/stale-map-after.png" style="display:inline-block; width:45%; vertical-align:top; margin-left:1%;">
-</div>
-</section>
-<section id="why-the-detour" class="slide level2">
-<h2>Why the detour</h2>
-<p>The route runs through downtown Toronto on a divided one-way arterial. The raw trace forces the matcher to revisit the source position — but each carriageway is a separate one-way OSM way, so the matcher detours east, south on the opposite-direction street, then west to rejoin.</p>
-<p>With the stale row filtered out, the matcher routes straight northbound — no detour, no back-tracking.</p>
-</section>
-<section id="params-and-gotchas" class="slide level2">
-<h2>Params and gotchas</h2>
-<ul>
-<li><strong><code>window</code> tradeoff</strong> — too small misses re-emissions of older records; too large risks dropping legitimate revisits to a prior location.</li>
-<li><strong><code>speed == 0</code> exemption</strong> — a stopped truck legitimately emits many identical pings. Without this, a stationary row in the buffer would also spuriously flag a later <em>moving</em> ping that happens to pass through the same coords.</li>
-<li><strong>Partial match is kept</strong> — same lat/lon but different speed or heading is not a re-emission.</li>
-<li><strong>Nulls pass through</strong> — a null in any of the four compared fields never matches.</li>
-<li><strong>Trucks are independent</strong> — truck B’s fresh ping cannot match truck A’s buffer.</li>
-<li><strong>Time is not part of the match</strong> — only <code>(lat, lon, speed, heading)</code> is compared. The re-emission’s timestamp can be any value later than the source.</li>
-</ul>
-</section></section>
-<section>
-<section id="filter_impossible_speeds" class="title-slide slide level1 center">
-<h1><code>filter_impossible_speeds</code></h1>
+<div class="quarto-title-meta column-page">
 
-</section>
-<section id="what-why-1" class="slide level2">
-<h2>What / why</h2>
-<p>GPS glitches produce fixes that imply motion faster than any truck can move.</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb2"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb2-1"><a href="" aria-hidden="true" tabindex="-1"></a>clean <span class="op">=</span> trucktrack.filter_impossible_speeds(df, max_speed_kmh<span class="op">=</span><span class="fl">200.0</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<p>Per truck, sorted by <code>(id, time)</code>. For each row, compute Haversine distance and <code>dt</code> against the <strong>last kept point</strong> — not the previous row. If the implied speed exceeds the threshold, drop the row and hold the anchor.</p>
-<p>Threshold is on <em>computed</em> speed (distance ÷ time), not the device-reported <code>speed</code> column: glitched GPS often emits a self-consistently wrong reported speed.</p>
-</section>
-<section id="off-route-spike-on-401-westbound" class="slide level2">
-<h2>Off-route spike on 401 westbound</h2>
-<div style="text-align:center;">
-<p><strong>Before</strong> — spike 5.5 km north · <strong>After</strong> — dropped</p>
-</div>
-<div style="text-align:center;">
-<img src="figures/speed-before.png" style="display:inline-block; width:45%; vertical-align:top; margin-right:1%;">
-<img src="figures/speed-after.png" style="display:inline-block; width:45%; vertical-align:top; margin-left:1%;">
-</div>
-</section>
-<section id="why-the-detour-1" class="slide level2">
-<h2>Why the detour</h2>
-<p>Truck cruising westbound on Highway 401 at 60-second cadence. Ping 25 lands ~5.5 km north of the corridor — that’s ~330 km/h of implied motion from its predecessor, well past the 200 km/h ceiling.</p>
-<p>The matcher tries to honor the off-route fix and bends the route north to reach it. With the spike dropped, ping 26 is evaluated against ping 24 (the last kept anchor) and the route stays on 401.</p>
-</section>
-<section id="params-and-gotchas-1" class="slide level2">
-<h2>Params and gotchas</h2>
-<ul>
-<li><strong><code>max_speed_kmh</code></strong> — default 200. Converted internally to m/s.</li>
-<li><strong>Anchor held across drops</strong> — consecutive spikes collapse against the last clean fix; one bad point cannot drag subsequent evaluation with it.</li>
-<li><strong>First valid point per truck always kept</strong> — no prior anchor to compare against.</li>
-<li><strong>Nulls pass through without advancing the anchor</strong> — a null <code>lat</code>/<code>lon</code>/<code>time</code> can’t be evaluated, so the row survives and the next row still compares against the last clean fix.</li>
-<li><strong><code>dt == 0</code> is safe</strong> — duplicate timestamps do not divide by zero; the row is kept.</li>
-</ul>
-</section></section>
-<section>
-<section id="split_by_observation_gap" class="title-slide slide level1 center">
-<h1><code>split_by_observation_gap</code></h1>
-
-</section>
-<section id="what-why-2" class="slide level2">
-<h2>What / why</h2>
-<p>A trajectory is only physically meaningful within a window of continuous observation. Yard dwells with the device shut off, privacy toggles, coverage holes — any of these leave a large <code>dt</code> between two otherwise-unremarkable pings.</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb3"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb3-1"><a href="" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> datetime <span class="im">import</span> timedelta</span>
-<span id="cb3-2"><a href="" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-3"><a href="" aria-hidden="true" tabindex="-1"></a>segmented <span class="op">=</span> trucktrack.split_by_observation_gap(</span>
-<span id="cb3-4"><a href="" aria-hidden="true" tabindex="-1"></a>    df,</span>
-<span id="cb3-5"><a href="" aria-hidden="true" tabindex="-1"></a>    gap<span class="op">=</span>timedelta(minutes<span class="op">=</span><span class="dv">2</span>),</span>
-<span id="cb3-6"><a href="" aria-hidden="true" tabindex="-1"></a>    min_length<span class="op">=</span><span class="dv">0</span>,</span>
-<span id="cb3-7"><a href="" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<p>Per truck, start a new <code>segment_id</code> whenever the time delta to the previous row exceeds <code>gap</code>.</p>
-</section>
-<section id="five-rows-straddling-a-10-hour-shutoff" class="slide level2">
-<h2>Five rows straddling a 10-hour shutoff</h2>
-<p><strong>Before</strong> — moving truck, <code>dt</code> jumps to 36060 s</p>
-<div class="quarto-figure quarto-figure-center">
-<figure>
-<p><img data-src="figures/gap-before.png" class="nostretch quarto-figure quarto-figure-center" style="width:45.0%"></p>
-</figure>
-</div>
-<p><strong>After</strong> — <code>segment_id</code> splits at the gap</p>
-<div class="quarto-figure quarto-figure-center">
-<figure>
-<p><img data-src="figures/gap-after.png" class="nostretch quarto-figure quarto-figure-center" style="width:45.0%"></p>
-</figure>
-</div>
-</section>
-<section id="what-changed-1" class="slide level2">
-<h2>What changed</h2>
-<p>Truck cruising westbound at ~63 mph, heading around 256°. The device reports normally at 60-second cadence, goes dark for 10 hours, then resumes — further down the route, still moving. Every column looks like normal driving; only <code>dt</code> tells you anything happened. With a 2-minute threshold, the splitter inserts a new segment at the 36060-second row.</p>
-<p>This is what makes the gap distinct from a stop: the pings aren’t clustered, speeds aren’t zero, headings aren’t frozen. A stop detector would see nothing; the gap splitter reads <code>dt</code> and segments.</p>
-</section>
-<section id="what-the-matcher-sees" class="slide level2">
-<h2>What the matcher sees</h2>
-<div style="text-align:center;">
-<p><strong>Before</strong> — matcher invents a U-turn · <strong>After</strong> — split, two clean legs</p>
-</div>
-<div style="text-align:center;">
-<img src="figures/gap-map-before.png" style="display:inline-block; width:45%; vertical-align:top; margin-right:1%;">
-<img src="figures/gap-map-after.png" style="display:inline-block; width:45%; vertical-align:top; margin-left:1%;">
-</div>
-</section>
-<section id="why-the-u-turn" class="slide level2">
-<h2>Why the U-turn</h2>
-<p>A → near-B → A out-and-back trip. The device fell silent on the WB carriageway at the Hespeler Rd interchange and resumed 10 hours later on the EB carriageway, ~370 m away.</p>
-<p>Without splitting, the matcher has no clue this isn’t a continuous trip and invents a U-turn through the on/off ramps. Splitting first ends one trip at ping (2) and starts a new one at ping (3); both legs match cleanly along their own carriageway.</p>
-</section>
-<section id="params-and-gotchas-2" class="slide level2">
-<h2>Params and gotchas</h2>
-<ul>
-<li><strong><code>gap: timedelta</code></strong> — the only tuning knob for segmentation.</li>
-<li><strong><code>min_length</code></strong> — drops whole segments shorter than N rows. Set aggressively and the output can be empty; in the test suite, <code>min_length=20</code> on 15-row segments drops everything.</li>
-<li><strong>Tz-aware datetimes</strong> — handled identically to naive; no panic, same segment count.</li>
-<li><strong>Per-truck independence</strong> — vehicle A’s gaps cannot affect vehicle B’s segmentation.</li>
-<li><strong>Tiny thresholds fragment everything</strong> — a 1-second threshold on 30-second pings gives every row its own segment.</li>
-<li><strong>Space is irrelevant</strong> — the filter never looks at <code>lat</code> / <code>lon</code>. A truck that drove 500 km during a dropout and a truck that sat still are treated identically; only the time delta matters.</li>
-</ul>
-</section></section>
-<section>
-<section id="split_by_stops" class="title-slide slide level1 center">
-<h1><code>split_by_stops</code></h1>
-
-</section>
-<section id="what-why-3" class="slide level2">
-<h2>What / why</h2>
-<p>Trucks idle: loading docks, rest breaks, driver swaps. A “stop” is a window of pings that stays inside a small diameter for long enough.</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb4"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb4-1"><a href="" aria-hidden="true" tabindex="-1"></a>segmented <span class="op">=</span> trucktrack.split_by_stops(</span>
-<span id="cb4-2"><a href="" aria-hidden="true" tabindex="-1"></a>    df,</span>
-<span id="cb4-3"><a href="" aria-hidden="true" tabindex="-1"></a>    max_diameter<span class="op">=</span><span class="fl">50.0</span>,            <span class="co"># meters</span></span>
-<span id="cb4-4"><a href="" aria-hidden="true" tabindex="-1"></a>    min_duration<span class="op">=</span>timedelta(minutes<span class="op">=</span><span class="dv">2</span>),</span>
-<span id="cb4-5"><a href="" aria-hidden="true" tabindex="-1"></a>    min_length<span class="op">=</span><span class="dv">0</span>,</span>
-<span id="cb4-6"><a href="" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<p>Within a truck, find maximal windows where all pings fit inside <code>max_diameter</code> <em>and</em> span at least <code>min_duration</code>. Label them <code>is_stop = true</code>; label everything else as movement.</p>
-<p>Segments alternate movement → stop → movement.</p>
-</section>
-<section id="fuel-rest-at-a-401-service-area" class="slide level2">
-<h2>Fuel rest at a 401 service area</h2>
-<div style="text-align:center;">
-<p><strong>Before</strong> — pings stack on the Petro Canada lot · <strong>After</strong> — dwell flagged</p>
-</div>
-<div style="text-align:center;">
-<img src="figures/stop-before.png" style="display:inline-block; width:45%; vertical-align:top; margin-right:1%;">
-<img src="figures/stop-after.png" style="display:inline-block; width:45%; vertical-align:top; margin-left:1%;">
-</div>
-</section>
-<section id="what-the-detector-did" class="slide level2">
-<h2>What the detector did</h2>
-<p>Truck pulls off Highway 401 westbound at the Comber Petro Canada, parks for 15 minutes, then re-enters 401 westbound. The detector finds the cluster: 16 pings inside a 50 m diameter spanning ~15 minutes.</p>
-<p>One <code>segment_id</code> per phase (approach / dwell / departure), <code>is_stop</code> true on the middle segment. All rows preserved — rows are never dropped by the stop detector itself.</p>
-</section>
-<section id="params-and-gotchas-3" class="slide level2">
-<h2>Params and gotchas</h2>
-<ul>
-<li><strong><code>max_diameter</code> (m)</strong> — maximum spatial extent for a window to count as stopped.</li>
-<li><strong><code>min_duration</code></strong> — minimum temporal span. <em>Both</em> must hold simultaneously.</li>
-<li><strong><code>min_length</code> is asymmetric</strong> — drops short <em>movement</em> segments but <strong>keeps stop segments regardless</strong>. A 10-row movement segment vanishes at <code>min_length=15</code>; a 6-row stop survives.</li>
-<li><strong>Large diameter or duration → no stops</strong> — <code>max_diameter=100_000 m</code> with <code>min_duration=24 h</code> finds nothing in a normal day’s trace.</li>
-<li><strong>All rows preserved by default</strong> — useful for downstream filters (traffic) that need the original positions around each stop.</li>
-</ul>
-</section></section>
-<section>
-<section id="filter_traffic_stops" class="title-slide slide level1 center">
-<h1><code>filter_traffic_stops</code></h1>
-
-</section>
-<section id="what-why-4" class="slide level2">
-<h2>What / why</h2>
-<p>Not every detected stop is a real stop. Trucks also halt at red lights, in congestion, and behind queued traffic — all on the road corridor they were already following.</p>
-<div class="code-copy-outer-scaffold"><div class="sourceCode" id="cb5"><pre class="sourceCode python code-with-copy"><code class="sourceCode python"><span id="cb5-1"><a href="" aria-hidden="true" tabindex="-1"></a>cleaned <span class="op">=</span> trucktrack.filter_traffic_stops(</span>
-<span id="cb5-2"><a href="" aria-hidden="true" tabindex="-1"></a>    df,                           <span class="co"># output of split_by_stops</span></span>
-<span id="cb5-3"><a href="" aria-hidden="true" tabindex="-1"></a>    max_angle_change<span class="op">=</span><span class="fl">30.0</span>,        <span class="co"># degrees</span></span>
-<span id="cb5-4"><a href="" aria-hidden="true" tabindex="-1"></a>    min_distance<span class="op">=</span><span class="fl">10.0</span>,            <span class="co"># meters</span></span>
-<span id="cb5-5"><a href="" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<p>For each stop segment, compute the <strong>approach bearing</strong> (points before the stop) and the <strong>departure bearing</strong> (points after). If the angular change is below <code>max_angle_change</code>, the truck stayed on the same corridor — reclassify the stop as movement and merge segments.</p>
-</section>
-<section id="construction-halt-on-401-westbound" class="slide level2">
-<h2>Construction halt on 401 westbound</h2>
-<div style="text-align:center;">
-<p><strong>Before</strong> — blue leg / orange ring / orange leg · <strong>After</strong> — single continuous blue, no break</p>
-</div>
-<div style="text-align:center;">
-<img src="figures/traffic-before.png" style="display:inline-block; width:45%; vertical-align:top; margin-right:1%;">
-<img src="figures/traffic-after.png" style="display:inline-block; width:45%; vertical-align:top; margin-left:1%;">
-</div>
-</section>
-<section id="contrast-real-stop-preserved" class="slide level2">
-<h2>Contrast — real stop preserved</h2>
-<div class="columns">
-<div class="column" style="width:50%;">
-<p><img data-src="figures/traffic-real-stop.png" class=""></p>
-</div><div class="column" style="width:50%;">
-<p>The Comber Petro Canada dwell from the previous slide. Same shape (cluster of pings, &gt;2 min, &lt;50 m), but the truck approaches from 401 and leaves at a sharp angle onto the driveway. Bearing change ≈ 90°, above threshold. Stop survives.</p>
-</div></div>
-</section>
-<section id="params-and-gotchas-4" class="slide level2">
-<h2>Params and gotchas</h2>
-<ul>
-<li><strong>Requires <code>split_by_stops</code> output schema</strong> — expects <code>segment_id</code> and <code>is_stop</code>. Hard dependency.</li>
-<li><strong><code>max_angle_change</code> (degrees)</strong> — default 30. Lower = stricter (more stops kept); higher = more reclassification.</li>
-<li><strong><code>min_distance</code> (m)</strong> — minimum separation between point pairs used for bearing computation. Filters GPS jitter out of an otherwise noisy bearing signal.</li>
-<li><strong>Bearings from positions, not device <code>heading</code></strong> — device heading can freeze or lag; positions are ground truth.</li>
-<li><strong>Segment IDs are renumbered</strong> — after reclassification, IDs are sequential again, so downstream code doesn’t see gaps in the segment_id space.</li>
-</ul>
-
-</section></section>
+    <div>
+    <div class="quarto-title-meta-heading">Author</div>
+    <div class="quarto-title-meta-contents">
+             <p>Jesse Tweedle </p>
+          </div>
+  </div>
+    
+    <div>
+    <div class="quarto-title-meta-heading">Published</div>
+    <div class="quarto-title-meta-contents">
+      <p class="date">May 3, 2026</p>
     </div>
-  <div class="quarto-auto-generated-content" style="display: none;">
-<div class="footer footer-default">
-
-</div>
-</div></div>
-
-  <script>window.backupDefine = window.define; window.define = undefined;</script>
-  <script src="index_files/libs/revealjs/dist/reveal.js"></script>
-  <!-- reveal.js plugins -->
-  <script src="index_files/libs/revealjs/plugin/quarto-line-highlight/line-highlight.js"></script>
-  <script src="index_files/libs/revealjs/plugin/pdf-export/pdfexport.js"></script>
-  <script src="index_files/libs/revealjs/plugin/reveal-menu/menu.js"></script>
-  <script src="index_files/libs/revealjs/plugin/reveal-menu/quarto-menu.js"></script>
-  <script src="index_files/libs/revealjs/plugin/quarto-support/support.js"></script>
+  </div>
+  
+    
+  </div>
   
 
-  <script src="index_files/libs/revealjs/plugin/notes/notes.js"></script>
-  <script src="index_files/libs/revealjs/plugin/search/search.js"></script>
-  <script src="index_files/libs/revealjs/plugin/zoom/zoom.js"></script>
-  <script src="index_files/libs/revealjs/plugin/math/math.js"></script>
-  <script>window.define = window.backupDefine; window.backupDefine = undefined;</script>
 
-  <script>
+</header>
 
-      // Full list of configuration options available at:
-      // https://revealjs.com/config/
-      Reveal.initialize({
-'controlsAuto': true,
-'previewLinksAuto': false,
-'pdfSeparateFragments': false,
-'autoAnimateEasing': "ease",
-'autoAnimateDuration': 1,
-'autoAnimateUnmatched': true,
-'jumpToSlide': true,
-'pdfMaxPagesPerSlide': 1,
-'menu': {"side":"left","useTextContentForMissingTitles":true,"markers":false,"loadIcons":false,"custom":[{"title":"Tools","icon":"<i class=\"fas fa-gear\"></i>","content":"<ul class=\"slide-menu-items\">\n<li class=\"slide-tool-item active\" data-item=\"0\"><a href=\"#\" onclick=\"RevealMenuToolHandlers.fullscreen(event)\"><kbd>f</kbd> Fullscreen</a></li>\n<li class=\"slide-tool-item\" data-item=\"1\"><a href=\"#\" onclick=\"RevealMenuToolHandlers.speakerMode(event)\"><kbd>s</kbd> Speaker View</a></li>\n<li class=\"slide-tool-item\" data-item=\"2\"><a href=\"#\" onclick=\"RevealMenuToolHandlers.overview(event)\"><kbd>o</kbd> Slide Overview</a></li>\n<li class=\"slide-tool-item\" data-item=\"3\"><a href=\"#\" onclick=\"RevealMenuToolHandlers.togglePdfExport(event)\"><kbd>e</kbd> PDF Export Mode</a></li>\n<li class=\"slide-tool-item\" data-item=\"4\"><a href=\"#\" onclick=\"RevealMenuToolHandlers.toggleScrollView(event)\"><kbd>r</kbd> Scroll View Mode</a></li>\n<li class=\"slide-tool-item\" data-item=\"5\"><a href=\"#\" onclick=\"RevealMenuToolHandlers.keyboardHelp(event)\"><kbd>?</kbd> Keyboard Help</a></li>\n</ul>"}],"openButton":true},
-'smaller': false,
- 
-        // Display controls in the bottom right corner
-        controls: false,
 
-        // Help the user learn the controls by providing hints, for example by
-        // bouncing the down arrow when they first encounter a vertical slide
-        controlsTutorial: false,
+<div class="quarto-layout-panel" data-layout-ncol="2">
+<div class="quarto-layout-row">
+<div class="quarto-layout-cell" style="flex-basis: 50.0%;justify-content: flex-start;">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><a href="figures/stale-before.png" class="lightbox" data-gallery="filters" title="Stale ping"><img src="figures/stale-before.png" class="img-fluid figure-img" alt="Stale ping"></a></p>
+<figcaption>Stale ping</figcaption>
+</figure>
+</div>
+</div>
+<div class="quarto-layout-cell" style="flex-basis: 50.0%;justify-content: flex-start;">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><a href="figures/stale-after.png" class="lightbox" data-gallery="filters" title="Stale ping — filtered"><img src="figures/stale-after.png" class="img-fluid figure-img" alt="Stale ping — filtered"></a></p>
+<figcaption>Stale ping — filtered</figcaption>
+</figure>
+</div>
+</div>
+</div>
+<div class="quarto-layout-row">
+<div class="quarto-layout-cell" style="flex-basis: 50.0%;justify-content: flex-start;">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><a href="figures/stale-map-before.png" class="lightbox" data-gallery="filters" title="Stale ping — matcher detour"><img src="figures/stale-map-before.png" class="img-fluid figure-img" alt="Stale ping — matcher detour"></a></p>
+<figcaption>Stale ping — matcher detour</figcaption>
+</figure>
+</div>
+</div>
+<div class="quarto-layout-cell" style="flex-basis: 50.0%;justify-content: flex-start;">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><a href="figures/stale-map-after.png" class="lightbox" data-gallery="filters" title="Stale ping — clean route"><img src="figures/stale-map-after.png" class="img-fluid figure-img" alt="Stale ping — clean route"></a></p>
+<figcaption>Stale ping — clean route</figcaption>
+</figure>
+</div>
+</div>
+</div>
+<div class="quarto-layout-row">
+<div class="quarto-layout-cell" style="flex-basis: 50.0%;justify-content: flex-start;">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><a href="figures/speed-before.png" class="lightbox" data-gallery="filters" title="Impossible speed"><img src="figures/speed-before.png" class="img-fluid figure-img" alt="Impossible speed"></a></p>
+<figcaption>Impossible speed</figcaption>
+</figure>
+</div>
+</div>
+<div class="quarto-layout-cell" style="flex-basis: 50.0%;justify-content: flex-start;">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><a href="figures/speed-after.png" class="lightbox" data-gallery="filters" title="Impossible speed — filtered"><img src="figures/speed-after.png" class="img-fluid figure-img" alt="Impossible speed — filtered"></a></p>
+<figcaption>Impossible speed — filtered</figcaption>
+</figure>
+</div>
+</div>
+</div>
+<div class="quarto-layout-row">
+<div class="quarto-layout-cell" style="flex-basis: 50.0%;justify-content: flex-start;">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><a href="figures/gap-before.png" class="lightbox" data-gallery="filters" title="Observation gap"><img src="figures/gap-before.png" class="img-fluid figure-img" alt="Observation gap"></a></p>
+<figcaption>Observation gap</figcaption>
+</figure>
+</div>
+</div>
+<div class="quarto-layout-cell" style="flex-basis: 50.0%;justify-content: flex-start;">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><a href="figures/gap-after.png" class="lightbox" data-gallery="filters" title="Observation gap — split"><img src="figures/gap-after.png" class="img-fluid figure-img" alt="Observation gap — split"></a></p>
+<figcaption>Observation gap — split</figcaption>
+</figure>
+</div>
+</div>
+</div>
+<div class="quarto-layout-row">
+<div class="quarto-layout-cell" style="flex-basis: 50.0%;justify-content: flex-start;">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><a href="figures/gap-map-before.png" class="lightbox" data-gallery="filters" title="Observation gap — matcher loop"><img src="figures/gap-map-before.png" class="img-fluid figure-img" alt="Observation gap — matcher loop"></a></p>
+<figcaption>Observation gap — matcher loop</figcaption>
+</figure>
+</div>
+</div>
+<div class="quarto-layout-cell" style="flex-basis: 50.0%;justify-content: flex-start;">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><a href="figures/gap-map-after.png" class="lightbox" data-gallery="filters" title="Observation gap — clean route"><img src="figures/gap-map-after.png" class="img-fluid figure-img" alt="Observation gap — clean route"></a></p>
+<figcaption>Observation gap — clean route</figcaption>
+</figure>
+</div>
+</div>
+</div>
+<div class="quarto-layout-row">
+<div class="quarto-layout-cell" style="flex-basis: 50.0%;justify-content: flex-start;">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><a href="figures/stop-before.png" class="lightbox" data-gallery="filters" title="Stop (long idle)"><img src="figures/stop-before.png" class="img-fluid figure-img" alt="Stop (long idle)"></a></p>
+<figcaption>Stop (long idle)</figcaption>
+</figure>
+</div>
+</div>
+<div class="quarto-layout-cell" style="flex-basis: 50.0%;justify-content: flex-start;">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><a href="figures/stop-after.png" class="lightbox" data-gallery="filters" title="Stop — separated"><img src="figures/stop-after.png" class="img-fluid figure-img" alt="Stop — separated"></a></p>
+<figcaption>Stop — separated</figcaption>
+</figure>
+</div>
+</div>
+</div>
+<div class="quarto-layout-row">
+<div class="quarto-layout-cell" style="flex-basis: 50.0%;justify-content: flex-start;">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><a href="figures/traffic-before.png" class="lightbox" data-gallery="filters" title="Traffic jam (false stop)"><img src="figures/traffic-before.png" class="img-fluid figure-img" alt="Traffic jam (false stop)"></a></p>
+<figcaption>Traffic jam (false stop)</figcaption>
+</figure>
+</div>
+</div>
+<div class="quarto-layout-cell" style="flex-basis: 50.0%;justify-content: flex-start;">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><a href="figures/traffic-after.png" class="lightbox" data-gallery="filters" title="Traffic jam — reclassified"><img src="figures/traffic-after.png" class="img-fluid figure-img" alt="Traffic jam — reclassified"></a></p>
+<figcaption>Traffic jam — reclassified</figcaption>
+</figure>
+</div>
+</div>
+</div>
+<div class="quarto-layout-row">
+<div class="quarto-layout-cell" style="flex-basis: 50.0%;justify-content: flex-start;">
+<div class="quarto-figure quarto-figure-center">
+<figure class="figure">
+<p><a href="figures/traffic-real-stop.png" class="lightbox" data-gallery="filters" title="Real stop — preserved"><img src="figures/traffic-real-stop.png" class="img-fluid figure-img" alt="Real stop — preserved"></a></p>
+<figcaption>Real stop — preserved</figcaption>
+</figure>
+</div>
+</div>
+</div>
+</div>
 
-        // Determines where controls appear, "edges" or "bottom-right"
-        controlsLayout: 'edges',
-
-        // Visibility rule for backwards navigation arrows; "faded", "hidden"
-        // or "visible"
-        controlsBackArrows: 'faded',
-
-        // Display a presentation progress bar
-        progress: true,
-
-        // Display the page number of the current slide
-        slideNumber: 'c/t',
-
-        // 'all', 'print', or 'speaker'
-        showSlideNumber: 'all',
-
-        // Add the current slide number to the URL hash so that reloading the
-        // page/copying the URL will return you to the same slide
-        hash: true,
-
-        // Start with 1 for the hash rather than 0
-        hashOneBasedIndex: false,
-
-        // Flags if we should monitor the hash and change slides accordingly
-        respondToHashChanges: true,
-
-        // Push each slide change to the browser history
-        history: true,
-
-        // Enable keyboard shortcuts for navigation
-        keyboard: true,
-
-        // Enable the slide overview mode
-        overview: true,
-
-        // Disables the default reveal.js slide layout (scaling and centering)
-        // so that you can use custom CSS layout
-        disableLayout: false,
-
-        // Vertical centering of slides
-        center: false,
-
-        // Enables touch navigation on devices with touch input
-        touch: true,
-
-        // Loop the presentation
-        loop: false,
-
-        // Change the presentation direction to be RTL
-        rtl: false,
-
-        // see https://revealjs.com/vertical-slides/#navigation-mode
-        navigationMode: 'linear',
-
-        // Randomizes the order of slides each time the presentation loads
-        shuffle: false,
-
-        // Turns fragments on and off globally
-        fragments: true,
-
-        // Flags whether to include the current fragment in the URL,
-        // so that reloading brings you to the same fragment position
-        fragmentInURL: false,
-
-        // Flags if the presentation is running in an embedded mode,
-        // i.e. contained within a limited portion of the screen
-        embedded: false,
-
-        // Flags if we should show a help overlay when the questionmark
-        // key is pressed
-        help: true,
-
-        // Flags if it should be possible to pause the presentation (blackout)
-        pause: true,
-
-        // Flags if speaker notes should be visible to all viewers
-        showNotes: false,
-
-        // Global override for autoplaying embedded media (null/true/false)
-        autoPlayMedia: null,
-
-        // Global override for preloading lazy-loaded iframes (null/true/false)
-        preloadIframes: null,
-
-        // Number of milliseconds between automatically proceeding to the
-        // next slide, disabled when set to 0, this value can be overwritten
-        // by using a data-autoslide attribute on your slides
-        autoSlide: 0,
-
-        // Stop auto-sliding after user input
-        autoSlideStoppable: true,
-
-        // Use this method for navigation when auto-sliding
-        autoSlideMethod: null,
-
-        // Specify the average time in seconds that you think you will spend
-        // presenting each slide. This is used to show a pacing timer in the
-        // speaker view
-        defaultTiming: null,
-
-        // Enable slide navigation via mouse wheel
-        mouseWheel: false,
-
-        // The display mode that will be used to show slides
-        display: 'block',
-
-        // Hide cursor if inactive
-        hideInactiveCursor: true,
-
-        // Time before the cursor is hidden (in ms)
-        hideCursorTime: 5000,
-
-        // Opens links in an iframe preview overlay
-        previewLinks: false,
-
-        // Transition style (none/fade/slide/convex/concave/zoom)
-        transition: 'none',
-
-        // Transition speed (default/fast/slow)
-        transitionSpeed: 'default',
-
-        // Transition style for full page slide backgrounds
-        // (none/fade/slide/convex/concave/zoom)
-        backgroundTransition: 'none',
-
-        // Number of slides away from the current that are visible
-        viewDistance: 3,
-
-        // Number of slides away from the current that are visible on mobile
-        // devices. It is advisable to set this to a lower number than
-        // viewDistance in order to save resources.
-        mobileViewDistance: 2,
-
-        // The "normal" size of the presentation, aspect ratio will be preserved
-        // when the presentation is scaled to fit different resolutions. Can be
-        // specified using percentage units.
-        width: 1280,
-
-        height: 720,
-
-        // Factor of the display size that should remain empty around the content
-        margin: 0.1,
-
-        math: {
-          mathjax: 'https://cdn.jsdelivr.net/npm/mathjax@2.7.9/MathJax.js',
-          config: 'TeX-AMS_HTML-full',
-          tex2jax: {
-            inlineMath: [['\\(','\\)']],
-            displayMath: [['\\[','\\]']],
-            balanceBraces: true,
-            processEscapes: false,
-            processRefs: true,
-            processEnvironments: true,
-            preview: 'TeX',
-            skipTags: ['script','noscript','style','textarea','pre','code'],
-            ignoreClass: 'tex2jax_ignore',
-            processClass: 'tex2jax_process'
-          },
-        },
-
-        // reveal.js plugins
-        plugins: [QuartoLineHighlight, PdfExport, RevealMenu, QuartoSupport,
-
-          RevealMath,
-          RevealNotes,
-          RevealSearch,
-          RevealZoom
-        ]
+</main>
+<!-- /main column -->
+<script id="quarto-html-after-body" type="application/javascript">
+  window.document.addEventListener("DOMContentLoaded", function (event) {
+    const icon = "";
+    const anchorJS = new window.AnchorJS();
+    anchorJS.options = {
+      placement: 'right',
+      icon: icon
+    };
+    anchorJS.add('.anchored');
+    const isCodeAnnotation = (el) => {
+      for (const clz of el.classList) {
+        if (clz.startsWith('code-annotation-')) {                     
+          return true;
+        }
+      }
+      return false;
+    }
+    const onCopySuccess = function(e) {
+      // button target
+      const button = e.trigger;
+      // don't keep focus
+      button.blur();
+      // flash "checked"
+      button.classList.add('code-copy-button-checked');
+      var currentTitle = button.getAttribute("title");
+      button.setAttribute("title", "Copied!");
+      let tooltip;
+      if (window.bootstrap) {
+        button.setAttribute("data-bs-toggle", "tooltip");
+        button.setAttribute("data-bs-placement", "left");
+        button.setAttribute("data-bs-title", "Copied!");
+        tooltip = new bootstrap.Tooltip(button, 
+          { trigger: "manual", 
+            customClass: "code-copy-button-tooltip",
+            offset: [0, -8]});
+        tooltip.show();    
+      }
+      setTimeout(function() {
+        if (tooltip) {
+          tooltip.hide();
+          button.removeAttribute("data-bs-title");
+          button.removeAttribute("data-bs-toggle");
+          button.removeAttribute("data-bs-placement");
+        }
+        button.setAttribute("title", currentTitle);
+        button.classList.remove('code-copy-button-checked');
+      }, 1000);
+      // clear code selection
+      e.clearSelection();
+    }
+    const getTextToCopy = function(trigger) {
+      const outerScaffold = trigger.parentElement.cloneNode(true);
+      const codeEl = outerScaffold.querySelector('code');
+      for (const childEl of codeEl.children) {
+        if (isCodeAnnotation(childEl)) {
+          childEl.remove();
+        }
+      }
+      return codeEl.innerText;
+    }
+    const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
+      text: getTextToCopy
+    });
+    clipboard.on('success', onCopySuccess);
+    if (window.document.getElementById('quarto-embedded-source-code-modal')) {
+      const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
+        text: getTextToCopy,
+        container: window.document.getElementById('quarto-embedded-source-code-modal')
       });
-    </script>
-    <script id="quarto-html-after-body" type="application/javascript">
-      window.document.addEventListener("DOMContentLoaded", function (event) {
-        const tabsets =  window.document.querySelectorAll(".panel-tabset-tabby")
-        tabsets.forEach(function(tabset) {
-          const tabby = new Tabby('#' + tabset.id);
-        });
-        const isCodeAnnotation = (el) => {
-          for (const clz of el.classList) {
-            if (clz.startsWith('code-annotation-')) {                     
-              return true;
-            }
+      clipboardModal.on('success', onCopySuccess);
+    }
+      var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
+      var mailtoRegex = new RegExp(/^mailto:/);
+        var filterRegex = new RegExp('/' + window.location.host + '/');
+      var isInternal = (href) => {
+          return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
+      }
+      // Inspect non-navigation links and adorn them if external
+     var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
+      for (var i=0; i<links.length; i++) {
+        const link = links[i];
+        if (!isInternal(link.href)) {
+          // undo the damage that might have been done by quarto-nav.js in the case of
+          // links that we want to consider external
+          if (link.dataset.originalHref !== undefined) {
+            link.href = link.dataset.originalHref;
           }
-          return false;
         }
-        const onCopySuccess = function(e) {
-          // button target
-          const button = e.trigger;
-          // don't keep focus
-          button.blur();
-          // flash "checked"
-          button.classList.add('code-copy-button-checked');
-          var currentTitle = button.getAttribute("title");
-          button.setAttribute("title", "Copied!");
-          let tooltip;
-          if (window.bootstrap) {
-            button.setAttribute("data-bs-toggle", "tooltip");
-            button.setAttribute("data-bs-placement", "left");
-            button.setAttribute("data-bs-title", "Copied!");
-            tooltip = new bootstrap.Tooltip(button, 
-              { trigger: "manual", 
-                customClass: "code-copy-button-tooltip",
-                offset: [0, -8]});
-            tooltip.show();    
-          }
-          setTimeout(function() {
-            if (tooltip) {
-              tooltip.hide();
-              button.removeAttribute("data-bs-title");
-              button.removeAttribute("data-bs-toggle");
-              button.removeAttribute("data-bs-placement");
-            }
-            button.setAttribute("title", currentTitle);
-            button.classList.remove('code-copy-button-checked');
-          }, 1000);
-          // clear code selection
-          e.clearSelection();
+      }
+    function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
+      const config = {
+        allowHTML: true,
+        maxWidth: 500,
+        delay: 100,
+        arrow: false,
+        appendTo: function(el) {
+            return el.parentElement;
+        },
+        interactive: true,
+        interactiveBorder: 10,
+        theme: 'quarto',
+        placement: 'bottom-start',
+      };
+      if (contentFn) {
+        config.content = contentFn;
+      }
+      if (onTriggerFn) {
+        config.onTrigger = onTriggerFn;
+      }
+      if (onUntriggerFn) {
+        config.onUntrigger = onUntriggerFn;
+      }
+      window.tippy(el, config); 
+    }
+    const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
+    for (var i=0; i<noterefs.length; i++) {
+      const ref = noterefs[i];
+      tippyHover(ref, function() {
+        // use id or data attribute instead here
+        let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
+        try { href = new URL(href).hash; } catch {}
+        const id = href.replace(/^#\/?/, "");
+        const note = window.document.getElementById(id);
+        if (note) {
+          return note.innerHTML;
+        } else {
+          return "";
         }
-        const getTextToCopy = function(trigger) {
-          const outerScaffold = trigger.parentElement.cloneNode(true);
-          const codeEl = outerScaffold.querySelector('code');
-          for (const childEl of codeEl.children) {
-            if (isCodeAnnotation(childEl)) {
-              childEl.remove();
-            }
+      });
+    }
+    const xrefs = window.document.querySelectorAll('a.quarto-xref');
+    const processXRef = (id, note) => {
+      // Strip column container classes
+      const stripColumnClz = (el) => {
+        el.classList.remove("page-full", "page-columns");
+        if (el.children) {
+          for (const child of el.children) {
+            stripColumnClz(child);
           }
-          return codeEl.innerText;
         }
-        const clipboard = new window.ClipboardJS('.code-copy-button:not([data-in-quarto-modal])', {
-          text: getTextToCopy
-        });
-        clipboard.on('success', onCopySuccess);
-        if (window.document.getElementById('quarto-embedded-source-code-modal')) {
-          const clipboardModal = new window.ClipboardJS('.code-copy-button[data-in-quarto-modal]', {
-            text: getTextToCopy,
-            container: window.document.getElementById('quarto-embedded-source-code-modal')
-          });
-          clipboardModal.on('success', onCopySuccess);
-        }
-          var localhostRegex = new RegExp(/^(?:http|https):\/\/localhost\:?[0-9]*\//);
-          var mailtoRegex = new RegExp(/^mailto:/);
-            var filterRegex = new RegExp('/' + window.location.host + '/');
-          var isInternal = (href) => {
-              return filterRegex.test(href) || localhostRegex.test(href) || mailtoRegex.test(href);
-          }
-          // Inspect non-navigation links and adorn them if external
-         var links = window.document.querySelectorAll('a[href]:not(.nav-link):not(.navbar-brand):not(.toc-action):not(.sidebar-link):not(.sidebar-item-toggle):not(.pagination-link):not(.no-external):not([aria-hidden]):not(.dropdown-item):not(.quarto-navigation-tool):not(.about-link)');
-          for (var i=0; i<links.length; i++) {
-            const link = links[i];
-            if (!isInternal(link.href)) {
-              // undo the damage that might have been done by quarto-nav.js in the case of
-              // links that we want to consider external
-              if (link.dataset.originalHref !== undefined) {
-                link.href = link.dataset.originalHref;
-              }
-            }
-          }
-        function tippyHover(el, contentFn, onTriggerFn, onUntriggerFn) {
-          const config = {
-            allowHTML: true,
-            maxWidth: 500,
-            delay: 100,
-            arrow: false,
-            appendTo: function(el) {
-                return el.closest('section.slide') || el.parentElement;
-            },
-            interactive: true,
-            interactiveBorder: 10,
-            theme: 'light-border',
-            placement: 'bottom-start',
-          };
-          if (contentFn) {
-            config.content = contentFn;
-          }
-          if (onTriggerFn) {
-            config.onTrigger = onTriggerFn;
-          }
-          if (onUntriggerFn) {
-            config.onUntrigger = onUntriggerFn;
-          }
-            config['offset'] = [0,0];
-            config['maxWidth'] = 700;
-          window.tippy(el, config); 
-        }
-        const noterefs = window.document.querySelectorAll('a[role="doc-noteref"]');
-        for (var i=0; i<noterefs.length; i++) {
-          const ref = noterefs[i];
-          tippyHover(ref, function() {
-            // use id or data attribute instead here
-            let href = ref.getAttribute('data-footnote-href') || ref.getAttribute('href');
-            try { href = new URL(href).hash; } catch {}
-            const id = href.replace(/^#\/?/, "");
-            const note = window.document.getElementById(id);
-            if (note) {
-              return note.innerHTML;
+      }
+      stripColumnClz(note)
+      if (id === null || id.startsWith('sec-')) {
+        // Special case sections, only their first couple elements
+        const container = document.createElement("div");
+        if (note.children && note.children.length > 2) {
+          container.appendChild(note.children[0].cloneNode(true));
+          for (let i = 1; i < note.children.length; i++) {
+            const child = note.children[i];
+            if (child.tagName === "P" && child.innerText === "") {
+              continue;
             } else {
-              return "";
+              container.appendChild(child.cloneNode(true));
+              break;
             }
-          });
+          }
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(container);
+          }
+          return container.innerHTML
+        } else {
+          if (window.Quarto?.typesetMath) {
+            window.Quarto.typesetMath(note);
+          }
+          return note.innerHTML;
         }
-        const findCites = (el) => {
-          const parentEl = el.parentElement;
-          if (parentEl) {
-            const cites = parentEl.dataset.cites;
-            if (cites) {
-              return {
-                el,
-                cites: cites.split(' ')
-              };
-            } else {
-              return findCites(el.parentElement)
+      } else {
+        // Remove any anchor links if they are present
+        const anchorLink = note.querySelector('a.anchorjs-link');
+        if (anchorLink) {
+          anchorLink.remove();
+        }
+        if (window.Quarto?.typesetMath) {
+          window.Quarto.typesetMath(note);
+        }
+        if (note.classList.contains("callout")) {
+          return note.outerHTML;
+        } else {
+          return note.innerHTML;
+        }
+      }
+    }
+    for (var i=0; i<xrefs.length; i++) {
+      const xref = xrefs[i];
+      tippyHover(xref, undefined, function(instance) {
+        instance.disable();
+        let url = xref.getAttribute('href');
+        let hash = undefined; 
+        if (url.startsWith('#')) {
+          hash = url;
+        } else {
+          try { hash = new URL(url).hash; } catch {}
+        }
+        if (hash) {
+          const id = hash.replace(/^#\/?/, "");
+          const note = window.document.getElementById(id);
+          if (note !== null) {
+            try {
+              const html = processXRef(id, note.cloneNode(true));
+              instance.setContent(html);
+            } finally {
+              instance.enable();
+              instance.show();
             }
           } else {
-            return undefined;
-          }
-        };
-        var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
-        for (var i=0; i<bibliorefs.length; i++) {
-          const ref = bibliorefs[i];
-          const citeInfo = findCites(ref);
-          if (citeInfo) {
-            tippyHover(citeInfo.el, function() {
-              var popup = window.document.createElement('div');
-              citeInfo.cites.forEach(function(cite) {
-                var citeDiv = window.document.createElement('div');
-                citeDiv.classList.add('hanging-indent');
-                citeDiv.classList.add('csl-entry');
-                var biblioDiv = window.document.getElementById('ref-' + cite);
-                if (biblioDiv) {
-                  citeDiv.innerHTML = biblioDiv.innerHTML;
-                }
-                popup.appendChild(citeDiv);
-              });
-              return popup.innerHTML;
+            // See if we can fetch this
+            fetch(url.split('#')[0])
+            .then(res => res.text())
+            .then(html => {
+              const parser = new DOMParser();
+              const htmlDoc = parser.parseFromString(html, "text/html");
+              const note = htmlDoc.getElementById(id);
+              if (note !== null) {
+                const html = processXRef(id, note);
+                instance.setContent(html);
+              } 
+            }).finally(() => {
+              instance.enable();
+              instance.show();
             });
           }
+        } else {
+          // See if we can fetch a full url (with no hash to target)
+          // This is a special case and we should probably do some content thinning / targeting
+          fetch(url)
+          .then(res => res.text())
+          .then(html => {
+            const parser = new DOMParser();
+            const htmlDoc = parser.parseFromString(html, "text/html");
+            const note = htmlDoc.querySelector('main.content');
+            if (note !== null) {
+              // This should only happen for chapter cross references
+              // (since there is no id in the URL)
+              // remove the first header
+              if (note.children.length > 0 && note.children[0].tagName === "HEADER") {
+                note.children[0].remove();
+              }
+              const html = processXRef(null, note);
+              instance.setContent(html);
+            } 
+          }).finally(() => {
+            instance.enable();
+            instance.show();
+          });
         }
+      }, function(instance) {
       });
-      </script>
-    
+    }
+        let selectedAnnoteEl;
+        const selectorForAnnotation = ( cell, annotation) => {
+          let cellAttr = 'data-code-cell="' + cell + '"';
+          let lineAttr = 'data-code-annotation="' +  annotation + '"';
+          const selector = 'span[' + cellAttr + '][' + lineAttr + ']';
+          return selector;
+        }
+        const selectCodeLines = (annoteEl) => {
+          const doc = window.document;
+          const targetCell = annoteEl.getAttribute("data-target-cell");
+          const targetAnnotation = annoteEl.getAttribute("data-target-annotation");
+          const annoteSpan = window.document.querySelector(selectorForAnnotation(targetCell, targetAnnotation));
+          const lines = annoteSpan.getAttribute("data-code-lines").split(",");
+          const lineIds = lines.map((line) => {
+            return targetCell + "-" + line;
+          })
+          let top = null;
+          let height = null;
+          let parent = null;
+          if (lineIds.length > 0) {
+              //compute the position of the single el (top and bottom and make a div)
+              const el = window.document.getElementById(lineIds[0]);
+              top = el.offsetTop;
+              height = el.offsetHeight;
+              parent = el.parentElement.parentElement;
+            if (lineIds.length > 1) {
+              const lastEl = window.document.getElementById(lineIds[lineIds.length - 1]);
+              const bottom = lastEl.offsetTop + lastEl.offsetHeight;
+              height = bottom - top;
+            }
+            if (top !== null && height !== null && parent !== null) {
+              // cook up a div (if necessary) and position it 
+              let div = window.document.getElementById("code-annotation-line-highlight");
+              if (div === null) {
+                div = window.document.createElement("div");
+                div.setAttribute("id", "code-annotation-line-highlight");
+                div.style.position = 'absolute';
+                parent.appendChild(div);
+              }
+              div.style.top = top - 2 + "px";
+              div.style.height = height + 4 + "px";
+              div.style.left = 0;
+              let gutterDiv = window.document.getElementById("code-annotation-line-highlight-gutter");
+              if (gutterDiv === null) {
+                gutterDiv = window.document.createElement("div");
+                gutterDiv.setAttribute("id", "code-annotation-line-highlight-gutter");
+                gutterDiv.style.position = 'absolute';
+                const codeCell = window.document.getElementById(targetCell);
+                const gutter = codeCell.querySelector('.code-annotation-gutter');
+                gutter.appendChild(gutterDiv);
+              }
+              gutterDiv.style.top = top - 2 + "px";
+              gutterDiv.style.height = height + 4 + "px";
+            }
+            selectedAnnoteEl = annoteEl;
+          }
+        };
+        const unselectCodeLines = () => {
+          const elementsIds = ["code-annotation-line-highlight", "code-annotation-line-highlight-gutter"];
+          elementsIds.forEach((elId) => {
+            const div = window.document.getElementById(elId);
+            if (div) {
+              div.remove();
+            }
+          });
+          selectedAnnoteEl = undefined;
+        };
+          // Handle positioning of the toggle
+      window.addEventListener(
+        "resize",
+        throttle(() => {
+          elRect = undefined;
+          if (selectedAnnoteEl) {
+            selectCodeLines(selectedAnnoteEl);
+          }
+        }, 10)
+      );
+      function throttle(fn, ms) {
+      let throttle = false;
+      let timer;
+        return (...args) => {
+          if(!throttle) { // first call gets through
+              fn.apply(this, args);
+              throttle = true;
+          } else { // all the others get throttled
+              if(timer) clearTimeout(timer); // cancel #2
+              timer = setTimeout(() => {
+                fn.apply(this, args);
+                timer = throttle = false;
+              }, ms);
+          }
+        };
+      }
+        // Attach click handler to the DT
+        const annoteDls = window.document.querySelectorAll('dt[data-target-cell]');
+        for (const annoteDlNode of annoteDls) {
+          annoteDlNode.addEventListener('click', (event) => {
+            const clickedEl = event.target;
+            if (clickedEl !== selectedAnnoteEl) {
+              unselectCodeLines();
+              const activeEl = window.document.querySelector('dt[data-target-cell].code-annotation-active');
+              if (activeEl) {
+                activeEl.classList.remove('code-annotation-active');
+              }
+              selectCodeLines(clickedEl);
+              clickedEl.classList.add('code-annotation-active');
+            } else {
+              // Unselect the line
+              unselectCodeLines();
+              clickedEl.classList.remove('code-annotation-active');
+            }
+          });
+        }
+    const findCites = (el) => {
+      const parentEl = el.parentElement;
+      if (parentEl) {
+        const cites = parentEl.dataset.cites;
+        if (cites) {
+          return {
+            el,
+            cites: cites.split(' ')
+          };
+        } else {
+          return findCites(el.parentElement)
+        }
+      } else {
+        return undefined;
+      }
+    };
+    var bibliorefs = window.document.querySelectorAll('a[role="doc-biblioref"]');
+    for (var i=0; i<bibliorefs.length; i++) {
+      const ref = bibliorefs[i];
+      const citeInfo = findCites(ref);
+      if (citeInfo) {
+        tippyHover(citeInfo.el, function() {
+          var popup = window.document.createElement('div');
+          citeInfo.cites.forEach(function(cite) {
+            var citeDiv = window.document.createElement('div');
+            citeDiv.classList.add('hanging-indent');
+            citeDiv.classList.add('csl-entry');
+            var biblioDiv = window.document.getElementById('ref-' + cite);
+            if (biblioDiv) {
+              citeDiv.innerHTML = biblioDiv.innerHTML;
+            }
+            popup.appendChild(citeDiv);
+          });
+          return popup.innerHTML;
+        });
+      }
+    }
+  });
+  </script>
+</div> <!-- /content -->
+<script>var lightboxQuarto = GLightbox({"closeEffect":"zoom","descPosition":"bottom","loop":false,"openEffect":"zoom","selector":".lightbox"});
+(function() {
+  let previousOnload = window.onload;
+  window.onload = () => {
+    if (previousOnload) {
+      previousOnload();
+    }
+    lightboxQuarto.on('slide_before_load', (data) => {
+      const { slideIndex, slideNode, slideConfig, player, trigger } = data;
+      const href = trigger.getAttribute('href');
+      if (href !== null) {
+        const imgEl = window.document.querySelector(`a[href="${href}"] img`);
+        if (imgEl !== null) {
+          const srcAttr = imgEl.getAttribute("src");
+          if (srcAttr && srcAttr.startsWith("data:")) {
+            slideConfig.href = srcAttr;
+          }
+        }
+      } 
+    });
+  
+    lightboxQuarto.on('slide_after_load', (data) => {
+      const { slideIndex, slideNode, slideConfig, player, trigger } = data;
+      if (window.Quarto?.typesetMath) {
+        window.Quarto.typesetMath(slideNode);
+      }
+    });
+  
+  };
+  
+})();
+          </script>
+
+
+
 
 </body></html>

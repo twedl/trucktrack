@@ -1,17 +1,43 @@
 ---
 title: "Trucktrack filter pipeline"
-subtitle: "Cleaning and segmenting truck GPS traces"
 author: "Jesse Tweedle"
+date: today
+format:
+  html:
+    theme: cosmo
+    page-layout: full
+    toc: false
+lightbox: auto
 ---
 
-{{< include 00-pipeline.qmd >}}
+::: {layout-ncol=2}
+![Stale ping](figures/stale-before.png){group="filters"}
 
-{{< include 01-stale.qmd >}}
+![Stale ping — filtered](figures/stale-after.png){group="filters"}
 
-{{< include 02-speed.qmd >}}
+![Stale ping — matcher detour](figures/stale-map-before.png){group="filters"}
 
-{{< include 03-gap.qmd >}}
+![Stale ping — clean route](figures/stale-map-after.png){group="filters"}
 
-{{< include 04-stop.qmd >}}
+![Impossible speed](figures/speed-before.png){group="filters"}
 
-{{< include 05-traffic.qmd >}}
+![Impossible speed — filtered](figures/speed-after.png){group="filters"}
+
+![Observation gap](figures/gap-before.png){group="filters"}
+
+![Observation gap — split](figures/gap-after.png){group="filters"}
+
+![Observation gap — matcher loop](figures/gap-map-before.png){group="filters"}
+
+![Observation gap — clean route](figures/gap-map-after.png){group="filters"}
+
+![Stop (long idle)](figures/stop-before.png){group="filters"}
+
+![Stop — separated](figures/stop-after.png){group="filters"}
+
+![Traffic jam (false stop)](figures/traffic-before.png){group="filters"}
+
+![Traffic jam — reclassified](figures/traffic-after.png){group="filters"}
+
+![Real stop — preserved](figures/traffic-real-stop.png){group="filters"}
+:::

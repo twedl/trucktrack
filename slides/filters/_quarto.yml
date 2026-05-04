@@ -3,16 +3,3 @@ project:
   output-dir: ../../docs/filters
   render:
     - index.qmd
-
-format:
-  revealjs:
-    theme: white
-    slide-number: true
-    embed-resources: false
-    incremental: false
-    code-line-numbers: false
-    width: 1280
-    height: 720
-    pdf-max-pages-per-slide: 1
-    auto-stretch: false
-    css: custom.css

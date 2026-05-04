@@ -1,15 +1,31 @@
 ---
 title: "Trucktrack on Valhalla"
-subtitle: "Tiles, partitioning, and map-matching"
 author: "Jesse Tweedle"
+date: today
+format:
+  html:
+    theme: cosmo
+    page-layout: full
+    toc: false
+lightbox: auto
 ---
 
-{{< include 00-overview.qmd >}}
+::: {layout-ncol=2}
+![Tile hierarchy](figures/hierarchy-grid.png){group="valhalla"}
 
-{{< include 01-tiles.qmd >}}
+![Tile zoom](figures/tile-zoom.png){group="valhalla"}
 
-{{< include 02-partition.qmd >}}
+![Trip footprint over tiles](figures/trip-footprint.png){group="valhalla"}
 
-{{< include 03-mapmatch.qmd >}}
+![Tier classification](figures/tier-classification.png){group="valhalla"}
 
-{{< include 04-bridge.qmd >}}
+![Partition cells](figures/partition-cells.png){group="valhalla"}
+
+![Hilbert ordering](figures/hilbert-locality.png){group="valhalla"}
+
+![Clean trace](figures/bridge-clean.png){group="valhalla"}
+
+![Gappy trace, no bridge](figures/bridge-no-bridge.png){group="valhalla"}
+
+![Gappy trace, bridged](figures/bridge-with-bridge.png){group="valhalla"}
+:::
