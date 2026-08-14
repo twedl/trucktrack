@@ -32,8 +32,10 @@ from typing import Any
 
 import polars as pl
 
+from trucktrack.pipeline import IMPOSSIBLE_SPEED_KMH, MIN_SEGMENT_LENGTH
 from trucktrack.query import ChunkIndex, scan_raw_truck
 from trucktrack.splitters import (
+    filter_impossible_speeds,
     filter_stale_pings,
     filter_traffic_stops,
     split_by_observation_gap,
@@ -142,13 +144,15 @@ def split_trips(
     stop_min_duration: timedelta,
     traffic_max_angle_change: float | None = 30.0,
     traffic_min_distance: float = 10.0,
-    min_length: int = 3,
+    min_length: int = MIN_SEGMENT_LENGTH,
     stale_window: int | None = 5,
+    impossible_speed_kmh: float | None = IMPOSSIBLE_SPEED_KMH,
 ) -> pl.DataFrame:
-    """Apply stale-ping, gap, stop, and (optionally) traffic filters.
+    """Apply stale-ping, impossible-speed, gap, stop, and (optionally) traffic filters.
 
-    Mirrors the pipeline's per-chunk processing so inspect results match
-    what ``run_pipeline`` produces for the same input.
+    Mirrors the pipeline's per-chunk processing (same filters, same
+    order) so inspect results match what ``run_pipeline`` produces for
+    the same input.
 
     Returns the input rows annotated with ``gap_segment_id``,
     ``segment_id`` and ``is_stop``.  ``segment_id`` is a composite ID
@@ -159,10 +163,13 @@ def split_trips(
 
     Pass ``traffic_max_angle_change=None`` to skip the traffic filter
     (useful for with/without comparisons).  Pass ``stale_window=None``
-    to skip the stale-ping filter.
+    to skip the stale-ping filter, or ``impossible_speed_kmh=None`` to
+    skip the impossible-speed filter.
     """
     if stale_window is not None:
         df = filter_stale_pings(df, window=stale_window)
+    if impossible_speed_kmh is not None:
+        df = filter_impossible_speeds(df, max_speed_kmh=impossible_speed_kmh)
     gapped = split_by_observation_gap(df, gap, min_length=min_length)
     # Preserve gap-split boundaries through the stop split, which would
     # otherwise overwrite ``segment_id`` with its own stop-transition ids.
