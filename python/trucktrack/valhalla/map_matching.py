@@ -171,6 +171,99 @@ def _parse_way_ids(resp: dict[str, Any]) -> list[int]:
     return ways
 
 
+# trace_attributes keys behind the per-fix match columns (plus edge.way_id).
+FIX_MATCH_ATTRIBUTES: tuple[str, ...] = (
+    "edge.way_id",
+    "edge.id",
+    "edge.begin_heading",
+    "edge.end_heading",
+    "matched.type",
+    "matched.edge_index",
+    "matched.distance_along_edge",
+    "matched.distance_from_trace_point",
+)
+
+FIX_MATCH_SCHEMA: dict[str, type[pl.DataType]] = {
+    "edge_id": pl.UInt64,
+    "way_id": pl.Int64,
+    "distance_along_edge": pl.Float64,
+    "match_type": pl.Utf8,
+    "distance_from_trace": pl.Float64,
+    "begin_heading": pl.Float64,
+    "end_heading": pl.Float64,
+}
+
+# Column name -> one value per input point, in FIX_MATCH_SCHEMA order.
+FixMatches = dict[str, list[Any]]
+
+
+def null_fix_matches(n: int) -> FixMatches:
+    """Per-fix match columns for *n* points that weren't matched."""
+    return {col: [None] * n for col in FIX_MATCH_SCHEMA}
+
+
+def _edge_indices(matched: list[dict[str, Any]], n_edges: int) -> list[int | None]:
+    """Each matched point's index into ``edges``, or ``None`` when it has none.
+
+    Valhalla reports a point with no edge by omitting ``edge_index`` or
+    by setting it to its invalid sentinel (2**64 - 1).  It does that to
+    some ``interpolated`` points that it did place along an edge:
+    fixes within ``interpolation_distance`` of the last, most often a
+    truck standing in a queue.  Their ``distance_along_edge`` carries
+    on from the previous point's, so such a point takes the previous
+    point's edge as long as it doesn't move backwards along it.
+    Unmatched points break the chain.  Without this, trucks reporting
+    every few seconds lose their queue time and every queue looks
+    shorter than it was.
+    """
+    out: list[int | None] = []
+    last: tuple[int, float] | None = None  # (edge index, distance along) last placed
+    for p in matched:
+        i = p.get("edge_index")
+        if i is not None and i >= n_edges:
+            i = None
+        along = p.get("distance_along_edge")
+        if (
+            i is None
+            and p.get("type") == "interpolated"
+            and last is not None
+            and along is not None
+            and along >= last[1]
+        ):
+            i = last[0]
+        out.append(i)
+        if p.get("type") == "unmatched":
+            last = None
+        elif i is not None and along is not None:
+            last = (i, along)
+    return out
+
+
+def parse_fix_matches(resp: dict[str, Any], n_points: int) -> FixMatches:
+    """Where each input point landed, from a response with FIX_MATCH_ATTRIBUTES.
+
+    Returns :data:`FIX_MATCH_SCHEMA` columns with one value per point:
+    the edge's GraphId, OSM way, begin/end headings, and the point's
+    fraction along it, match type and distance from the trace.  Edge
+    columns are null for points with no edge (see :func:`_edge_indices`).
+    """
+    matched: list[dict[str, Any]] = resp.get("matched_points", [])
+    edges: list[dict[str, Any]] = resp.get("edges", [])
+    if len(matched) != n_points:
+        raise ValueError(f"{len(matched)} matched points for {n_points} points")
+    out = null_fix_matches(0)
+    for p, i in zip(matched, _edge_indices(matched, len(edges)), strict=True):
+        edge = edges[i] if i is not None else {}
+        out["edge_id"].append(edge.get("id"))
+        out["way_id"].append(edge.get("way_id"))
+        out["distance_along_edge"].append(p.get("distance_along_edge"))
+        out["match_type"].append(p.get("type"))
+        out["distance_from_trace"].append(p.get("distance_from_trace_point"))
+        out["begin_heading"].append(edge.get("begin_heading"))
+        out["end_heading"].append(edge.get("end_heading"))
+    return out
+
+
 def map_match(
     points: list[tuple[float, float]],
     *,

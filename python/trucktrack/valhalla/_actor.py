@@ -73,6 +73,22 @@ def find_config() -> Path | None:
     return None
 
 
+def resolve_config(config: str | Path | None) -> Path:
+    """Return *config*, or the discovered ``valhalla.json`` when ``None``.
+
+    Raises :class:`FileNotFoundError` when no config is found.
+    """
+    if config is not None:
+        return Path(config)
+    found = find_config()
+    if found is None:
+        raise FileNotFoundError(
+            "No valhalla.json found. Create one at ./valhalla.json "
+            "pointing at your tile extract, or pass config=..."
+        )
+    return found
+
+
 def get_actor(config: str | Path | None = None) -> Any:
     """Return a cached Valhalla Actor for the given config.
 
@@ -99,13 +115,7 @@ def get_actor(config: str | Path | None = None) -> Any:
         _local.actors = {}
     actors: dict[str, Any] = _local.actors
 
-    if config is None:
-        config = find_config()
-        if config is None:
-            raise FileNotFoundError(
-                "No valhalla.json found. Create one at ./valhalla.json "
-                "pointing at your tile extract, or pass config=..."
-            )
+    config = resolve_config(config)
     key = str(config)
     if key not in actors:
         actors[key] = valhalla.Actor(Path(config).resolve())

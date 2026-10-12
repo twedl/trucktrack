@@ -9,19 +9,17 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import polars as pl
 import pytest
-from trucktrack.congestion import (
-    OBSERVATION_ATTRIBUTES,
-    OBSERVATION_COLUMNS,
-    ObservationConfig,
-)
-from trucktrack.valhalla import tile_build_id, write_tile_build_id
+from trucktrack.congestion import OBSERVATION_COLUMNS, ObservationConfig
+from trucktrack.valhalla import parse_fix_matches, tile_build_id, write_tile_build_id
 from trucktrack.valhalla._bridge import (
     BridgeConfig,
     map_match_dataframe_with_bridges,
 )
+from trucktrack.valhalla.map_matching import FIX_MATCH_SCHEMA
 
 _SAMPLE = Path(__file__).parent.parent / "data" / "trucks"
 
@@ -69,12 +67,114 @@ class TestTileBuildId:
         assert tile_build_id(config) != before
 
 
-def test_bridges_reject_attributes_with_shapes() -> None:
+# Trimmed from a real trace_attributes response on the local Ontario
+# tiles (synthetic trip through Brampton), edges re-indexed.  The
+# unmatched point and the sentinel edge_index are the two ways Valhalla
+# reports a point with no edge.
+_RESPONSE: dict[str, Any] = {
+    "units": "kilometers",
+    "matched_points": [
+        {
+            "type": "matched",
+            "edge_index": 0,
+            "distance_along_edge": 0.892249,
+            "distance_from_trace_point": 1.612005,
+        },
+        {
+            "type": "matched",
+            "edge_index": 1,
+            "distance_along_edge": 1.0,
+            "distance_from_trace_point": 2.30917,
+        },
+        {"type": "unmatched"},
+        {
+            "type": "interpolated",
+            "edge_index": 18446744073709551615,
+            "distance_along_edge": 0.0,
+            "distance_from_trace_point": 0.0,
+        },
+        {
+            "type": "matched",
+            "edge_index": 2,
+            "distance_along_edge": 0.529403,
+            "distance_from_trace_point": 32.865639,
+        },
+    ],
+    "edges": [
+        {
+            "way_id": 370115604,
+            "id": 1634000558945,
+            "begin_heading": 119,
+            "end_heading": 119,
+        },
+        {
+            "way_id": 808977465,
+            "id": 1638664624993,
+            "begin_heading": 138,
+            "end_heading": 138,
+        },
+        {
+            "way_id": 920928491,
+            "id": 1342686762890,
+            "begin_heading": 334,
+            "end_heading": 279,
+        },
+    ],
+}
+
+
+class TestParseFixMatches:
+    def test_one_value_per_point(self) -> None:
+        fm = parse_fix_matches(_RESPONSE, 5)
+        assert list(fm) == list(FIX_MATCH_SCHEMA)
+        # The sentinel point follows an unmatched one, so it stays edgeless.
+        assert fm["edge_id"] == [
+            1634000558945,
+            1638664624993,
+            None,
+            None,
+            1342686762890,
+        ]
+        assert fm["way_id"] == [370115604, 808977465, None, None, 920928491]
+        assert fm["match_type"][2:4] == ["unmatched", "interpolated"]
+        assert fm["begin_heading"][4] == 334
+        df = pl.DataFrame(fm, schema=FIX_MATCH_SCHEMA)
+        assert df.height == 5
+
+    def test_edgeless_interpolated_point_put_back_on_its_edge(self) -> None:
+        # A truck standing in a queue: Valhalla places the interpolated
+        # points further along edge 0 but drops their edge_index.
+        response = {
+            "matched_points": [
+                {"type": "matched", "edge_index": 0, "distance_along_edge": 0.40},
+                {"type": "interpolated", "distance_along_edge": 0.42},
+                {
+                    "type": "interpolated",
+                    "edge_index": 18446744073709551615,
+                    "distance_along_edge": 0.44,
+                },
+                # Behind the last point on edge 0: can't be edge 0.
+                {"type": "interpolated", "distance_along_edge": 0.10},
+                {"type": "matched", "edge_index": 1, "distance_along_edge": 0.07},
+            ],
+            "edges": _RESPONSE["edges"][:2],
+        }
+        e0, e1 = 1634000558945, 1638664624993
+        assert parse_fix_matches(response, 5)["edge_id"] == [e0, e0, e0, None, e1]
+
+    def test_point_count_must_match(self) -> None:
+        with pytest.raises(ValueError, match="5 matched points for 4 points"):
+            parse_fix_matches(_RESPONSE, 4)
+
+    def test_empty_response(self) -> None:
+        df = pl.DataFrame(parse_fix_matches({}, 0), schema=FIX_MATCH_SCHEMA)
+        assert df.is_empty()
+
+
+def test_bridges_reject_per_fix_with_shapes() -> None:
     df = pl.DataFrame({"time": [], "lat": [], "lon": []})
     with pytest.raises(ValueError, match="collect_shapes"):
-        map_match_dataframe_with_bridges(
-            df, attributes=OBSERVATION_ATTRIBUTES, collect_shapes=True
-        )
+        map_match_dataframe_with_bridges(df, per_fix=True, collect_shapes=True)
 
 
 @pytest.fixture(scope="module")
@@ -166,7 +266,7 @@ class TestPipelineObservations:
         )
         assert lost.exists()
 
-    def test_bridged_responses_cover_each_segment(self, partitioned: Path) -> None:
+    def test_bridged_fix_matches_line_up_with_rows(self, partitioned: Path) -> None:
         trips = (
             pl.scan_parquet(partitioned / "**" / "*.parquet")
             .filter(~pl.col("is_stop"))
@@ -179,15 +279,13 @@ class TestPipelineObservations:
         gappy = pl.concat([trip.head(n // 3), trip.tail(n // 3)])
 
         result = map_match_dataframe_with_bridges(
-            gappy,
-            bridges=BridgeConfig(max_dist_m=5000),
-            attributes=OBSERVATION_ATTRIBUTES,
+            gappy, bridges=BridgeConfig(max_dist_m=5000), per_fix=True
         )
-        if result.fallback_used:
-            assert [off for off, _ in result.responses] == [0]
-        else:
-            assert [off for off, _ in result.responses] == [0, n // 3]
-        for offset, resp in result.responses:
-            n_points = len(resp["matched_points"])
-            assert offset + n_points <= len(gappy)
-            assert all("id" in e for e in resp["edges"])
+        assert not result.fallback_used
+        assert len(result.fits) == 1
+        fm = result.fix_matches
+        assert fm is not None
+        assert {len(values) for values in fm.values()} == {len(gappy)}
+        on_edge = [e is not None for e in fm["edge_id"]]
+        # Both segments matched: fixes on either side of the gap landed.
+        assert any(on_edge[: n // 3]) and any(on_edge[n // 3 :])

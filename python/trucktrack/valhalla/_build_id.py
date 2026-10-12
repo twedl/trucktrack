@@ -14,10 +14,9 @@ import os
 import tempfile
 from pathlib import Path
 
-from trucktrack.valhalla._actor import find_config
+from trucktrack.valhalla._actor import resolve_config
 
 BUILD_ID_FILENAME = "tile_build_id"
-_HASH_CHUNK = 8 * 1024 * 1024
 
 
 def write_tile_build_id(tile_extract: str | Path) -> str:
@@ -27,11 +26,8 @@ def write_tile_build_id(tile_extract: str | Path) -> str:
     traffic is added.  Overwrites any earlier ID.
     """
     extract = Path(tile_extract)
-    digest = hashlib.sha256()
     with extract.open("rb") as f:
-        while chunk := f.read(_HASH_CHUNK):
-            digest.update(chunk)
-    build_id = digest.hexdigest()[:16]
+        build_id = hashlib.file_digest(f, "sha256").hexdigest()[:16]
     fd, tmp = tempfile.mkstemp(dir=extract.parent, suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as f:
@@ -52,11 +48,7 @@ def tile_build_id(config: str | Path | None = None) -> str:
     missing (tiles built before IDs existed), the archive is hashed now
     and the ID written, so later calls agree.
     """
-    if config is None:
-        config = find_config()
-        if config is None:
-            raise FileNotFoundError("No valhalla.json found; pass config=...")
-    mjolnir = json.loads(Path(config).read_text())["mjolnir"]
+    mjolnir = json.loads(resolve_config(config).read_text())["mjolnir"]
     extract = Path(mjolnir["tile_extract"])
     id_path = extract.parent / BUILD_ID_FILENAME
     if id_path.exists():

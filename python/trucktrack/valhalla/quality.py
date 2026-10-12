@@ -15,10 +15,9 @@ is much longer than the input and reverses direction many times.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 import polars as pl
 
@@ -30,11 +29,13 @@ from trucktrack.valhalla._bridge import (
     map_match_dataframe_with_bridges,
 )
 from trucktrack.valhalla.map_matching import (
+    FIX_MATCH_ATTRIBUTES,
+    FixMatches,
     MatchedPoint,
     _parse_way_ids,
     map_match_full,
     map_match_route_shape,
-    map_match_ways,
+    parse_fix_matches,
     trace_attributes,
 )
 
@@ -66,9 +67,8 @@ class MapMatchQuality:
     matched_points: list[MatchedPoint] = field(default_factory=list)
     way_ids: list[int] = field(default_factory=list)
     shapes: list[list[tuple[float, float]]] = field(default_factory=list)
-    # Raw trace_attributes responses when extra attributes were requested:
-    # (row offset into the time-sorted trip of the first point matched, response).
-    responses: list[tuple[int, dict[str, Any]]] = field(default_factory=list)
+    # Where each input point landed, when per_fix was requested.
+    fix_matches: FixMatches | None = None
     # Bridge signals — populated only by evaluate_map_match_with_bridges.
     # n_bridges counts the routed bridges actually used; when the
     # fallback path fires, n_bridges is 0 and any_bridge_failed is True.
@@ -157,7 +157,7 @@ class _MatchResult:
     way_ids: list[int] = field(default_factory=list)
     fits: list[BridgeFit] = field(default_factory=list)
     fallback_used: bool = False
-    responses: list[tuple[int, dict[str, Any]]] = field(default_factory=list)
+    fix_matches: FixMatches | None = None
 
 
 def _evaluate(
@@ -186,7 +186,7 @@ def _evaluate(
     q.shapes = result.shapes
     q.matched_points = result.matched_points
     q.way_ids = result.way_ids
-    q.responses = result.responses
+    q.fix_matches = result.fix_matches
     if record_breaks:
         q.n_polylines = len(result.shapes)
         q.shape_gaps = _polyline_break_gaps(result.shapes)
@@ -276,7 +276,7 @@ def evaluate_map_match_ways(
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
     trace_options: dict[str, object] | None = None,
-    attributes: Sequence[str] = (),
+    per_fix: bool = False,
 ) -> MapMatchQuality:
     """Lightweight quality wrapper around :func:`map_match_ways`.
 
@@ -285,30 +285,23 @@ def evaluate_map_match_ways(
     metrics.  Intended for pipeline use where the extra ``trace_route``
     call is not worth the cost.
 
-    *attributes* adds ``trace_attributes`` filter keys to the same call
-    and keeps the raw response in ``responses`` at offset 0.
+    *per_fix* also records where each point landed (see
+    :func:`~trucktrack.valhalla.parse_fix_matches`) from the same call.
     """
 
     def match() -> _MatchResult:
-        if not attributes:
-            ways = map_match_ways(
-                points,
-                costing=costing,
-                costing_options=costing_options,
-                config=config,
-                trace_options=trace_options,
-            )
-            return _MatchResult(shapes=[], way_ids=ways)
         resp = trace_attributes(
             points,
-            attributes=["edge.way_id", *attributes],
+            attributes=FIX_MATCH_ATTRIBUTES if per_fix else ["edge.way_id"],
             costing=costing,
             costing_options=costing_options,
             config=config,
             trace_options=trace_options,
         )
         return _MatchResult(
-            shapes=[], way_ids=_parse_way_ids(resp), responses=[(0, resp)]
+            shapes=[],
+            way_ids=_parse_way_ids(resp),
+            fix_matches=parse_fix_matches(resp, len(points)) if per_fix else None,
         )
 
     return _evaluate(trip_id, points, match, record_breaks=False)
@@ -327,7 +320,7 @@ def evaluate_map_match_with_bridges(
     config: str | Path | None = None,
     trace_options: dict[str, object] | None = None,
     collect_shapes: bool = False,
-    attributes: Sequence[str] = (),
+    per_fix: bool = False,
 ) -> MapMatchQuality:
     """Bridged-match variant of :func:`evaluate_map_match_ways`.
 
@@ -344,9 +337,8 @@ def evaluate_map_match_with_bridges(
     ``n_bridges``, ``max_detour_ratio``, ``total_bridge_m``,
     ``any_bridge_failed``.
 
-    *attributes* is passed through to
-    :func:`~trucktrack.valhalla._bridge.map_match_dataframe_with_bridges`;
-    its raw responses land in ``responses``.
+    *per_fix* is passed through to
+    :func:`~trucktrack.valhalla._bridge.map_match_dataframe_with_bridges`.
     """
     points = list(zip(df[lat_col].to_list(), df[lon_col].to_list(), strict=True))
 
@@ -362,14 +354,14 @@ def evaluate_map_match_with_bridges(
             config=config,
             trace_options=trace_options,
             collect_shapes=collect_shapes,
-            attributes=attributes,
+            per_fix=per_fix,
         )
         return _MatchResult(
             shapes=result.shapes,
             way_ids=result.way_ids,
             fits=result.fits,
             fallback_used=result.fallback_used,
-            responses=result.responses,
+            fix_matches=result.fix_matches,
         )
 
     return _evaluate(trip_id, points, match, record_breaks=False, n_points=len(df))

@@ -2,31 +2,26 @@
 
 Both functions look at a fix's neighbours in time, so they run on a
 whole trip before any rows are dropped (stop rows, unmatched points).
+They read ``id``, ``time``, ``lat``, ``lon`` and ``speed`` (km/h) and
+sort by trip, then time.
 """
 
 from __future__ import annotations
 
 import polars as pl
 
-
-def _seconds(duration: pl.Expr) -> pl.Expr:
-    return duration.dt.total_microseconds() / 1e6
+from trucktrack.congestion.config import DEFAULT_CONFIG, ObservationConfig
 
 
 def time_weights[FrameT: (pl.DataFrame, pl.LazyFrame)](
-    frame: FrameT,
-    *,
-    max_half_gap_s: float = 30.0,
-    id_col: str = "id",
-    time_col: str = "time",
-    weight_col: str = "w",
+    frame: FrameT, config: ObservationConfig = DEFAULT_CONFIG
 ) -> FrameT:
-    """Add the time, in seconds, that each fix stands for.
+    """Add ``w``: the time, in seconds, that each fix stands for.
 
     A fix's speed is instantaneous, so it stands for the time around
     it: half the gap back to the previous fix plus half the gap on to
-    the next, each side capped at *max_half_gap_s*.  A trip's first and
-    last fixes get only their inner side.
+    the next, each side capped at ``config.max_half_gap_s``.  A trip's
+    first and last fixes get only their inner side.
 
     The weighted mean of fix speeds on an edge, Σ speed·w / Σ w, is the
     edge's space-mean speed (Σ metres / Σ seconds).  Even when fixes
@@ -44,38 +39,28 @@ def time_weights[FrameT: (pl.DataFrame, pl.LazyFrame)](
     Rows repeating a trip's timestamp get ``w = 0`` and gaps are
     measured between distinct timestamps, so a duplicated fix is
     dropped rather than counted twice.  The first row, in input order,
-    keeps the weight.  The result is sorted by trip, then time.
+    keeps the weight.
     """
-    t = pl.col(time_col)
-    first = pl.struct(id_col, time_col).is_first_distinct()
+    t = pl.col("time")
+    first = t.ne(t.shift(1)).fill_null(True)
     distinct_t = pl.when(first).then(t)
     prev_t = distinct_t.shift(1).forward_fill()
     next_t = distinct_t.shift(-1).backward_fill()
 
     def half(gap: pl.Expr) -> pl.Expr:
-        return (_seconds(gap) / 2).clip(upper_bound=max_half_gap_s).fill_null(0.0)
+        seconds = gap.dt.total_microseconds() / 2e6
+        return seconds.clip(upper_bound=config.max_half_gap_s).fill_null(0.0)
 
     w = pl.when(first).then(half(t - prev_t) + half(next_t - t)).otherwise(0.0)
-    return frame.sort(id_col, time_col, maintain_order=True).with_columns(
-        w.over(id_col).alias(weight_col)
+    return frame.sort("id", "time", maintain_order=True).with_columns(
+        w.over("id").alias("w")
     )
 
 
 def flag_dwell[FrameT: (pl.DataFrame, pl.LazyFrame)](
-    frame: FrameT,
-    *,
-    stationary_kmh: float = 2.0,
-    max_stationary_step_m: float = 30.0,
-    max_queue_stop_s: float = 180.0,
-    id_col: str = "id",
-    time_col: str = "time",
-    lat_col: str = "lat",
-    lon_col: str = "lon",
-    speed_col: str = "speed",
-    weight_col: str = "w",
-    flag_col: str = "dwell",
+    frame: FrameT, config: ObservationConfig = DEFAULT_CONFIG
 ) -> FrameT:
-    """Flag stationary fixes that belong to a dwell rather than a queue.
+    """Add ``dwell``: stationary fixes from a dwell rather than a queue.
 
     A zero-speed fix in a queue or at a signal is part of the delay an
     edge's speed should reflect.  A zero from a truck parked at a curb,
@@ -83,10 +68,11 @@ def flag_dwell[FrameT: (pl.DataFrame, pl.LazyFrame)](
     splitter's minimum, and longer stops the traffic filter
     reclassified as movement, stay inside trips with their zeros.
 
-    A stationary run is consecutive fixes below *stationary_kmh*, each
-    within *max_stationary_step_m* of the one before.  It is a dwell
-    when its fixes stand for more than *max_queue_stop_s* in total, by
-    their time weights (run :func:`time_weights` first).
+    A stationary run is consecutive fixes below
+    ``config.stationary_kmh``, each within
+    ``config.max_stationary_step_m`` of the one before.  It is a dwell
+    when its fixes stand for more than ``config.max_queue_stop_s`` in
+    total, by their time weights (run :func:`time_weights` first).
 
     The step limit matters for sparse trucks: two zeros a minute apart
     and a few hundred metres down the road are two signal stops, not
@@ -100,23 +86,22 @@ def flag_dwell[FrameT: (pl.DataFrame, pl.LazyFrame)](
     lone zero from a truck reporting every 30 min is capped (see
     :func:`time_weights`) and counts as a queue.
 
-    A null speed is not stationary.  The result is sorted by trip, then
-    time.
+    A null speed is not stationary.
     """
-    lat = pl.col(lat_col).radians()
-    lon = pl.col(lon_col).radians()
+    lat = pl.col("lat").radians()
+    lon = pl.col("lon").radians()
     step_m = (
         6_371_000.0
         * ((lat - lat.shift(1)) ** 2 + ((lon - lon.shift(1)) * lat.cos()) ** 2).sqrt()
     )
-    stationary = (pl.col(speed_col) < stationary_kmh).fill_null(False)
+    stationary = (pl.col("speed") < config.stationary_kmh).fill_null(False)
     run_start = (
-        stationary.ne(stationary.shift(1)) | (step_m > max_stationary_step_m)
+        stationary.ne(stationary.shift(1)) | (step_m > config.max_stationary_step_m)
     ).fill_null(True)
-    run_s = pl.col(weight_col).sum().over(id_col, "_run")
+    run_s = pl.col("w").sum().over("id", "_run")
     return (
-        frame.sort(id_col, time_col, maintain_order=True)
-        .with_columns(run_start.cum_sum().over(id_col).alias("_run"))
-        .with_columns((stationary & (run_s > max_queue_stop_s)).alias(flag_col))
+        frame.sort("id", "time", maintain_order=True)
+        .with_columns(run_start.cum_sum().over("id").alias("_run"))
+        .with_columns((stationary & (run_s > config.max_queue_stop_s)).alias("dwell"))
         .drop("_run")
     )

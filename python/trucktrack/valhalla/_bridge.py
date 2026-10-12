@@ -20,10 +20,8 @@ value, letting Meili itself break the trace at the gap.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import polars as pl
@@ -35,9 +33,12 @@ from trucktrack.valhalla._json import loads as _json_loads
 from trucktrack.valhalla._parsing import concat_leg_shapes
 from trucktrack.valhalla.map_matching import (
     _BASE_BREAKAGE_DISTANCE,
+    FIX_MATCH_ATTRIBUTES,
+    FixMatches,
     _parse_way_ids,
     map_match_dataframe_full,
-    map_match_ways,
+    null_fix_matches,
+    parse_fix_matches,
     trace_attributes,
 )
 
@@ -83,9 +84,8 @@ class BridgedMatchResult:
     shapes: list[list[tuple[float, float]]]
     fits: list[BridgeFit] = field(default_factory=list)
     fallback_used: bool = False
-    # Raw trace_attributes responses when extra attributes were requested:
-    # (row offset into the time-sorted trip of the first point matched, response).
-    responses: list[tuple[int, dict[str, Any]]] = field(default_factory=list)
+    # Where each row of the time-sorted df landed, when per_fix was requested.
+    fix_matches: FixMatches | None = None
 
 
 def _find_gap_indices(
@@ -245,7 +245,7 @@ def map_match_dataframe_with_bridges(
     config: str | Path | None = None,
     trace_options: dict[str, object] | None = None,
     collect_shapes: bool = False,
-    attributes: Sequence[str] = (),
+    per_fix: bool = False,
 ) -> BridgedMatchResult:
     """Map-match a trip, bridging large time/distance gaps with ``/route``.
 
@@ -254,7 +254,7 @@ def map_match_dataframe_with_bridges(
     Way-ID sequences are concatenated with seam-dedup.
 
     When *collect_shapes* is false (the default), each sub-segment uses
-    a single ``trace_attributes`` call (``map_match_ways``) — one
+    a single ``trace_attributes`` call — one
     Valhalla call per segment plus two per bridge.  ``matched_df`` and
     ``shapes`` come back empty.
 
@@ -273,16 +273,20 @@ def map_match_dataframe_with_bridges(
     The adaptive breakage-distance cap is tied to ``bridges.max_dist_m``
     so the matcher never searches further than the splitter would allow.
 
-    *attributes* adds ``trace_attributes`` filter keys to each
-    sub-segment's call and keeps the raw responses in
-    ``responses``, each with the row offset of its first point in the
-    time-sorted *df*.  Bridges have no fixes, so they add no responses.
-    Not supported with *collect_shapes*.
+    *per_fix* also records where each row of the time-sorted *df*
+    landed, in ``fix_matches`` (see
+    :func:`~trucktrack.valhalla.parse_fix_matches`).  Rows in segments
+    too short to match get nulls.  Not supported with *collect_shapes*.
     """
-    if attributes and collect_shapes:
-        raise ValueError("attributes is not supported with collect_shapes")
+    if per_fix and collect_shapes:
+        raise ValueError("per_fix is not supported with collect_shapes")
     df = df.sort(time_col, maintain_order=True)
-    responses: list[tuple[int, dict[str, Any]]] = []
+    fix_matches = null_fix_matches(0) if per_fix else None
+
+    def _add_fix_matches(new: FixMatches) -> None:
+        if fix_matches is not None:
+            for col, values in new.items():
+                fix_matches[col].extend(values)
 
     def _segment_points(seg: pl.DataFrame) -> list[tuple[float, float]]:
         return list(zip(seg[lat_col].to_list(), seg[lon_col].to_list(), strict=True))
@@ -301,28 +305,18 @@ def map_match_dataframe_with_bridges(
             max_breakage_m=bridges.max_dist_m,
         )
 
-    def _match_ways(
-        frame: pl.DataFrame, opts: dict[str, object] | None, offset: int = 0
-    ) -> list[int]:
-        if not attributes:
-            return map_match_ways(
-                _segment_points(frame),
-                costing=costing,
-                costing_options=costing_options,
-                config=config,
-                trace_options=opts,
-                max_breakage_m=bridges.max_dist_m,
-            )
+    def _match_ways(frame: pl.DataFrame, opts: dict[str, object] | None) -> list[int]:
         resp = trace_attributes(
             _segment_points(frame),
-            attributes=["edge.way_id", *attributes],
+            attributes=FIX_MATCH_ATTRIBUTES if per_fix else ["edge.way_id"],
             costing=costing,
             costing_options=costing_options,
             config=config,
             trace_options=opts,
             max_breakage_m=bridges.max_dist_m,
         )
-        responses.append((offset, resp))
+        if per_fix:
+            _add_fix_matches(parse_fix_matches(resp, len(frame)))
         return _parse_way_ids(resp)
 
     gap_idxs = _find_gap_indices(
@@ -340,7 +334,7 @@ def map_match_dataframe_with_bridges(
             )
         ways = _match_ways(df, trace_options)
         return BridgedMatchResult(
-            matched_df=df.head(0), way_ids=ways, shapes=[], responses=responses
+            matched_df=df.head(0), way_ids=ways, shapes=[], fix_matches=fix_matches
         )
 
     segments = _split_at(df, gap_idxs)
@@ -348,20 +342,20 @@ def map_match_dataframe_with_bridges(
     all_shapes: list[list[tuple[float, float]]] = []
     matched_frames: list[pl.DataFrame] = []
     fits: list[BridgeFit] = []
-    offset = 0
 
     try:
         for k, seg in enumerate(segments):
             if len(seg) < 2:
                 if collect_shapes:
                     matched_frames.append(_null_matched_frame(seg))
+                _add_fix_matches(null_fix_matches(len(seg)))
             elif collect_shapes:
                 seg_matched, seg_ways, seg_shapes = _match_full(seg, trace_options)
                 matched_frames.append(seg_matched)
                 _extend_dedup(all_ways, seg_ways)
                 all_shapes.extend(seg_shapes)
             else:
-                seg_ways = _match_ways(seg, trace_options, offset)
+                seg_ways = _match_ways(seg, trace_options)
                 _extend_dedup(all_ways, seg_ways)
 
             if k < len(segments) - 1:
@@ -383,9 +377,10 @@ def map_match_dataframe_with_bridges(
                 if collect_shapes:
                     all_shapes.append(bridge_shape)
                 fits.append(fit)
-            offset += len(seg)
     except Exception:
-        responses.clear()
+        if fix_matches is not None:
+            for values in fix_matches.values():
+                values.clear()
         fallback_opts = dict(trace_options or {})
         fallback_opts["breakage_distance"] = _BASE_BREAKAGE_DISTANCE
         if collect_shapes:
@@ -400,7 +395,7 @@ def map_match_dataframe_with_bridges(
             shapes=shapes,
             fits=[],
             fallback_used=True,
-            responses=responses,
+            fix_matches=fix_matches,
         )
 
     matched_df = (
@@ -414,5 +409,5 @@ def map_match_dataframe_with_bridges(
         shapes=all_shapes,
         fits=fits,
         fallback_used=False,
-        responses=responses,
+        fix_matches=fix_matches,
     )

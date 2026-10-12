@@ -2,19 +2,16 @@
 
 from __future__ import annotations
 
-import copy
 import random
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 import polars as pl
 import pytest
 from trucktrack.congestion import (
-    FIX_COLUMNS,
     OBSERVATION_COLUMNS,
     ObservationConfig,
+    edge_observations,
     flag_dwell,
-    observations_from_trace_attributes,
     time_weights,
 )
 from trucktrack.generate.interpolator import FixSchedule
@@ -55,7 +52,8 @@ class TestTimeWeights:
         assert w == [5.0, 35.0, 60.0, 45.0, 15.0]
 
     def test_cap_is_configurable(self) -> None:
-        w = time_weights(_fixes([0, 60, 120]), max_half_gap_s=10.0)["w"].to_list()
+        config = ObservationConfig(max_half_gap_s=10.0)
+        w = time_weights(_fixes([0, 60, 120]), config)["w"].to_list()
         assert w == [10.0, 20.0, 10.0]
 
     def test_repeated_timestamp_gets_zero_weight(self) -> None:
@@ -164,7 +162,8 @@ class TestEstimatorOnSyntheticSampling:
 
 
 def _dwell(df: pl.DataFrame, **kwargs: float) -> list[bool]:
-    return flag_dwell(time_weights(df), **kwargs)["dwell"].to_list()
+    config = ObservationConfig(**kwargs)
+    return flag_dwell(time_weights(df, config), config)["dwell"].to_list()
 
 
 class TestFlagDwell:
@@ -223,175 +222,64 @@ class TestFlagDwell:
         assert not any(_dwell(df))
 
 
-# Trimmed from a real trace_attributes response on the local Ontario
-# tiles (synthetic trip through Brampton), edges re-indexed.  The
-# unmatched point and the sentinel edge_index are the two ways Valhalla
-# reports a point with no edge.
-_RESPONSE: dict[str, Any] = {
-    "units": "kilometers",
-    "matched_points": [
-        {
-            "type": "matched",
-            "edge_index": 0,
-            "distance_along_edge": 0.892249,
-            "distance_from_trace_point": 1.612005,
-        },
-        {
-            "type": "matched",
-            "edge_index": 1,
-            "distance_along_edge": 1.0,
-            "distance_from_trace_point": 2.30917,
-        },
-        {"type": "unmatched"},
-        {
-            "type": "interpolated",
-            "edge_index": 18446744073709551615,
-            "distance_along_edge": 0.0,
-            "distance_from_trace_point": 0.0,
-        },
-        {
-            "type": "matched",
-            "edge_index": 2,
-            "distance_along_edge": 0.529403,
-            "distance_from_trace_point": 32.865639,
-        },
-    ],
-    "edges": [
-        {
-            "way_id": 370115604,
-            "id": 1634000558945,
-            "begin_heading": 119,
-            "end_heading": 119,
-        },
-        {
-            "way_id": 808977465,
-            "id": 1638664624993,
-            "begin_heading": 138,
-            "end_heading": 138,
-        },
-        {
-            "way_id": 920928491,
-            "id": 1342686762890,
-            "begin_heading": 334,
-            "end_heading": 279,
-        },
-    ],
-}
-
-
-def _matched_fixes(
+def _matched(
     *,
     speed: list[float | None] | None = None,
     heading: list[float] | None = None,
     w: list[float] | None = None,
+    end_heading: float = 279.0,
 ) -> pl.DataFrame:
-    n = len(_RESPONSE["matched_points"])
+    """Three matched fixes: on a straight edge, unmatched, on a curving edge."""
     return pl.DataFrame(
         {
-            "id": ["t"] * n,
-            "time": [_T0 + timedelta(seconds=60 * i) for i in range(n)],
-            "speed": speed or [55.9, 55.7, 56.1, 0.0, 56.1],
-            "heading": heading or [119.0, 138.0, 135.0, 135.0, 305.0],
-            "w": w or [30.0, 60.0, 60.0, 60.0, 30.0],
-            "dwell": [False] * n,
+            "id": ["t"] * 3,
+            "time": [_T0 + timedelta(seconds=s) for s in (0, 60, 120)],
+            "speed": speed or [55.9, 56.1, 56.1],
+            "heading": heading or [119.0, 135.0, 305.0],
+            "w": w or [30.0, 60.0, 30.0],
+            "dwell": [False] * 3,
+            "edge_id": [1634000558945, None, 1342686762890],
+            "way_id": [370115604, None, 920928491],
+            "distance_along_edge": [0.892249, None, 0.529403],
+            "match_type": ["matched", "unmatched", "matched"],
+            "distance_from_trace": [1.612005, None, 32.865639],
+            "begin_heading": [119.0, None, 334.0],
+            "end_heading": [119.0, None, end_heading],
         },
-        schema_overrides={"speed": pl.Float64, "heading": pl.Float64},
+        schema_overrides={
+            "speed": pl.Float64,
+            "heading": pl.Float64,
+            "edge_id": pl.UInt64,
+        },
     )
 
 
-class TestObservationsFromTraceAttributes:
-    _CFG = ObservationConfig()
-
-    def test_one_row_per_fix_on_an_edge(self) -> None:
-        obs = observations_from_trace_attributes(_RESPONSE, _matched_fixes(), self._CFG)
+class TestEdgeObservations:
+    def test_keeps_fixes_on_an_edge(self) -> None:
+        obs = edge_observations(_matched())
         assert obs.columns == list(OBSERVATION_COLUMNS)
-        assert obs["edge_id"].to_list() == [1634000558945, 1638664624993, 1342686762890]
-        assert obs["way_id"].to_list() == [370115604, 808977465, 920928491]
-        assert obs["time"].to_list() == [
-            _T0 + timedelta(seconds=s) for s in (0, 60, 240)
-        ]
-        assert obs["distance_from_trace"][2] == pytest.approx(32.865639)
+        assert obs["edge_id"].to_list() == [1634000558945, 1342686762890]
+        assert obs["time"].to_list() == [_T0, _T0 + timedelta(seconds=120)]
 
     def test_fixes_without_speed_or_weight_dropped(self) -> None:
-        fixes = _matched_fixes(
-            speed=[None, 55.7, 56.1, 0.0, 56.1], w=[30.0, 0.0, 60.0, 60.0, 30.0]
-        )
-        obs = observations_from_trace_attributes(_RESPONSE, fixes, self._CFG)
-        assert obs["edge_id"].to_list() == [1342686762890]
+        obs = edge_observations(_matched(speed=[None, 56.1, 56.1], w=[30, 60, 0]))
+        assert obs.is_empty()
 
     def test_heading_compared_to_bearing_along_curving_edge(self) -> None:
         # Edge turns 334 -> 279; 53% along it the bearing is ~305.
-        obs = observations_from_trace_attributes(_RESPONSE, _matched_fixes(), self._CFG)
-        assert obs["heading_diff"].to_list() == pytest.approx([0.0, 0.0, 0.1], abs=0.1)
+        obs = edge_observations(_matched())
+        assert obs["heading_diff"].to_list() == pytest.approx([0.0, 0.1], abs=0.1)
         assert not obs["wrong_way"].any()
 
     def test_opposite_heading_at_speed_is_wrong_way(self) -> None:
-        fixes = _matched_fixes(
-            speed=[55.9, 10.0, 56.1, 0.0, 56.1], heading=[299.0, 318.0, 0, 0, 305.0]
+        obs = edge_observations(
+            _matched(speed=[55.9, 56.1, 10.0], heading=[299.0, 0.0, 125.0])
         )
-        obs = observations_from_trace_attributes(_RESPONSE, fixes, self._CFG)
-        assert obs["heading_diff"][0] == pytest.approx(180.0)
-        # Second fix is reversed too, but too slow to trust its course.
-        assert obs["wrong_way"].to_list() == [True, False, False]
+        assert obs["heading_diff"].to_list() == pytest.approx([180.0, 180.0], abs=0.2)
+        # The second fix is reversed too, but too slow to trust its course.
+        assert obs["wrong_way"].to_list() == [True, False]
 
     def test_sharply_turning_edge_not_checked(self) -> None:
-        response = copy.deepcopy(_RESPONSE)
-        response["edges"][2]["end_heading"] = 154  # a 180° turn
-        fixes = _matched_fixes(heading=[119.0, 138.0, 0, 0, 125.0])
-        obs = observations_from_trace_attributes(response, fixes, self._CFG)
-        assert obs["heading_diff"][2] is None
-        assert not obs["wrong_way"][2]
-
-    def test_edgeless_interpolated_fix_put_back_on_its_edge(self) -> None:
-        # A truck standing in a queue: Valhalla places the interpolated
-        # fixes further along edge 0 but drops their edge_index.
-        response = {
-            "matched_points": [
-                {"type": "matched", "edge_index": 0, "distance_along_edge": 0.40},
-                {"type": "interpolated", "distance_along_edge": 0.42},
-                {
-                    "type": "interpolated",
-                    "edge_index": 18446744073709551615,
-                    "distance_along_edge": 0.44,
-                },
-                # Behind the last fix on edge 0: can't be edge 0.
-                {"type": "interpolated", "distance_along_edge": 0.10},
-                {"type": "matched", "edge_index": 1, "distance_along_edge": 0.07},
-            ],
-            "edges": _RESPONSE["edges"][:2],
-        }
-        obs = observations_from_trace_attributes(response, _matched_fixes(), self._CFG)
-        assert obs["time"].to_list() == [
-            _T0 + timedelta(seconds=s) for s in (0, 60, 120, 240)
-        ]
-        assert obs["edge_id"].to_list() == [
-            1634000558945,
-            1634000558945,
-            1634000558945,
-            1638664624993,
-        ]
-
-    def test_unmatched_fix_breaks_edge_recovery(self) -> None:
-        # In _RESPONSE the sentinel point follows an unmatched one.
-        obs = observations_from_trace_attributes(_RESPONSE, _matched_fixes(), self._CFG)
-        assert _T0 + timedelta(seconds=180) not in obs["time"].to_list()
-
-    def test_fix_count_must_match(self) -> None:
-        with pytest.raises(ValueError, match="5 matched points for 4 fixes"):
-            observations_from_trace_attributes(
-                _RESPONSE, _matched_fixes().head(4), self._CFG
-            )
-
-    def test_empty_response_keeps_schema(self) -> None:
-        fixes = _matched_fixes().head(0)
-        obs = observations_from_trace_attributes({}, fixes, self._CFG)
-        assert obs.is_empty()
-        assert obs.columns == list(OBSERVATION_COLUMNS)
-        assert obs.schema["time"] == fixes.schema["time"]
-
-    def test_needs_fix_columns(self) -> None:
-        with pytest.raises(pl.exceptions.ColumnNotFoundError):
-            observations_from_trace_attributes(
-                _RESPONSE, _matched_fixes().drop("w"), self._CFG
-            )
-        assert "w" in FIX_COLUMNS
+        obs = edge_observations(_matched(heading=[119.0, 0.0, 125.0], end_heading=154))
+        assert obs["heading_diff"][1] is None
+        assert not obs["wrong_way"][1]

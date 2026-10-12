@@ -45,14 +45,18 @@ from tqdm import tqdm
 
 from trucktrack.congestion import (
     FIX_COLUMNS,
-    OBSERVATION_ATTRIBUTES,
     ObservationConfig,
-    observations_from_trace_attributes,
+    edge_observations,
     prepare_fixes,
 )
 from trucktrack.pipeline import parquet_row_count, partition_sort_key
 from trucktrack.valhalla._bridge import BridgeConfig
 from trucktrack.valhalla._build_id import tile_build_id
+from trucktrack.valhalla.map_matching import (
+    FIX_MATCH_SCHEMA,
+    FixMatches,
+    null_fix_matches,
+)
 from trucktrack.valhalla.quality import (
     MapMatchQuality,
     evaluate_map_match_ways,
@@ -177,23 +181,22 @@ def _map_match_trip_row(
     config: str | Path | None = None,
     debug: bool = False,
     bridges: BridgeConfig | None = None,
-    observations: ObservationConfig | None = None,
-) -> tuple[pl.DataFrame, dict[str, object], pl.DataFrame | None]:
-    """Map-match one trip; return (way_ids_df, quality_row_dict, observations).
+    per_fix: bool = False,
+) -> tuple[pl.DataFrame, dict[str, object], FixMatches | None]:
+    """Map-match one trip; return (way_ids_df, quality_row_dict, fix_matches).
 
     The quality row is left as a dict so the caller can batch many rows
     into a single ``pl.DataFrame`` construction — the per-trip list-of-
     one-dict pattern hits polars' ``_sequence_of_dict_to_pydf`` under the
     GIL and shows up as a hotspot in py-spy.
 
-    *observations* requests edge speed observations from the same
-    ``trace_attributes`` call; *trip* must then carry
-    :data:`~trucktrack.congestion.FIX_COLUMNS`.  Otherwise the third
-    element is ``None``.
+    *per_fix* also returns where each row of the time-sorted trip
+    landed (see :func:`~trucktrack.valhalla.parse_fix_matches`), from
+    the same ``trace_attributes`` call.  The third element is ``None``
+    when it wasn't requested or the trip wasn't matched.
     """
-    # Stable sort: response offsets index rows in this order.
+    # Stable: fix matches line up with the rows in this order.
     trip = trip.sort("time", maintain_order=True)
-    attributes = OBSERVATION_ATTRIBUTES if observations is not None else ()
     trip_id = trip.item(0, "id")
     date = cast(datetime, trip["time"].min()).date()
     t0 = perf_counter() if debug else 0.0
@@ -206,13 +209,11 @@ def _map_match_trip_row(
         )
     elif bridges is not None:
         q = evaluate_map_match_with_bridges(
-            trip_id, trip, bridges=bridges, config=config, attributes=attributes
+            trip_id, trip, bridges=bridges, config=config, per_fix=per_fix
         )
     else:
         points = list(zip(trip["lat"].to_list(), trip["lon"].to_list(), strict=True))
-        q = evaluate_map_match_ways(
-            trip_id, points, config=config, attributes=attributes
-        )
+        q = evaluate_map_match_ways(trip_id, points, config=config, per_fix=per_fix)
     elapsed = perf_counter() - t0 if debug else None
     ways = q.way_ids
     if ways:
@@ -222,22 +223,7 @@ def _map_match_trip_row(
         )
     else:
         way_df = _null_way_result(trip_id, date)
-    obs_df = None
-    if observations is not None:
-        obs_parts = [
-            observations_from_trace_attributes(
-                resp,
-                trip.slice(offset, len(resp.get("matched_points", []))),
-                observations,
-            )
-            for offset, resp in q.responses
-        ]
-        obs_df = (
-            pl.concat(obs_parts)
-            if obs_parts
-            else observations_from_trace_attributes({}, trip.head(0), observations)
-        )
-    return way_df, _quality_row(trip_id, date, q, elapsed), obs_df
+    return way_df, _quality_row(trip_id, date, q, elapsed), q.fix_matches
 
 
 def map_match_trip(
@@ -339,20 +325,25 @@ def _process_partition(
             continue
         way_dfs: list[pl.DataFrame] = []
         quality_rows: list[dict[str, object]] = []
-        obs_dfs: list[pl.DataFrame] = []
+        fix_matches = null_fix_matches(0)
         rows_pending = 0
-        for _, trip in df.group_by("id"):
-            way_df, quality_row, obs_df = _map_match_trip_row(
+        # In row order, so fix matches stack back onto df (sorted by
+        # trip, then time, when observations are on).
+        for _, trip in df.group_by("id", maintain_order=True):
+            way_df, quality_row, trip_matches = _map_match_trip_row(
                 trip,
                 config=config,
                 debug=debug,
                 bridges=bridges,
-                observations=observations,
+                per_fix=observations is not None,
             )
             way_dfs.append(way_df)
             quality_rows.append(quality_row)
-            if obs_df is not None:
-                obs_dfs.append(obs_df)
+            if observations is not None:
+                for col, values in (
+                    trip_matches or null_fix_matches(len(trip))
+                ).items():
+                    fix_matches[col].extend(values)
             total_trips += 1
             rows_pending += len(trip)
             if rows_pending >= _PROGRESS_BATCH_ROWS:
@@ -373,7 +364,10 @@ def _process_partition(
         _atomic_write_parquet(matched, out_path)
         _atomic_write_parquet(quality, quality_path)
         if observations is not None:
-            obs = pl.concat(obs_dfs).with_columns(
+            fixes = df.select(FIX_COLUMNS).hstack(
+                pl.DataFrame(fix_matches, schema=FIX_MATCH_SCHEMA)
+            )
+            obs = edge_observations(fixes, observations).with_columns(
                 pl.lit(build_id, dtype=pl.Utf8).alias("tile_build_id")
             )
             _atomic_write_parquet(obs, obs_path)
