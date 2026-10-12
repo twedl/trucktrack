@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+from typing import Any
 
 import requests
 
@@ -67,7 +68,7 @@ def _random_point_in_zone(
 def _snap_to_road(
     lat: float, lon: float, valhalla_url: str
 ) -> tuple[float, float] | None:
-    body = {
+    body: dict[str, Any] = {
         "locations": [{"lat": lat, "lon": lon, "search_cutoff": 2000}],
         "costing": "truck",
     }

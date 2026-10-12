@@ -26,11 +26,11 @@ pub fn split_by_observation_gap(
                 .dt()
                 .timestamp(TimeUnit::Microseconds)
                 .diff(lit(1), NullBehavior::Ignore)
-                .over([col(id_col)])
+                .over([col(id_col)])?
                 .gt(lit(gap_us))
                 .fill_null(lit(false))
                 .cum_sum(false)
-                .over([col(id_col)])
+                .over([col(id_col)])?
                 .alias("segment_id"),
         )
         .collect()?;

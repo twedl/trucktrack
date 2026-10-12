@@ -150,7 +150,7 @@ fn datetime_to_microseconds(col: &Column) -> PolarsResult<Vec<i64>> {
         .take_materialized_series();
     let i64_ca = series.i64()?;
     Ok(i64_ca
-        .into_iter()
+        .iter()
         .map(|opt: Option<i64>| opt.unwrap_or(i64::MIN))
         .collect())
 }

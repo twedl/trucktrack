@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import requests
 
@@ -28,7 +29,7 @@ def fetch_route(
 
         return route(origin, destination, config=config)
 
-    body = {
+    body: dict[str, Any] = {
         "locations": [
             {"lat": origin[0], "lon": origin[1]},
             {"lat": destination[0], "lon": destination[1]},
