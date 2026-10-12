@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import random
+from collections import Counter
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -11,14 +13,30 @@ import pytest
 import requests
 import trucktrack
 from trucktrack.generate import (
+    RouteSegment,
+    SamplingConfig,
     TracePoint,
     TripConfig,
     generate_trace,
+    random_sampling,
     traces_to_csv,
     traces_to_parquet,
 )
-from trucktrack.generate.gps_errors import stale_reemission
+from trucktrack.generate.gps_errors import signal_dropout, stale_reemission
+from trucktrack.generate.interpolator import (
+    FixSchedule,
+    bearing,
+    haversine_m,
+    interpolate_route,
+    offset_to_latlon,
+)
 from trucktrack.generate.models import DEFAULT_VALHALLA_URL
+from trucktrack.generate.operational_errors import fuel_rest_stop, relay_driving
+from trucktrack.generate.parking import (
+    ManeuverType,
+    generate_arrival_maneuver,
+    generate_departure_maneuver,
+)
 
 
 def _valhalla_reachable() -> bool:
@@ -71,7 +89,7 @@ class TestGenerateTrace:
             assert -90.0 <= p.lat <= 90.0
             assert -180.0 <= p.lon <= 180.0
             assert 0.0 <= p.heading < 360.0
-            assert p.speed_mph >= 0.0
+            assert p.speed_kmh >= 0.0
 
 
 @requires_valhalla
@@ -126,15 +144,18 @@ def test_empty_route_handled() -> None:
 # ── GPS error injectors ──────────────────────────────────────────────────
 
 
-def _linear_trace(n: int) -> list[TracePoint]:
-    base = datetime(2026, 1, 1, 8, 0, tzinfo=UTC).replace(tzinfo=None)
+_START = datetime(2026, 1, 1, 8, 0)
+
+
+def _linear_trace(n: int, interval_s: float = 60.0) -> list[TracePoint]:
+    base = _START
     return [
         TracePoint(
             lat=43.0 + i * 0.001,
             lon=-79.0,
-            speed_mph=55.0,
+            speed_kmh=55.0,
             heading=90.0,
-            timestamp=base + timedelta(seconds=60 * i),
+            timestamp=base + timedelta(seconds=interval_s * i),
         )
         for i in range(n)
     ]
@@ -146,11 +167,11 @@ class TestStaleReemissionInjector:
         out = stale_reemission(points, random.Random(0), count=3)
         assert len(out) == 33
 
-        src_keys = {(p.lat, p.lon, p.speed_mph, p.heading) for p in points}
+        src_keys = {(p.lat, p.lon, p.speed_kmh, p.heading) for p in points}
         seen: dict[tuple[float, float, float, float], int] = {}
         dup_count = 0
         for p in out:
-            k = (p.lat, p.lon, p.speed_mph, p.heading)
+            k = (p.lat, p.lon, p.speed_kmh, p.heading)
             if k in seen and k in src_keys:
                 dup_count += 1
             seen[k] = seen.get(k, 0) + 1
@@ -168,7 +189,7 @@ class TestStaleReemissionInjector:
                 "time": [p.timestamp for p in corrupted],
                 "lat": [p.lat for p in corrupted],
                 "lon": [p.lon for p in corrupted],
-                "speed": [p.speed_mph for p in corrupted],
+                "speed": [p.speed_kmh for p in corrupted],
                 "heading": [p.heading for p in corrupted],
             }
         )
@@ -179,3 +200,217 @@ class TestStaleReemissionInjector:
         points = _linear_trace(5)
         out = stale_reemission(points, random.Random(0), count=3)
         assert out == points
+
+
+# ── Sampling schedule ────────────────────────────────────────────────────
+
+
+def _straight_route(km: float = 60.0, mps: float = 25.0) -> RouteSegment:
+    """Due-east route in 500 m steps at a constant speed."""
+    n = int(km * 2)
+    coords = [offset_to_latlon(43.0, -80.0, 500.0 * i, 0.0) for i in range(n + 1)]
+    distances = [
+        haversine_m(*coords[i], *coords[i + 1]) for i in range(len(coords) - 1)
+    ]
+    total = sum(distances)
+    return RouteSegment(
+        coords=coords,
+        speeds_mps=[mps] * len(distances),
+        distances_m=distances,
+        total_distance_m=total,
+        total_duration_s=total / mps,
+    )
+
+
+_ROUTE = _straight_route()
+
+
+def _gaps_s(points: list[TracePoint]) -> list[float]:
+    return [
+        (b.timestamp - a.timestamp).total_seconds()
+        for a, b in zip(points, points[1:], strict=False)
+    ]
+
+
+class TestSamplingConfig:
+    def test_default_is_fixed_60s(self) -> None:
+        rng = random.Random(0)
+        assert {SamplingConfig().next_gap(rng) for _ in range(1000)} == {60.0}
+
+    def test_irregular_and_long_gaps(self) -> None:
+        # p(long) = 36/h * 10 s / 3600 = 0.1; p(irregular) = 0.9 * 0.2 = 0.18.
+        sampling = SamplingConfig(
+            interval_s=10.0, irregular_prob=0.2, long_gaps_per_hour=36.0
+        )
+        rng = random.Random(0)
+        gaps = [sampling.next_gap(rng) for _ in range(10_000)]
+        assert 800 < sum(g == 1800.0 for g in gaps) < 1200
+        irregular = [g for g in gaps if g not in (10.0, 1800.0)]
+        assert all(1 <= g <= 60 and g == int(g) for g in irregular)
+        assert 1500 < len(irregular) < 2000
+
+    def test_random_sampling_mix_is_by_gap(self) -> None:
+        rng = random.Random(0)
+        configs = [random_sampling(rng) for _ in range(4000)]
+        # Gaps per second of reporting, by interval.
+        rate: Counter[str] = Counter()
+        for c in configs:
+            kind = {60.0: "60s", 1800.0: "30min"}.get(c.interval_s, "fast")
+            rate[kind] += 1.0 / c.interval_s
+        total = sum(rate.values())
+        assert 0.65 < rate["60s"] / total < 0.75
+        assert 0.001 < rate["30min"] / total < 0.004
+        # By truck, the slow schedules dominate.
+        trucks = Counter(c.interval_s for c in configs)
+        assert trucks[60.0] / 4000 > 0.7
+        assert all(1 <= i <= 59 for i in trucks if i not in (60.0, 1800.0))
+        sparse = [c for c in configs if c.interval_s == 1800.0]
+        assert sparse
+        assert all(c.irregular_prob == c.long_gaps_per_hour == 0 for c in sparse)
+
+
+class TestFixSchedule:
+    def test_continuous_across_phases(self) -> None:
+        sched = FixSchedule(SamplingConfig(interval_s=45.0), _START, random.Random(0))
+        first = sched.until(_START + timedelta(seconds=100))
+        second = sched.until(_START + timedelta(seconds=200))
+        assert first == [_START + timedelta(seconds=s) for s in (0, 45, 90)]
+        assert second == [_START + timedelta(seconds=s) for s in (135, 180)]
+
+
+class TestInterpolateRoute:
+    def test_sampling_does_not_change_the_drive(self) -> None:
+        route = _ROUTE
+
+        def drive(sampling: SamplingConfig) -> tuple[list[TracePoint], datetime]:
+            sched = FixSchedule(sampling, _START, random.Random(0))
+            return interpolate_route(route, _START, random.Random(1), sched)
+
+        fine, fine_arrival = drive(SamplingConfig(interval_s=1.0))
+        coarse, coarse_arrival = drive(SamplingConfig())
+        sparse, sparse_arrival = drive(SamplingConfig(interval_s=1800.0))
+
+        # Arrival comes from the speed profile, not the last fix.
+        assert fine_arrival == coarse_arrival == sparse_arrival
+        assert sparse[-1].timestamp < sparse_arrival - timedelta(seconds=60)
+
+        # Every coarser fix lies on the 1 s trace.  Heading is excluded:
+        # it is held from the previous fix while stopped.
+        on_fine = {p.timestamp: (p.lat, p.lon, p.speed_kmh) for p in fine}
+        for p in coarse + sparse:
+            assert on_fine[p.timestamp] == (p.lat, p.lon, p.speed_kmh)
+
+
+class TestGenerateTraceSampling:
+    @pytest.fixture(autouse=True)
+    def _fake_route(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "trucktrack.generate.trace.fetch_route",
+            lambda *args, **kwargs: _ROUTE,
+        )
+
+    def _trace(self, sampling: SamplingConfig) -> list[TracePoint]:
+        return generate_trace(
+            TripConfig(
+                origin=_ROUTE.coords[0],
+                destination=_ROUTE.coords[-1],
+                departure_time=_START,
+                seed=3,
+                errors=[],
+                gps_noise_meters=0.0,
+                sampling=sampling,
+            )
+        )
+
+    @pytest.mark.parametrize("interval_s", [1.0, 37.0, 60.0, 1800.0])
+    def test_fixes_follow_the_schedule_through_every_phase(
+        self, interval_s: float
+    ) -> None:
+        points = self._trace(SamplingConfig(interval_s=interval_s))
+        assert set(_gaps_s(points)) == {interval_s}
+
+    def test_no_jump_where_maneuvers_meet_the_route(self) -> None:
+        points = self._trace(SamplingConfig(interval_s=1.0))
+        implied_mps = [
+            haversine_m(a.lat, a.lon, b.lat, b.lon) / g
+            for a, b, g in zip(points, points[1:], _gaps_s(points), strict=False)
+        ]
+        # The fake route is driven at 25 m/s; nothing should go faster.
+        assert max(implied_mps) < 26.0
+
+    def test_coarse_trace_is_a_subset_of_fine_trace(self) -> None:
+        fine = {
+            p.timestamp: (p.lat, p.lon)
+            for p in self._trace(SamplingConfig(interval_s=1.0))
+        }
+        coarse = self._trace(SamplingConfig())
+        assert all(fine[p.timestamp] == (p.lat, p.lon) for p in coarse)
+
+
+class TestInjectorsFollowSampling:
+    def test_fuel_stop_dwell_uses_trace_interval(self) -> None:
+        out = fuel_rest_stop(
+            _linear_trace(200, interval_s=10.0), random.Random(0), duration_s=600.0
+        )
+        assert len(out) == 260
+        assert set(_gaps_s(out)) == {10.0}
+
+    def test_signal_dropout_removes_a_duration(self) -> None:
+        out = signal_dropout(
+            _linear_trace(200, interval_s=10.0), random.Random(0), duration_s=300.0
+        )
+        assert len(out) == 170
+        assert max(_gaps_s(out)) == 310.0
+
+    def test_signal_dropout_lasts_its_duration_with_irregular_gaps(self) -> None:
+        # Mostly 1 s with a 30 s gap every fifth fix: counting fixes would
+        # remove ~300 fixes, i.e. far more than 300 s.
+        points = _linear_trace(1000, interval_s=1.0)
+        t = _START
+        for i, p in enumerate(points):
+            points[i] = replace(p, timestamp=t)
+            t += timedelta(seconds=30 if i % 5 == 4 else 1)
+        out = signal_dropout(points, random.Random(0), duration_s=300.0)
+        assert 300.0 <= max(_gaps_s(out)) <= 330.0
+
+    def test_relay_driving_keeps_the_device_gaps(self) -> None:
+        points = _linear_trace(60, interval_s=10.0)
+        for i in range(20, 30):
+            points[i] = replace(points[i], speed_kmh=0.0)
+        points[40:] = [
+            replace(p, timestamp=p.timestamp + timedelta(seconds=7))
+            for p in points[40:]
+        ]
+        out = relay_driving(points, random.Random(0))
+        # The stop is closed up, but the 17 s gap the device made survives.
+        assert len(out) < len(points)
+        assert sorted(set(_gaps_s(out))) == [10.0, 17.0]
+
+
+class TestManeuversMeetTheRoad:
+    @pytest.mark.parametrize("maneuver", list(ManeuverType))
+    @pytest.mark.parametrize("arriving", [True, False])
+    def test_maneuver_lines_up_with_the_road(
+        self, maneuver: ManeuverType, arriving: bool
+    ) -> None:
+        road, heading = (43.0, -80.0), 70.0
+        make = generate_arrival_maneuver if arriving else generate_departure_maneuver
+        points = make(*road, heading, _START, random.Random(0), maneuver_type=maneuver)
+
+        def turn(a: float, b: float) -> float:
+            return abs((b - a + 540.0) % 360.0 - 180.0)
+
+        moves = [
+            (p, bearing(p.lat, p.lon, q.lat, q.lon))
+            for p, q in zip(points, points[1:], strict=False)
+            if haversine_m(p.lat, p.lon, q.lat, q.lon) > 0.5
+        ]
+        # Arrivals leave the road where it ends, carrying on the same way;
+        # departures join it where it starts, heading the way it goes.
+        road_end, road_step = (
+            (points[0], moves[0]) if arriving else (points[-1], moves[-1])
+        )
+        assert haversine_m(road_end.lat, road_end.lon, *road) < 0.2
+        assert turn(road_step[1], heading) < 1.0
+        # Reported heading is GPS course (direction of motion), even reversing.
+        assert all(turn(p.heading, moved) < 10.0 for p, moved in moves)

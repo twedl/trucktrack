@@ -12,7 +12,11 @@ from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime, timedelta
 
-from trucktrack.generate.interpolator import INTERVAL_S, haversine_m, offset_to_latlon
+from trucktrack.generate.interpolator import (
+    haversine_m,
+    median_interval_s,
+    offset_to_latlon,
+)
 from trucktrack.generate.models import TracePoint
 
 ErrorFn = Callable[..., list[TracePoint]]
@@ -29,6 +33,7 @@ def _make_dwell_points(
     anchor: TracePoint,
     n: int,
     start_time: datetime,
+    interval_s: float,
     rng: random.Random,
     jitter_m: float = 2.0,
 ) -> list[TracePoint]:
@@ -44,12 +49,40 @@ def _make_dwell_points(
             TracePoint(
                 lat=round(lat, 6),
                 lon=round(lon, 6),
-                speed_mph=0.0,
+                speed_kmh=0.0,
                 heading=round(rng.uniform(0, 360), 1),
-                timestamp=start_time + timedelta(seconds=i * INTERVAL_S),
+                timestamp=start_time + timedelta(seconds=i * interval_s),
             )
         )
     return pts
+
+
+def _insert_dwell(
+    points: list[TracePoint],
+    idx: int,
+    duration_s: float,
+    rng: random.Random,
+    *,
+    jitter_m: float,
+    min_points: int = 1,
+    heading: float | None = None,
+) -> list[TracePoint]:
+    """Insert stationary points after ``points[idx]``, shifting the rest later.
+
+    Dwell points come at the trace's own interval; *heading*, if given,
+    replaces their random headings.
+    """
+    dt = median_interval_s(points)
+    n = max(min_points, int(duration_s / dt))
+    if n == 0:
+        return points
+    anchor = points[idx]
+    t0 = anchor.timestamp + timedelta(seconds=dt)
+    dwell = _make_dwell_points(anchor, n, t0, dt, rng, jitter_m=jitter_m)
+    if heading is not None:
+        dwell = [replace(p, heading=heading) for p in dwell]
+    shift = timedelta(seconds=n * dt)
+    return points[: idx + 1] + dwell + _shift_timestamps(points[idx + 1 :], shift)
 
 
 def privacy_shutoff(
@@ -63,8 +96,8 @@ def privacy_shutoff(
     start_idx = rng.randint(int(len(points) * 0.7), int(len(points) * 0.85))
     n_remove = rng.randint(3, max(4, len(points) // 10))
     end_idx = min(start_idx + n_remove, len(points) - 2)
-    actual_removed_s = (end_idx - start_idx) * INTERVAL_S
-    extra = timedelta(seconds=duration_s - actual_removed_s)
+    removed = points[end_idx].timestamp - points[start_idx].timestamp
+    extra = timedelta(seconds=duration_s) - removed
     return points[:start_idx] + _shift_timestamps(points[end_idx:], extra)
 
 
@@ -72,7 +105,7 @@ def relay_driving(
     points: list[TracePoint],
     rng: random.Random,
     *,
-    speed_threshold_mph: float = 2.0,
+    speed_threshold_kmh: float = 3.2,
     min_stop_points: int = 3,
 ) -> list[TracePoint]:
     if len(points) < 10:
@@ -83,13 +116,13 @@ def relay_driving(
     stopped = 0
 
     for pt in points:
-        if pt.speed_mph < speed_threshold_mph:
+        if pt.speed_kmh < speed_threshold_kmh:
             stopped += 1
             if stopped <= min_stop_points:
                 current.append(pt)
         else:
             if stopped > min_stop_points and current:
-                while current and current[-1].speed_mph < speed_threshold_mph:
+                while current and current[-1].speed_kmh < speed_threshold_kmh:
                     current.pop()
                 if current:
                     segments.append(current)
@@ -102,12 +135,14 @@ def relay_driving(
     if not segments:
         return points
 
+    # Close each removed stop: every segment starts one interval after the
+    # previous one ends, keeping the device's gaps within segments.
+    dt = timedelta(seconds=median_interval_s(points))
     result: list[TracePoint] = []
-    t = points[0].timestamp
+    next_start = points[0].timestamp
     for seg in segments:
-        for pt in seg:
-            result.append(replace(pt, timestamp=t))
-            t += timedelta(seconds=INTERVAL_S)
+        result.extend(_shift_timestamps(seg, next_start - seg[0].timestamp))
+        next_start = result[-1].timestamp + dt
     return result
 
 
@@ -120,15 +155,12 @@ def yard_dwell(
 ) -> list[TracePoint]:
     if not points:
         return points
-    n = max(1, int(duration_s / INTERVAL_S))
-    if position == "start":
-        anchor = points[0]
-        t0 = anchor.timestamp - timedelta(seconds=duration_s)
-        return _make_dwell_points(anchor, n, t0, rng) + points
-    else:
-        anchor = points[-1]
-        t0 = anchor.timestamp + timedelta(seconds=INTERVAL_S)
-        return points + _make_dwell_points(anchor, n, t0, rng)
+    if position != "start":
+        return _insert_dwell(points, len(points) - 1, duration_s, rng, jitter_m=2.0)
+    dt = median_interval_s(points)
+    n = max(1, int(duration_s / dt))
+    t0 = points[0].timestamp - timedelta(seconds=duration_s)
+    return _make_dwell_points(points[0], n, t0, dt, rng) + points
 
 
 def fuel_rest_stop(
@@ -143,12 +175,7 @@ def fuel_rest_stop(
     if position_fraction is None:
         position_fraction = rng.uniform(0.4, 0.6)
     idx = max(1, min(int(len(points) * position_fraction), len(points) - 2))
-    anchor = points[idx]
-    n_stop = max(1, int(duration_s / INTERVAL_S))
-    t0 = anchor.timestamp + timedelta(seconds=INTERVAL_S)
-    stop_pts = _make_dwell_points(anchor, n_stop, t0, rng, jitter_m=3.0)
-    shift = timedelta(seconds=n_stop * INTERVAL_S)
-    return points[: idx + 1] + stop_pts + _shift_timestamps(points[idx + 1 :], shift)
+    return _insert_dwell(points, idx, duration_s, rng, jitter_m=3.0)
 
 
 def weigh_station_stop(
@@ -166,15 +193,10 @@ def weigh_station_stop(
     for i in range(max(0, idx - approach_points), idx):
         result[i] = replace(
             result[i],
-            speed_mph=round(result[i].speed_mph * 0.3, 1),
+            speed_kmh=round(result[i].speed_kmh * 0.3, 1),
         )
 
-    anchor = result[idx]
-    n_stop = max(1, int(duration_s / INTERVAL_S))
-    t0 = anchor.timestamp + timedelta(seconds=INTERVAL_S)
-    stop_pts = _make_dwell_points(anchor, n_stop, t0, rng, jitter_m=1.5)
-    shift = timedelta(seconds=n_stop * INTERVAL_S)
-    return result[: idx + 1] + stop_pts + _shift_timestamps(result[idx + 1 :], shift)
+    return _insert_dwell(result, idx, duration_s, rng, jitter_m=1.5)
 
 
 def bobtail_segment(
@@ -190,10 +212,10 @@ def bobtail_segment(
     start = rng.randint(0, len(points) - n)
     result = list(points)
     for i in range(start, start + n):
-        if result[i].speed_mph > 5.0:
+        if result[i].speed_kmh > 8.0:
             result[i] = replace(
                 result[i],
-                speed_mph=round(result[i].speed_mph * speed_factor, 1),
+                speed_kmh=round(result[i].speed_kmh * speed_factor, 1),
             )
     return result
 
@@ -242,10 +264,10 @@ def device_power_cycle(
     if len(points) < 10:
         return points
     idx = rng.randint(len(points) // 4, 3 * len(points) // 4)
-    n_remove = max(1, int(gap_s / INTERVAL_S))
+    n_remove = max(1, int(gap_s / median_interval_s(points)))
     end_idx = min(idx + n_remove, len(points) - 1)
-    actual_s = (end_idx - idx) * INTERVAL_S
-    extra = timedelta(seconds=gap_s - actual_s)
+    removed = points[end_idx].timestamp - points[idx].timestamp
+    extra = timedelta(seconds=gap_s) - removed
 
     before = points[:idx]
     after_raw = points[end_idx:]
@@ -268,13 +290,13 @@ def traffic_jam(
     rng: random.Random,
     *,
     duration_s: float = 7_200.0,
-    crawl_speed_mph: float = 3.0,
+    crawl_speed_kmh: float = 5.0,
     full_stop_fraction: float = 0.4,
 ) -> list[TracePoint]:
     """Slow or stop a highway segment to simulate extreme traffic.
 
     A stretch of the trace (in the middle 30-70%) has its speeds crushed
-    to *crawl_speed_mph* or zero, and stationary dwell points are inserted
+    to *crawl_speed_kmh* or zero, and stationary dwell points are inserted
     to pad the duration.  Simulates weather closures, construction,
     accidents, protests, etc.
     """
@@ -291,31 +313,27 @@ def traffic_jam(
     result = list(points)
     for i in range(start_idx, min(end_idx, len(result))):
         if rng.random() < full_stop_fraction:
-            result[i] = replace(result[i], speed_mph=0.0)
+            result[i] = replace(result[i], speed_kmh=0.0)
         else:
             result[i] = replace(
                 result[i],
-                speed_mph=round(rng.uniform(0.5, crawl_speed_mph), 1),
+                speed_kmh=round(rng.uniform(0.8, crawl_speed_kmh), 1),
             )
 
-    # Insert dwell points at the jam midpoint to pad the total delay
-    existing_window_s = (end_idx - start_idx) * INTERVAL_S
-    extra_s = max(0.0, duration_s - existing_window_s)
-    n_dwell = int(extra_s / INTERVAL_S)
-    if n_dwell > 0:
-        mid = (start_idx + min(end_idx, len(result))) // 2
-        anchor = result[mid]
-        t0 = anchor.timestamp + timedelta(seconds=INTERVAL_S)
-        dwell_pts = _make_dwell_points(anchor, n_dwell, t0, rng, jitter_m=1.0)
-        # Override dwell headings to match travel direction (not random)
-        for k in range(len(dwell_pts)):
-            dwell_pts[k] = replace(dwell_pts[k], heading=anchor.heading)
-        shift = timedelta(seconds=n_dwell * INTERVAL_S)
-        result = (
-            result[: mid + 1] + dwell_pts + _shift_timestamps(result[mid + 1 :], shift)
-        )
-
-    return result
+    # Insert dwell points at the jam midpoint to pad the total delay,
+    # heading in the travel direction (not random)
+    window_end = result[min(end_idx, len(result) - 1)].timestamp
+    existing_window_s = (window_end - result[start_idx].timestamp).total_seconds()
+    mid = (start_idx + min(end_idx, len(result))) // 2
+    return _insert_dwell(
+        result,
+        mid,
+        max(0.0, duration_s - existing_window_s),
+        rng,
+        jitter_m=1.0,
+        min_points=0,
+        heading=result[mid].heading,
+    )
 
 
 def geofence_gap(

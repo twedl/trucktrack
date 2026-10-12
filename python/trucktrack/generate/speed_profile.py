@@ -7,9 +7,9 @@ import random
 import numpy as np
 
 # Truck speed caps by road class (m/s)
-HIGHWAY_CAP = 29.0  # ~65 mph
-ARTERIAL_CAP = 15.6  # ~35 mph
-URBAN_CAP = 11.2  # ~25 mph
+HIGHWAY_CAP = 29.0  # ~104 km/h
+ARTERIAL_CAP = 15.6  # ~56 km/h
+URBAN_CAP = 11.2  # ~40 km/h
 
 # Acceleration limits (m/s^2)
 MAX_ACCEL = 0.5  # loaded truck, 0-60 in ~54s
@@ -92,5 +92,5 @@ def inject_traffic_stops(
     return new_speeds, new_distances
 
 
-def mps_to_mph(speed_mps: float) -> float:
-    return speed_mps * 2.23694
+def mps_to_kmh(speed_mps: float) -> float:
+    return speed_mps * 3.6

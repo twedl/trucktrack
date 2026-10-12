@@ -21,7 +21,7 @@ def _make_tracepoints(n: int = 10) -> list[TracePoint]:
         TracePoint(
             lat=43.65 + i * 0.01,
             lon=-79.38 + i * 0.01,
-            speed_mph=55.0 + i,
+            speed_kmh=55.0 + i,
             heading=90.0,
             timestamp=base + timedelta(minutes=i),
         )

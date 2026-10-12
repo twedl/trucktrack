@@ -77,7 +77,7 @@ def _trips_to_points_df(
             ids.append(trip_id)
             lats.append(pt.lat)
             lons.append(pt.lon)
-            speeds.append(round(pt.speed_mph, 1))
+            speeds.append(round(pt.speed_kmh, 1))
             headings.append(round(pt.heading, 1))
             timestamps.append(pt.timestamp)
     return pl.DataFrame(

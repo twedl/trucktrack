@@ -9,7 +9,8 @@ Five maneuver types modeled after real CDL backing patterns:
   5. ANGLE_BACK      — Back into an angled parking space (45-60°).
 
 Geometry is built in a local meter frame (X=east, Y=north) centered on the
-target point, then projected to lat/lon.
+target point, then projected to lat/lon.  Maneuver speed tables are in mph
+(CDL backing guidance); ``_build_trace`` converts them to km/h.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ import numpy as np
 
 from trucktrack.generate.interpolator import offset_to_latlon
 from trucktrack.generate.models import TracePoint
+from trucktrack.generate.speed_profile import mps_to_kmh
 
 MIN_TURN_RADIUS = 12.8
 TRAILER_KING_TO_AXLE = 12.2
@@ -89,7 +91,7 @@ def _compass_to_math(heading_deg: float) -> float:
 def _build_trace(
     path_xy: list[tuple[float, float]],
     speeds_mph: list[float],
-    cab_headings: list[float],
+    headings: list[float],
     base_lat: float,
     base_lon: float,
     start_time: datetime,
@@ -103,7 +105,7 @@ def _build_trace(
         x, y = path_xy[i]
         lat, lon = _offset_to_latlon(base_lat, base_lon, x, y)
         speed = speeds_mph[i]
-        hdg = cab_headings[i]
+        hdg = headings[i]
 
         if heading_jitter > 0:
             hdg = (hdg + rng.uniform(-heading_jitter, heading_jitter)) % 360
@@ -112,7 +114,7 @@ def _build_trace(
             TracePoint(
                 lat=round(lat, 6),
                 lon=round(lon, 6),
-                speed_mph=round(speed, 1),
+                speed_kmh=round(mps_to_kmh(speed * MPH_TO_MPS), 1),
                 heading=round(hdg, 1),
                 timestamp=current_time,
             )
@@ -408,29 +410,70 @@ _GENERATORS = {
 }
 
 
+def _orient(
+    path: list[tuple[float, float]], at: int, heading: float
+) -> list[tuple[float, float]]:
+    """Turn and shift *path* so it meets the road at ``path[at]``.
+
+    The step at that end (the first step for an arrival, the last for a
+    departure) is rotated to point along *heading*, and ``path[at]`` is
+    moved to the origin, i.e. onto the road.
+    """
+    a, b = (path[0], path[1]) if at == 0 else (path[-2], path[-1])
+    turn = math.radians(heading - _heading_between(a, b))
+    c, s = math.cos(turn), math.sin(turn)
+    ox, oy = path[at]
+    # Clockwise (compass) rotation about the road point.
+    return [((x - ox) * c + (y - oy) * s, (y - oy) * c - (x - ox) * s) for x, y in path]
+
+
+def _course_headings(
+    path: list[tuple[float, float]], final_heading: float | None = None
+) -> list[float]:
+    """GPS course over ground: the bearing to the next point.
+
+    A device reports its direction of motion, so a reversing truck reads
+    opposite to its cab.  Stationary steps hold the previous course; the
+    last point takes *final_heading*, or holds too.
+    """
+    headings: list[float] = []
+    for a, b in zip(path, path[1:], strict=False):
+        if a != b:
+            headings.append(_heading_between(a, b))
+        else:
+            headings.append(headings[-1] if headings else final_heading or 0.0)
+    last = final_heading if final_heading is not None else headings[-1]
+    return [*headings, last]
+
+
 def generate_arrival_maneuver(
-    dock_lat: float,
-    dock_lon: float,
-    dock_heading: float,
+    road_lat: float,
+    road_lon: float,
+    arrival_heading: float,
     start_time: datetime,
     rng: random.Random,
     maneuver_type: ManeuverType = ManeuverType.ALLEY_DOCK,
     approach_side: str = "right",
 ) -> list[TracePoint]:
-    """Trace points for a truck arriving at a target location."""
+    """Trace points for a truck leaving the road and parking at a dock.
+
+    Starts at (*road_lat*, *road_lon*) carrying on along *arrival_heading*,
+    the direction the truck was travelling; the dock is wherever it ends.
+    """
     if maneuver_type is ManeuverType.ALLEY_DOCK:
-        path, speeds, headings = _alley_dock(dock_heading, rng, approach_side)
+        path, speeds, _ = _alley_dock(arrival_heading, rng, approach_side)
     else:
-        path, speeds, headings = _GENERATORS[maneuver_type](dock_heading, rng)
+        path, speeds, _ = _GENERATORS[maneuver_type](arrival_heading, rng)
+    path = _orient(path, 0, arrival_heading)
 
     jitter = 2.5 if maneuver_type is not ManeuverType.PULL_THROUGH else 0.5
 
     return _build_trace(
         path,
         speeds,
-        headings,
-        dock_lat,
-        dock_lon,
+        _course_headings(path),
+        road_lat,
+        road_lon,
         start_time,
         rng,
         heading_jitter=jitter,
@@ -438,63 +481,53 @@ def generate_arrival_maneuver(
 
 
 def generate_departure_maneuver(
-    dock_lat: float,
-    dock_lon: float,
-    dock_heading: float,
+    road_lat: float,
+    road_lon: float,
+    departure_heading: float,
     start_time: datetime,
     rng: random.Random,
     maneuver_type: ManeuverType = ManeuverType.ALLEY_DOCK,
     approach_side: str = "right",
 ) -> list[TracePoint]:
-    """Trace points for a truck departing a target location."""
+    """Trace points for a truck pulling out of a dock onto the road.
+
+    Ends at (*road_lat*, *road_lon*) heading along *departure_heading*;
+    the dock is wherever it starts.
+    """
     if maneuver_type is ManeuverType.PULL_THROUGH:
-        path = _straight_points((0.0, 0.0), dock_heading, 80, num_points=6)
+        path = _straight_points((0.0, 0.0), departure_heading, 80, num_points=6)
         speeds = np.linspace(0.0, 12.0, 6).tolist()
-        headings = [dock_heading] * 6
-        return _build_trace(
-            path,
-            speeds,
-            headings,
-            dock_lat,
-            dock_lon,
-            start_time,
-            rng,
-            heading_jitter=0.5,
-        )
-
-    if maneuver_type is ManeuverType.ALLEY_DOCK:
-        path, _, headings = _alley_dock(dock_heading, rng, approach_side)
+        jitter = 0.5
     else:
-        path, _, headings = _GENERATORS[maneuver_type](dock_heading, rng)
-
-    path = list(reversed(path))
-    headings = list(reversed(headings))
-
-    n = len(path)
-    speeds = []
-    new_headings = []
-    for i in range(n):
-        frac = i / max(n - 1, 1)
-        if frac < 0.05:
-            speed = 0.0
-        elif frac < 0.3:
-            speed = 2.0 + (frac - 0.05) / 0.25 * 4.0
-        elif frac < 0.6:
-            speed = 6.0 + (frac - 0.3) / 0.3 * 3.0
+        if maneuver_type is ManeuverType.ALLEY_DOCK:
+            path, _, _ = _alley_dock(departure_heading, rng, approach_side)
         else:
-            speed = 9.0 + (frac - 0.6) / 0.4 * 3.0
-        speeds.append(speed)
+            path, _, _ = _GENERATORS[maneuver_type](departure_heading, rng)
+        path = list(reversed(path))
 
-        hdg = _heading_between(path[i], path[i + 1]) if i < n - 1 else dock_heading
-        new_headings.append(hdg)
+        n = len(path)
+        speeds = []
+        for i in range(n):
+            frac = i / max(n - 1, 1)
+            if frac < 0.05:
+                speed = 0.0
+            elif frac < 0.3:
+                speed = 2.0 + (frac - 0.05) / 0.25 * 4.0
+            elif frac < 0.6:
+                speed = 6.0 + (frac - 0.3) / 0.3 * 3.0
+            else:
+                speed = 9.0 + (frac - 0.6) / 0.4 * 3.0
+            speeds.append(speed)
+        jitter = 1.5
+    path = _orient(path, -1, departure_heading)
 
     return _build_trace(
         path,
         speeds,
-        new_headings,
-        dock_lat,
-        dock_lon,
+        _course_headings(path, departure_heading),
+        road_lat,
+        road_lon,
         start_time,
         rng,
-        heading_jitter=1.5,
+        heading_jitter=jitter,
     )

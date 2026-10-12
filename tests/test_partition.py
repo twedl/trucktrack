@@ -34,7 +34,7 @@ def _trip(
             TracePoint(
                 lat=start_lat + f * (end_lat - start_lat),
                 lon=start_lon + f * (end_lon - start_lon),
-                speed_mph=55.0,
+                speed_kmh=55.0,
                 heading=90.0,
                 timestamp=base + timedelta(minutes=i),
             )

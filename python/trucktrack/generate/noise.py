@@ -27,12 +27,12 @@ def apply_noise(
 
         lat, lon = offset_to_latlon(pt.lat, pt.lon, dx, dy)
 
-        speed_noise = rng.gauss(0, 0.5)
-        noisy_speed = max(0.0, pt.speed_mph + speed_noise)
-        if pt.speed_mph < 0.1:
+        speed_noise = rng.gauss(0, 0.8)
+        noisy_speed = max(0.0, pt.speed_kmh + speed_noise)
+        if pt.speed_kmh < 0.1:
             noisy_speed = 0.0
 
-        if pt.speed_mph > 2.0:
+        if pt.speed_kmh > 3.2:
             heading_noise = rng.gauss(0, 1.0)
             noisy_heading = (pt.heading + heading_noise) % 360
         else:
@@ -42,7 +42,7 @@ def apply_noise(
             TracePoint(
                 lat=round(lat, 6),
                 lon=round(lon, 6),
-                speed_mph=round(noisy_speed, 1),
+                speed_kmh=round(noisy_speed, 1),
                 heading=round(noisy_heading, 1),
                 timestamp=pt.timestamp,
             )

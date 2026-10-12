@@ -8,7 +8,12 @@ from datetime import datetime
 from io import BytesIO, StringIO
 
 from trucktrack.generate.gps_errors import GPS_ERRORS
-from trucktrack.generate.interpolator import bearing, interpolate_route, resample_trace
+from trucktrack.generate.interpolator import (
+    FixSchedule,
+    bearing,
+    interpolate_route,
+    resample_trace,
+)
 from trucktrack.generate.models import ErrorConfig, RouteSegment, TracePoint, TripConfig
 from trucktrack.generate.noise import apply_noise
 from trucktrack.generate.operational_errors import OPERATIONAL_ERRORS
@@ -23,6 +28,12 @@ from trucktrack.generate.router import fetch_route
 def generate_trace(config: TripConfig) -> list[TracePoint]:
     """Generate a complete GPS trace for a truck delivery trip."""
     rng = random.Random(config.seed)
+    # Separate stream so the sampling schedule doesn't perturb the drive:
+    # the same seed under different SamplingConfigs is the same trip.
+    sampling_rng = random.Random(
+        None if config.seed is None else f"{config.seed}:sampling"
+    )
+    schedule = FixSchedule(config.sampling, config.departure_time, sampling_rng)
 
     route = fetch_route(
         config.origin, config.destination, config.valhalla_url, config=config.config
@@ -36,36 +47,37 @@ def generate_trace(config: TripConfig) -> list[TracePoint]:
 
     all_points: list[TracePoint] = []
 
-    departure_pts = generate_departure_maneuver(
-        dock_lat=config.origin[0],
-        dock_lon=config.origin[1],
-        dock_heading=origin_heading,
+    # Maneuvers meet the route where it starts and ends; the docks fall
+    # wherever the maneuvers put them.
+    road_start = route.coords[0] if route.coords else config.origin
+    road_end = route.coords[-1] if route.coords else config.destination
+
+    departure_path = generate_departure_maneuver(
+        road_lat=road_start[0],
+        road_lon=road_start[1],
+        departure_heading=origin_heading,
         start_time=config.departure_time,
         rng=rng,
         maneuver_type=origin_maneuver,
     )
-    departure_pts = resample_trace(departure_pts)
-    all_points.extend(departure_pts)
+    all_points.extend(resample_trace(departure_path, schedule))
 
     driving_start = (
-        departure_pts[-1].timestamp if departure_pts else config.departure_time
+        departure_path[-1].timestamp if departure_path else config.departure_time
     )
 
-    driving_pts = interpolate_route(route, driving_start, rng)
+    driving_pts, arrival_start = interpolate_route(route, driving_start, rng, schedule)
     all_points.extend(driving_pts)
 
-    arrival_start = driving_pts[-1].timestamp if driving_pts else driving_start
-
-    arrival_pts = generate_arrival_maneuver(
-        dock_lat=config.destination[0],
-        dock_lon=config.destination[1],
-        dock_heading=dest_heading,
+    arrival_path = generate_arrival_maneuver(
+        road_lat=road_end[0],
+        road_lon=road_end[1],
+        arrival_heading=dest_heading,
         start_time=arrival_start,
         rng=rng,
         maneuver_type=dest_maneuver,
     )
-    arrival_pts = resample_trace(arrival_pts)
-    all_points.extend(arrival_pts)
+    all_points.extend(resample_trace(arrival_path, schedule))
 
     if config.errors:
         all_points = _apply_errors(all_points, config.errors, rng)
@@ -105,7 +117,7 @@ def _csv_rows(points: list[TracePoint], trip_id: str) -> list[list[str]]:
             trip_id,
             f"{pt.lat:.6f}",
             f"{pt.lon:.6f}",
-            f"{pt.speed_mph:.1f}",
+            f"{pt.speed_kmh:.1f}",
             f"{pt.heading:.1f}",
             pt.timestamp.strftime("%Y-%m-%dT%H:%M:%SZ"),
         ]
@@ -148,7 +160,7 @@ def traces_to_parquet(
             ids.append(trip_id)
             lats.append(pt.lat)
             lons.append(pt.lon)
-            speeds.append(round(pt.speed_mph, 1))
+            speeds.append(round(pt.speed_kmh, 1))
             headings.append(round(pt.heading, 1))
             timestamps.append(pt.timestamp)
 

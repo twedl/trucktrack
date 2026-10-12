@@ -8,28 +8,40 @@ from __future__ import annotations
 
 import math
 import random
+from bisect import bisect_left
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import timedelta
 
-from trucktrack.generate.interpolator import INTERVAL_S, offset_to_latlon
+from trucktrack.generate.interpolator import median_interval_s, offset_to_latlon
 from trucktrack.generate.models import TracePoint
 
 ErrorFn = Callable[..., list[TracePoint]]
 
 
 def _random_window(
-    n: int,
+    points: list[TracePoint],
     duration_s: float,
     rng: random.Random,
+    *,
+    min_count: int = 2,
     margin_frac: float = 0.2,
 ) -> tuple[int, int]:
-    """Return (start, end) indices for a random contiguous window."""
-    count = max(2, int(duration_s / INTERVAL_S))
+    """Return (start, end) indices of a random window lasting *duration_s*.
+
+    The window holds at least *min_count* points.  Its end comes from the
+    timestamps, so irregular gaps don't stretch or shrink it.
+    """
+    n = len(points)
+    count = max(min_count, int(duration_s / median_interval_s(points)))
     margin = int(n * margin_frac)
     hi = max(margin, n - margin - count)
     start = rng.randint(margin, hi)
-    return start, min(start + count, n)
+    window_end = points[start].timestamp + timedelta(seconds=duration_s)
+    end = bisect_left(
+        points, window_end, lo=min(start + min_count, n), key=lambda p: p.timestamp
+    )
+    return start, end
 
 
 def _offset_point(
@@ -52,11 +64,7 @@ def signal_dropout(
 ) -> list[TracePoint]:
     if len(points) < 10:
         return points
-    n_remove = max(1, int(duration_s / INTERVAL_S))
-    margin = len(points) // 5
-    hi = max(margin, len(points) - margin - n_remove)
-    start = rng.randint(margin, hi)
-    end = min(start + n_remove, len(points))
+    start, end = _random_window(points, duration_s, rng, min_count=1)
     return points[:start] + points[end:]
 
 
@@ -66,13 +74,19 @@ def cold_start_drift(
     *,
     n_points: int = 3,
     drift_meters: float = 50.0,
+    min_off_s: float = 120.0,
 ) -> list[TracePoint]:
     if len(points) < 2:
         return points
+    # A cold start follows the device being off, not an ordinary gap: at
+    # least two fixes missed and at least *min_off_s*, so neither a fast
+    # device's off-schedule fix (up to 60 s) nor a 30 min device's normal
+    # gap counts.
+    min_off_s = max(2 * median_interval_s(points), min_off_s)
     result = list(points)
     for i in range(1, len(result)):
         gap = (result[i].timestamp - result[i - 1].timestamp).total_seconds()
-        if gap > INTERVAL_S * 2:
+        if gap > min_off_s:
             for j in range(i, min(i + n_points, len(result))):
                 decay = drift_meters * (1.0 - (j - i) / n_points)
                 result[j] = _offset_point(
@@ -98,7 +112,7 @@ def multipath(
     for i in indices:
         offset = rng.uniform(offset_min_m, offset_max_m)
         moved = _offset_point(result[i], offset, rng.uniform(0, 2 * math.pi))
-        result[i] = replace(moved, speed_mph=round(rng.uniform(60, 120), 1))
+        result[i] = replace(moved, speed_kmh=round(rng.uniform(100, 190), 1))
     return result
 
 
@@ -110,7 +124,7 @@ def frozen_fix(
 ) -> list[TracePoint]:
     if len(points) < 10:
         return points
-    start, end = _random_window(len(points), duration_s, rng)
+    start, end = _random_window(points, duration_s, rng)
     frozen_lat = points[start].lat
     frozen_lon = points[start].lon
     result = list(points)
@@ -119,7 +133,7 @@ def frozen_fix(
             result[i],
             lat=frozen_lat,
             lon=frozen_lon,
-            speed_mph=0.0,
+            speed_kmh=0.0,
         )
     return result
 
@@ -181,12 +195,12 @@ def speed_heading_desync(
 ) -> list[TracePoint]:
     if len(points) < 10:
         return points
-    start, end = _random_window(len(points), duration_s, rng)
+    start, end = _random_window(points, duration_s, rng)
     heading_lag = rng.randint(2, 5)
     result = list(points)
     for i in range(start, end):
         lagged = result[max(i - heading_lag, 0)].heading
-        result[i] = replace(result[i], speed_mph=0.0, heading=lagged)
+        result[i] = replace(result[i], speed_kmh=0.0, heading=lagged)
     return result
 
 
@@ -200,7 +214,7 @@ def jitter_at_rest(
     walk_lat = 0.0
     walk_lon = 0.0
     for i in range(len(result)):
-        if result[i].speed_mph < 1.0:
+        if result[i].speed_kmh < 1.6:
             step_lat = rng.gauss(0, walk_meters / 3) / 111_320.0
             step_lon = rng.gauss(0, walk_meters / 3) / (
                 111_320.0 * math.cos(math.radians(result[i].lat))
@@ -211,7 +225,7 @@ def jitter_at_rest(
                 result[i],
                 lat=round(result[i].lat + walk_lat, 6),
                 lon=round(result[i].lon + walk_lon, 6),
-                speed_mph=round(rng.uniform(0, 0.5), 1),
+                speed_kmh=round(rng.uniform(0, 0.8), 1),
                 heading=round(rng.uniform(0, 360), 1),
             )
         else:
@@ -231,12 +245,12 @@ def stale_reemission(
     """Device re-emits an earlier ping verbatim a few rows later.
 
     Picks ``count`` source rows, and for each one inserts a copy of that
-    row (same ``lat``/``lon``/``speed_mph``/``heading``) a few positions
+    row (same ``lat``/``lon``/``speed_kmh``/``heading``) a few positions
     later in the trace with a timestamp slotted just after the row it
     displaces.  The result is the ``T1 → T2 → T3=T1`` pattern that
     :func:`trucktrack.filter_stale_pings` is designed to detect.
 
-    Only moving rows (``speed_mph > 0``) are chosen as sources, since the
+    Only moving rows (``speed_kmh > 0``) are chosen as sources, since the
     stale-ping filter exempts zero-speed rows and an injection there would
     be invisible to downstream checks.
     """
@@ -244,7 +258,7 @@ def stale_reemission(
     if n < 10 or lag_min < 1 or lag_max < lag_min:
         return points
 
-    moving = [i for i in range(2, n - lag_max - 2) if points[i].speed_mph > 0]
+    moving = [i for i in range(2, n - lag_max - 2) if points[i].speed_kmh > 0]
     if not moving:
         return points
 
@@ -256,9 +270,10 @@ def stale_reemission(
         # Insert just after the row that actually occurred at src+lag.
         insert_at = src + lag + 1
         anchor = points[src + lag]
-        # Offset by a fraction of the sampling interval so the re-emitted
-        # row still sorts after the anchor.
-        ts = anchor.timestamp + timedelta(seconds=INTERVAL_S * rng.uniform(0.1, 0.9))
+        # Offset by a fraction of the gap to the next row so the
+        # re-emitted row sorts between the anchor and that row.
+        gap = points[insert_at].timestamp - anchor.timestamp
+        ts = anchor.timestamp + gap * rng.uniform(0.1, 0.9)
         stale = replace(points[src], timestamp=ts)
         ops.append((insert_at, stale))
 

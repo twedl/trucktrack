@@ -10,10 +10,12 @@ from trucktrack._core import __version__
 from trucktrack.generate import (
     ErrorConfig,
     RouteSegment,
+    SamplingConfig,
     TracePoint,
     TripConfig,
     default_error_profile,
     generate_trace,
+    random_sampling,
     traces_to_csv,
     traces_to_parquet,
 )
@@ -79,10 +81,12 @@ __all__ = [
     # generate
     "ErrorConfig",
     "RouteSegment",
+    "SamplingConfig",
     "TracePoint",
     "TripConfig",
     "default_error_profile",
     "generate_trace",
+    "random_sampling",
     "traces_to_csv",
     "traces_to_parquet",
     # partition

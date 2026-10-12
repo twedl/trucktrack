@@ -16,7 +16,7 @@ def tracepoints_to_dataframe(points: list[TracePoint]) -> pl.DataFrame:
         {
             "lat": [p.lat for p in points],
             "lon": [p.lon for p in points],
-            "speed": [p.speed_mph for p in points],
+            "speed": [p.speed_kmh for p in points],
             "heading": [p.heading for p in points],
             "time": [p.timestamp for p in points],
         }

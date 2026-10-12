@@ -1,21 +1,64 @@
-"""Walk a route polyline at fixed time intervals to produce GPS trace points."""
+"""Walk a route polyline at a device's fix times to produce GPS trace points."""
 
 from __future__ import annotations
 
 import math
 import random
+import statistics
+from dataclasses import replace
 from datetime import datetime, timedelta
 
 import numpy as np
 
-from trucktrack.generate.models import RouteSegment, TracePoint
+from trucktrack.generate.models import (
+    DEFAULT_INTERVAL_S,
+    RouteSegment,
+    SamplingConfig,
+    TracePoint,
+)
 from trucktrack.generate.speed_profile import (
     inject_traffic_stops,
-    mps_to_mph,
+    mps_to_kmh,
     smooth_speeds,
 )
 
-INTERVAL_S = 60.0
+
+class FixSchedule:
+    """A device's fix times, continuous across the phases of a trace.
+
+    Each phase takes the fix times that fall inside it, so a gap that
+    starts in one phase ends in the next instead of restarting the
+    clock at every phase boundary.
+    """
+
+    def __init__(
+        self, sampling: SamplingConfig, start: datetime, rng: random.Random
+    ) -> None:
+        self._sampling = sampling
+        self._rng = rng
+        self._next = start
+
+    def until(self, end: datetime) -> list[datetime]:
+        """Take every remaining fix time at or before *end*."""
+        times: list[datetime] = []
+        while self._next <= end:
+            times.append(self._next)
+            self._next += timedelta(seconds=self._sampling.next_gap(self._rng))
+        return times
+
+
+def median_interval_s(points: list[TracePoint]) -> float:
+    """Median positive gap between consecutive points (60 s if none).
+
+    Error injectors use this to size dwell, dropout and window lengths
+    in fixes, so they work at whatever rate the trace was sampled.
+    """
+    gaps = [
+        dt
+        for a, b in zip(points, points[1:], strict=False)
+        if (dt := (b.timestamp - a.timestamp).total_seconds()) > 0
+    ]
+    return statistics.median(gaps) if gaps else DEFAULT_INTERVAL_S
 
 
 def offset_to_latlon(
@@ -30,55 +73,53 @@ def offset_to_latlon(
     return base_lat + dlat, base_lon + dlon
 
 
-def resample_trace(
-    points: list[TracePoint], interval_s: float = INTERVAL_S
-) -> list[TracePoint]:
-    """Resample a list of trace points at fixed time intervals.
+def resample_trace(points: list[TracePoint], schedule: FixSchedule) -> list[TracePoint]:
+    """Sample densely spaced trace points at the schedule's fix times.
 
-    Linearly interpolates lat, lon, and speed.  Heading is interpolated
-    along the shortest arc to avoid wrap-around artefacts.
+    Takes every scheduled fix up to the last point's timestamp.
+    Linearly interpolates lat, lon, and speed.  Each point's heading is
+    the course to the next point, so a fix takes the heading of the
+    segment it falls in rather than a blend of two courses.
     """
-    if len(points) < 2:
-        return list(points)
+    if not points:
+        return []
+    if len(points) == 1:
+        return [
+            replace(points[0], timestamp=t) for t in schedule.until(points[0].timestamp)
+        ]
 
     t0 = points[0].timestamp
     offsets = [(p.timestamp - t0).total_seconds() for p in points]
-    total = offsets[-1]
-    if total <= 0:
-        return [points[0]]
 
     result: list[TracePoint] = []
-    elapsed = 0.0
     j = 0  # index into source points
 
-    while elapsed <= total + 0.1:
+    for t in schedule.until(points[-1].timestamp):
+        elapsed = (t - t0).total_seconds()
         while j < len(offsets) - 2 and offsets[j + 1] < elapsed:
             j += 1
 
         seg_dur = offsets[j + 1] - offsets[j]
         frac = (elapsed - offsets[j]) / seg_dur if seg_dur > 0 else 0.0
-        frac = min(frac, 1.0)
+        frac = min(max(frac, 0.0), 1.0)
 
         p_a, p_b = points[j], points[j + 1]
 
         lat = p_a.lat + frac * (p_b.lat - p_a.lat)
         lon = p_a.lon + frac * (p_b.lon - p_a.lon)
-        speed = p_a.speed_mph + frac * (p_b.speed_mph - p_a.speed_mph)
+        speed = p_a.speed_kmh + frac * (p_b.speed_kmh - p_a.speed_kmh)
 
-        # Shortest-arc heading interpolation
-        diff = (p_b.heading - p_a.heading + 540) % 360 - 180
-        hdg = (p_a.heading + frac * diff) % 360
+        hdg = p_b.heading if frac >= 1.0 else p_a.heading
 
         result.append(
             TracePoint(
                 lat=round(lat, 6),
                 lon=round(lon, 6),
-                speed_mph=round(speed, 1),
+                speed_kmh=round(speed, 1),
                 heading=round(hdg, 1),
-                timestamp=t0 + timedelta(seconds=elapsed),
+                timestamp=t,
             )
         )
-        elapsed += interval_s
 
     return result
 
@@ -112,11 +153,17 @@ def interpolate_route(
     route: RouteSegment,
     departure_time: datetime,
     rng: random.Random,
-) -> list[TracePoint]:
-    """Walk the route polyline at ~60 s intervals, producing trace points."""
+    schedule: FixSchedule,
+) -> tuple[list[TracePoint], datetime]:
+    """Walk the route polyline at the schedule's fix times.
+
+    Returns the trace points and the arrival time.  The arrival time
+    comes from the speed profile, not the last fix, so a long gap at
+    the end of the drive doesn't pull the arrival earlier.
+    """
     coords = route.coords
     if len(coords) < 2:
-        return []
+        return [], departure_time
 
     speeds = smooth_speeds(route.speeds_mps, route.distances_m)
     speeds, distances = inject_traffic_stops(speeds, route.distances_m, rng)
@@ -139,18 +186,21 @@ def interpolate_route(
             seg_times.append(dist / spd)
 
     points: list[TracePoint] = []
-    current_time = departure_time
-    elapsed = 0.0
     total_time = sum(seg_times)
+    arrival_time = departure_time + timedelta(seconds=total_time)
 
     cum_time = [0.0]
     for t in seg_times:
         cum_time.append(cum_time[-1] + t)
 
     prev_heading: float | None = None
+    # Segment end times / distances, as arrays once rather than per fix.
+    seg_end_times = np.asarray(cum_time[1:])
+    geom_seg_ends = np.asarray(orig_cum_dist[1:])
 
-    while elapsed <= total_time + 0.1:
-        seg_idx = int(np.searchsorted(cum_time[1:], elapsed, side="right"))
+    for fix_time in schedule.until(arrival_time):
+        elapsed = (fix_time - departure_time).total_seconds()
+        seg_idx = int(np.searchsorted(seg_end_times, elapsed, side="right"))
         seg_idx = min(seg_idx, len(speeds) - 1)
 
         seg_start_time = cum_time[seg_idx]
@@ -168,9 +218,7 @@ def interpolate_route(
         else:
             dist_along_geom = 0.0
 
-        geom_seg = int(
-            np.searchsorted(orig_cum_dist[1:], dist_along_geom, side="right")
-        )
+        geom_seg = int(np.searchsorted(geom_seg_ends, dist_along_geom, side="right"))
         geom_seg = min(geom_seg, len(coords) - 2)
 
         seg_start_dist = orig_cum_dist[geom_seg]
@@ -188,7 +236,7 @@ def interpolate_route(
         )
 
         speed_mps = speeds[seg_idx]
-        speed_mph = mps_to_mph(speed_mps)
+        speed_kmh = mps_to_kmh(speed_mps)
 
         hdg = bearing(
             coords[geom_seg][0],
@@ -196,7 +244,7 @@ def interpolate_route(
             coords[geom_seg + 1][0],
             coords[geom_seg + 1][1],
         )
-        if prev_heading is not None and speed_mph < 1.0:
+        if prev_heading is not None and speed_kmh < 1.6:
             hdg = prev_heading
         prev_heading = hdg
 
@@ -204,12 +252,10 @@ def interpolate_route(
             TracePoint(
                 lat=round(lat, 6),
                 lon=round(lon, 6),
-                speed_mph=round(speed_mph, 1),
+                speed_kmh=round(speed_kmh, 1),
                 heading=round(hdg, 1),
-                timestamp=current_time + timedelta(seconds=elapsed),
+                timestamp=fix_time,
             )
         )
 
-        elapsed += INTERVAL_S
-
-    return points
+    return points, arrival_time

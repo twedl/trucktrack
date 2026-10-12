@@ -1,0 +1,1602 @@
+{
+  "c3838151338f66881ff636782fd8f0da": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "b7260b974563bf2c1119176c5f6def68": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "9928ec7a9e292def9c61bc4391ef36d4": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "67a24d1ddc03b31fe7f8d4abd7bcab48": {
+    "interval_s": 44.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "35f95947a395e3f010960bcc97061c09": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "804ee42dfa2c417603d231c66e6b81bc": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "393f07da4c1501e55b22afae1cf5bd27": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "7becf9829b1ceba14ff07ab774970f16": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "b41b0d406f01ed2fc166cf0db40e5f26": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "3c0282c17265acf24a23412fce4cb19d": {
+    "interval_s": 30.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "05b6406edd5375c7d6ec5689535ffa2a": {
+    "interval_s": 54.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "5ef29356a5420d6d36f74b40a893e901": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "f03dbe8da0043802245b488b8ad064e1": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "8fe4d7e5a5308bef320d10d79bb56bae": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "909ccdda91c8fb7d2b1bc893414e8bfa": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "04b84617cf7da9fd667e7555e3394bc1": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "159a8146061e2bbd39599235d492ed73": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "0c5f673482af1d9c650ba5237c1357d6": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "dc1807cb98d071e21a0c490f974e67df": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "1963ae5014dba9e9ae41911f1bea2efc": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "9d0a98d2a23f0668cfe8082ac5cf16e8": {
+    "interval_s": 38.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "154eb848b8d5c33495bbb43845bb3f76": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "aa83c7578288414d5b25d2d487c8f9e5": {
+    "interval_s": 58.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "476a12da597f27c72ecb612dfa7d0ffb": {
+    "interval_s": 1800.0,
+    "irregular_prob": 0.0,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.0,
+    "long_gap_s": 1800.0
+  },
+  "eb04bedef03af802568efaae0b6c0389": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "e4334d544e82530602f6efa221945797": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "2a7d1d2f3fbace45453645f788e409c9": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "f86e8b7b8438a68c913f8b4786eea92a": {
+    "interval_s": 29.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "853d841fca1791fcac68d05c3a5f50c7": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "2332079056aad1412a8dd90f99d2d86d": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "d7930e5fda4b1b2ba0c8ab82a5b2212c": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "c2f142386a274b6698e05cff9e3b5961": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "c67d84fc744aa317bb1e96a8c97e64aa": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "827ff100488d22df1c7f8753759316de": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "937e850657f3a6b9ea1bb08b9c03e862": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "07af43ddc23089e14c55768fb3c7671b": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "d6202ad6baaf4fe7632f122efe67f477": {
+    "interval_s": 46.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "30988741c3a1c72a1786834012576baf": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "c5a9959408ca53e04567cf747668a0b4": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "6fcd6c8cbbc97abe116801e848b29c30": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "64eae195fd0b37f1d802fd5c91a59a47": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "e16b041d3500880e8b1d14334239f6ae": {
+    "interval_s": 36.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "e5652b16a7cd87176683a981ce0ab8d5": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "8681ea8cb1eb90771cab380ffb4714e1": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "dab44ea86a271b8a4f185ebe5e2a8881": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "218c5cfa59cadf37c2b9af65f3c4d6d3": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "8f52e18555eedb4fc495488316632e30": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "5398dd17f264e349555b1e53dbd0f542": {
+    "interval_s": 1800.0,
+    "irregular_prob": 0.0,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.0,
+    "long_gap_s": 1800.0
+  },
+  "f43bf6577e59d1e5d9c912e4626def21": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "344571bb8eb21c7d44c7c883bd2c4534": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "65a43865af5f19121272987d1095d41e": {
+    "interval_s": 31.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "041b0423610fe1a66b61299feb04531b": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "08a1e541b8e37e4b2235d9cd79743fa3": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "128f0a2dc5395f8bb45cf5fb8e508627": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "6e4c0005de4b57fc4f796676456de647": {
+    "interval_s": 1800.0,
+    "irregular_prob": 0.0,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.0,
+    "long_gap_s": 1800.0
+  },
+  "34a17827f6790933e76a78ea0eb8062c": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "91eba028a0738abae2e1d2f7cd8eaf82": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "3b353a4a243149be7390e204508444e3": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "9c8d60a23a83cfa8d1ed56521c5b9166": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "29e6f2db47cdf94dda531bcca3a05f72": {
+    "interval_s": 39.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "b176fd696e762de71c0d85cbb32edadc": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "e5e6dfa58b2e162747d60b34ffa974f7": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "9cf1747c30e203e26ce74ae54daf0703": {
+    "interval_s": 45.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "34f960e51e18d94c67b251214f6e12b7": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "0c776f30e336f4712a6c184ce64502aa": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "d7fdf27e7d0406bfc6f0bddd1fcdce14": {
+    "interval_s": 46.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "2cfa185144c2d89407c4453d916e6f7f": {
+    "interval_s": 1800.0,
+    "irregular_prob": 0.0,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.0,
+    "long_gap_s": 1800.0
+  },
+  "5dd716aaf857727e19a35dcd325aa1d8": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "3feff61dfd93f163c5b95f440dcd2ddc": {
+    "interval_s": 1800.0,
+    "irregular_prob": 0.0,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.0,
+    "long_gap_s": 1800.0
+  },
+  "da6050f63af0adceb4de026380af05a9": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "d526b6fc3cf92efa48894f5890b86228": {
+    "interval_s": 1800.0,
+    "irregular_prob": 0.0,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.0,
+    "long_gap_s": 1800.0
+  },
+  "d700a174a9710308120eafff5d005399": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "ec7e879de02ae87b3c433d19cad544a2": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "81875dd94f8f2df0c8011f8ed486850d": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "4fd70100e5e03be9fad7526ad5474b7a": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "2f836c8ed4749f1a73d8b0171f159940": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "520d15359e3c82633cd1d7943e6cf821": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "563a631ffa3b761890eaa2a29d88dfaf": {
+    "interval_s": 23.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "3bc254c7687463f45850994b238c6e33": {
+    "interval_s": 26.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "d7e032a8c974c53827365415a232d902": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "1aebaf939976c56f20d6f4edf0f249d4": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "b997563f3233e40ff4db9b2a992067f8": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "be0da8c8bc261276e041f9a0e406c488": {
+    "interval_s": 1800.0,
+    "irregular_prob": 0.0,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.0,
+    "long_gap_s": 1800.0
+  },
+  "715d0d49c87d55a03be069b9b2856c5f": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "3c29f6c2f10755fcda0f962afb2612a3": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "210d248c72ab4f2f62ebd92947beaff7": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "c289c71e12bf163e149ea00cd5d42d07": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "c01d2d1ad6b2d5c0346c9fd3a91841e7": {
+    "interval_s": 40.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "ddb5ff6c6c284eb5674242e7c53af664": {
+    "interval_s": 42.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "19b152846255ee5d25fd39c92ea769d3": {
+    "interval_s": 43.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "28c61f3494fd9c3d141a7e7c406aa3c7": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "5f5b9fb25cce41477d59b2d8c16de634": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "4cfb31ae15edc286fd18932c756dd5e7": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "7223a6a6a5b00ea4514ce69c76d5a62d": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "61e7ac02e7b6a949a253a0023dfb9c19": {
+    "interval_s": 32.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "d1c00bca9b481ee7882028cf71b2188a": {
+    "interval_s": 33.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "19072578255c6980ca783248190a16e1": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "07e5e025a451dcee7e083eb7708bc62a": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "87f0742f111028e7e306767c705dade0": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "76b7f421ac0f0b6873cd8015f4bd3263": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "e129d4e5dceac889d1ce2127a3de3f0a": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "8e50c3d7d25d214395ad77374e778a1a": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "1fbc79c19d32b0a47e329ea8ab00f235": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "d6048da33b26feb4d4762dfcbce5c129": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "03c0b568239db29d571a0f467730c5fd": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "e37c2381fbd201c049c64fb712f85838": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "af906bc83beec6f1f43a1e948e6ad331": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "0bf32fd9edf9b0d01892f8813702c411": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "97786e1a4e155c7e806c9669512bb4e4": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "6bc19769db48d2c2097257f3edb85230": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "cef4a9c280ed54717f165090331c809b": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "26d088e516ac2b891b436d9a5e7276bc": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "11b6f0ad08985d4cb5bd1a1a9ca27597": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "a1ec0fa90e94f3f35a229b2e2517475f": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "80d98c3b5ffd39bcdd1f23b21f8ad720": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "1829881c148f3351a71c97104002c14b": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "8da2896ab6cc097edccf1bc5f2e1d5ef": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "6ea28f5537db867c7003ec8b844c7fbd": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "1adf8b65807bb668ec63dc85b88ccd8d": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "4214b066565164bd3a62bc375877c4f8": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "9d2390b7aab316d5d424c23ec08ebb00": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "b76dd629d7d17a7c3ceae8b8a323064a": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "bb3487f632d6186a6e85d42a58a3f249": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "68f03b5e4c97e5671d0b19d50a776cba": {
+    "interval_s": 31.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "076f2c539fcdc29d4e8167132c2e107f": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "e366d233f6ef7eba232755283aaedd3b": {
+    "interval_s": 1800.0,
+    "irregular_prob": 0.0,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.0,
+    "long_gap_s": 1800.0
+  },
+  "305aa22e8eeb20e10de9c6a0e88ce33c": {
+    "interval_s": 1800.0,
+    "irregular_prob": 0.0,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.0,
+    "long_gap_s": 1800.0
+  },
+  "1cda06f11b4f3c19fdb1a23dc2d838e9": {
+    "interval_s": 46.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "f2b78d270ab1376e1556d4eda498d823": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "c2fac8bed7188338d9681d65ded9980d": {
+    "interval_s": 9.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "5d1b6b6fa0ed7d64296e62761fc92237": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "4d5c6b45ebd023191a472cfbf3daf923": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "a0a85e41ee45f4edd94b0bc6e5fcc776": {
+    "interval_s": 38.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "b4eab00cd305be1e44f6c54976c1702c": {
+    "interval_s": 59.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "6e0fa4d9993fb478e7aa6b2f2f3fae84": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "69b4d8b0b98915a0d8ba107bb7fb93ef": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "8796e75498c9d70716078730fffc92fc": {
+    "interval_s": 59.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "34c28377f7d477e59ce7e44ac447ef4b": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "b9ea6081d20b046b801478ba64854561": {
+    "interval_s": 39.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "4f287f92567a238caa1072737eab0ae5": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "9ba30a75ed408f147fd5934911a1f565": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "14365e97e94bb8b89e68acfeb401601a": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "c42f308112544ec322d589f2fa6f100f": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "9c9347247afbe4a94a63ef6069a15a23": {
+    "interval_s": 45.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "dcdb812c3004d2d5cb63d5c4bbceadc6": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "694d06d063e831b438d70e1688dcefc9": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "d6495c65a2853f849bab0d158492db3b": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "bc6a6cd55c48cd4ff84e7669d8c917e5": {
+    "interval_s": 1800.0,
+    "irregular_prob": 0.0,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.0,
+    "long_gap_s": 1800.0
+  },
+  "f8bc8b94e9df4b29425f3d59a82ad681": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "b3830fb6836e8bd499daa32b98bd171d": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "36bf04b41e1c1a7a0e6c0ab9fa87501f": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "c3e24d21c90ed357dc1e496eaf24c3a6": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "f4f3524884125c7806d2bc8d03e1467a": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "e275868088aa4b1d234f61dff72e6cd8": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "a65d4907923117d89327c3e2bcfae411": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "8d6a18804ef400c08763da9033518460": {
+    "interval_s": 58.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "5036f36929fa776aa40a849c69080a6f": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "bafee2e6b877c41d6bf42f74ba0afac3": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "ac02602f6f6d47c9d4529cb219743825": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "c4dcb3c326d040a0ca5997f8167e5218": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "97e6395b4df42d035cc367875900845c": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "01e485723b8501af412b1dc796a8be7a": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "896aa26171d313e93a7755903b238374": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "cc1b3fccf04273c034842f51cd1f81f1": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "9ef312dc5337b84b5b287fd39c96f32a": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "d388b7820e6c8bb6a75786db05845700": {
+    "interval_s": 50.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "ab6bfb1d62450000dd8aa3b237c7f00e": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "911f530d6a55fa1f0fd148e0824704b3": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "a93aae90f309891bbb69fd70c64c6a1e": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "e232730220ee56bc004006ebdc234e1e": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "adc0f6bcf02ae72f9c8c0c7b299d86e2": {
+    "interval_s": 20.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "33ac844bcf1e055fea29d158c35df78e": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "070e787d1644c197e6d9c310de5daaf8": {
+    "interval_s": 45.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "f7e59618c64501429f4cf045adf8e1f8": {
+    "interval_s": 35.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "2abafc83958fb8b807ded4169a2e90c6": {
+    "interval_s": 56.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "acebfb9b8ec47a674ed1466df500065a": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "544ad874330797eaad32019f003f0e01": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "593fa44f52ed4c40e46c46ebb0144619": {
+    "interval_s": 1800.0,
+    "irregular_prob": 0.0,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.0,
+    "long_gap_s": 1800.0
+  },
+  "e80bca9839648bd9b7e40b467dcaeaf7": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "0812ed43149638d7f0ddd424e5174641": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "d68a7daf61908b80a73bbc8a4de71b28": {
+    "interval_s": 8.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "a07d473e60e29b9c84f218c89e8a9417": {
+    "interval_s": 43.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "eb7da3c8936c29e9cce2582cf9cfb006": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "1169b72dc55248958438d45d9443a207": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "1a407990fb60b9b7e0677a660afeb3cd": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "bf1d411573362aa0ec34747a9c8ea304": {
+    "interval_s": 1800.0,
+    "irregular_prob": 0.0,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.0,
+    "long_gap_s": 1800.0
+  },
+  "e8b86c15294af606109b6844ab102c23": {
+    "interval_s": 32.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "b04f0ab56242fcfb390faa2bf6657917": {
+    "interval_s": 35.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "2bc31da45d12cd27b2d19e52c43b7e93": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "f9a5398dadd52558a4a19663774a2429": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "f7a9909d234e44004a4530acb7401de2": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "c99cc548be053c40d81481c47bec9a73": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "5b0940dc107c49a4124fdef78b194de8": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "4510d80932a9f66861ceb76eca44fb30": {
+    "interval_s": 35.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "38e4c53efbd48a040955142cc560e134": {
+    "interval_s": 20.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "c18d26f26a419214bc61719e6ed42d53": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "6c85113c6386012e418e7ba10639bc9e": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "7efb62cf805276239aa981c955f9eaf1": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "db42815cbcd5cc48c42988db1f06a9bc": {
+    "interval_s": 46.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  },
+  "e646569f0bc37aa528856a7887135651": {
+    "interval_s": 60.0,
+    "irregular_prob": 0.05,
+    "irregular_min_s": 1,
+    "irregular_max_s": 60,
+    "long_gaps_per_hour": 0.1,
+    "long_gap_s": 1800.0
+  }
+}

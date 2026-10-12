@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
 DEFAULT_VALHALLA_URL = "http://localhost:8002"
+DEFAULT_INTERVAL_S = 60.0
 
 
 @dataclass
@@ -57,6 +59,68 @@ def default_error_profile() -> list[ErrorConfig]:
     ]
 
 
+@dataclass(frozen=True)
+class SamplingConfig:
+    """When a truck's GPS device reports a fix.
+
+    Most gaps between fixes are *interval_s*.  With probability
+    *irregular_prob* a gap is instead a whole number of seconds drawn
+    uniformly from [*irregular_min_s*, *irregular_max_s*].  Gaps of
+    *long_gap_s* (the truck keeps moving, no fixes) occur at an average
+    rate of *long_gaps_per_hour* per hour of reporting.  The default is
+    a fixed 60 s schedule.
+    """
+
+    interval_s: float = DEFAULT_INTERVAL_S
+    irregular_prob: float = 0.0
+    irregular_min_s: int = 1
+    irregular_max_s: int = 60
+    long_gaps_per_hour: float = 0.0
+    long_gap_s: float = 1800.0
+
+    def next_gap(self, rng: random.Random) -> float:
+        """Draw the gap in seconds before the next fix."""
+        if rng.random() < self.long_gaps_per_hour * self.interval_s / 3600.0:
+            return self.long_gap_s
+        if rng.random() < self.irregular_prob:
+            return float(rng.randint(self.irregular_min_s, self.irregular_max_s))
+        return self.interval_s
+
+
+def random_sampling(
+    rng: random.Random,
+    *,
+    share_60s: float = 0.7,
+    share_30min: float = 0.002,
+) -> SamplingConfig:
+    """Draw one truck's reporting schedule.
+
+    The shares are of gaps between fixes, not of trucks: *share_60s* of
+    all gaps come from trucks reporting every 60 s, *share_30min* from
+    trucks reporting every 30 min, and the rest are spread evenly over
+    trucks reporting every 1–59 s.  A truck reporting every *i* seconds
+    makes 1/*i* gaps per second, so each interval is drawn with
+    probability proportional to share × *i*: fast trucks are rare, but
+    each contributes many gaps.
+
+    Trucks that aren't on the 30 min schedule also report off schedule
+    (1–60 s) on 5% of gaps and go 30 min without a fix about once per
+    10 hours.
+    """
+    fast_share = (1.0 - share_60s - share_30min) / 59
+    shares = {60.0: share_60s, 1800.0: share_30min} | {
+        float(i): fast_share for i in range(1, 60)
+    }
+    interval_s = rng.choices(
+        list(shares), weights=[share * i for i, share in shares.items()]
+    )[0]
+    if interval_s == 1800.0:
+        return SamplingConfig(interval_s=1800.0)
+    return SamplingConfig(
+        interval_s=interval_s, irregular_prob=0.05, long_gaps_per_hour=0.1
+    )
+
+
 @dataclass
 class TripConfig:
     origin: tuple[float, float]  # (lat, lon)
@@ -70,13 +134,14 @@ class TripConfig:
     valhalla_url: str = DEFAULT_VALHALLA_URL
     config: str | Path | None = None
     errors: list[ErrorConfig] = field(default_factory=default_error_profile)
+    sampling: SamplingConfig = field(default_factory=SamplingConfig)
 
 
 @dataclass
 class TracePoint:
     lat: float
     lon: float
-    speed_mph: float
+    speed_kmh: float
     heading: float  # 0-360, 0=north, clockwise
     timestamp: datetime
 
