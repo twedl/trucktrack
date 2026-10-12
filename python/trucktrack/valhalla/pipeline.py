@@ -5,8 +5,12 @@ Reads the partitioned parquet dataset produced by
 applies a map-matching function to each trip.
 
 Resumable: the output directory mirrors the input hive layout. On
-restart, chunks whose output file already exists are skipped. Writes
+restart, chunks whose requested outputs all exist are skipped. Writes
 use atomic temp-file-then-rename to avoid partial output from crashes.
+
+Opt-in edge speed observations (one row per matched GPS fix, see
+:mod:`trucktrack.congestion`) come from the same ``trace_attributes``
+call and land in ``_observations/`` beside ``_quality/``.
 
 Partitions are processed in parallel using worker processes
 (ProcessPoolExecutor), assigned in contiguous spatial blocks to keep
@@ -39,8 +43,16 @@ from typing import Any, cast
 import polars as pl
 from tqdm import tqdm
 
+from trucktrack.congestion import (
+    FIX_COLUMNS,
+    OBSERVATION_ATTRIBUTES,
+    ObservationConfig,
+    observations_from_trace_attributes,
+    prepare_fixes,
+)
 from trucktrack.pipeline import parquet_row_count, partition_sort_key
 from trucktrack.valhalla._bridge import BridgeConfig
+from trucktrack.valhalla._build_id import tile_build_id
 from trucktrack.valhalla.quality import (
     MapMatchQuality,
     evaluate_map_match_ways,
@@ -165,15 +177,23 @@ def _map_match_trip_row(
     config: str | Path | None = None,
     debug: bool = False,
     bridges: BridgeConfig | None = None,
-) -> tuple[pl.DataFrame, dict[str, object]]:
-    """Map-match one trip; return (way_ids_df, quality_row_dict).
+    observations: ObservationConfig | None = None,
+) -> tuple[pl.DataFrame, dict[str, object], pl.DataFrame | None]:
+    """Map-match one trip; return (way_ids_df, quality_row_dict, observations).
 
     The quality row is left as a dict so the caller can batch many rows
     into a single ``pl.DataFrame`` construction — the per-trip list-of-
     one-dict pattern hits polars' ``_sequence_of_dict_to_pydf`` under the
     GIL and shows up as a hotspot in py-spy.
+
+    *observations* requests edge speed observations from the same
+    ``trace_attributes`` call; *trip* must then carry
+    :data:`~trucktrack.congestion.FIX_COLUMNS`.  Otherwise the third
+    element is ``None``.
     """
-    trip = trip.sort("time")
+    # Stable sort: response offsets index rows in this order.
+    trip = trip.sort("time", maintain_order=True)
+    attributes = OBSERVATION_ATTRIBUTES if observations is not None else ()
     trip_id = trip.item(0, "id")
     date = cast(datetime, trip["time"].min()).date()
     t0 = perf_counter() if debug else 0.0
@@ -186,11 +206,13 @@ def _map_match_trip_row(
         )
     elif bridges is not None:
         q = evaluate_map_match_with_bridges(
-            trip_id, trip, bridges=bridges, config=config
+            trip_id, trip, bridges=bridges, config=config, attributes=attributes
         )
     else:
         points = list(zip(trip["lat"].to_list(), trip["lon"].to_list(), strict=True))
-        q = evaluate_map_match_ways(trip_id, points, config=config)
+        q = evaluate_map_match_ways(
+            trip_id, points, config=config, attributes=attributes
+        )
     elapsed = perf_counter() - t0 if debug else None
     ways = q.way_ids
     if ways:
@@ -200,7 +222,22 @@ def _map_match_trip_row(
         )
     else:
         way_df = _null_way_result(trip_id, date)
-    return way_df, _quality_row(trip_id, date, q, elapsed)
+    obs_df = None
+    if observations is not None:
+        obs_parts = [
+            observations_from_trace_attributes(
+                resp,
+                trip.slice(offset, len(resp.get("matched_points", []))),
+                observations,
+            )
+            for offset, resp in q.responses
+        ]
+        obs_df = (
+            pl.concat(obs_parts)
+            if obs_parts
+            else observations_from_trace_attributes({}, trip.head(0), observations)
+        )
+    return way_df, _quality_row(trip_id, date, q, elapsed), obs_df
 
 
 def map_match_trip(
@@ -223,7 +260,7 @@ def map_match_trip(
     ``edge_walk`` (see
     :func:`trucktrack.valhalla.quality.evaluate_map_match_with_bridges`).
     """
-    way_df, quality_row = _map_match_trip_row(
+    way_df, quality_row, _ = _map_match_trip_row(
         trip, config=config, debug=debug, bridges=bridges
     )
     quality_df = pl.DataFrame([quality_row], schema=_QUALITY_SCHEMA)
@@ -251,11 +288,14 @@ def _process_partition(
     *,
     debug: bool = False,
     bridges: BridgeConfig | None = None,
+    observations: ObservationConfig | None = None,
+    build_id: str | None = None,
 ) -> tuple[str, int, int, int, int, float]:
     """Read one partition chunk-by-chunk, map-match each trip, and write results.
 
     Processes one chunk at a time to keep memory free for Valhalla.
-    Skips chunks whose output file already exists.
+    Skips chunks whose requested outputs all exist.  *build_id* tags
+    observation rows (see :func:`~trucktrack.valhalla.tile_build_id`).
     Returns (tier, partition_id, chunks_skipped, trips_matched, rows_out, elapsed_s).
     """
     t0 = perf_counter()
@@ -264,8 +304,11 @@ def _process_partition(
     partition_id = int(rel.name.removeprefix("partition_id="))
     out_dir = output_dir / rel
     quality_dir = output_dir / "_quality" / rel
+    obs_dir = output_dir / "_observations" / rel
     out_dir.mkdir(parents=True, exist_ok=True)
     quality_dir.mkdir(parents=True, exist_ok=True)
+    if observations is not None:
+        obs_dir.mkdir(parents=True, exist_ok=True)
 
     chunks = sorted(partition_dir.glob("*.parquet"))
     skipped = 0
@@ -276,27 +319,40 @@ def _process_partition(
         raw_rows = row_counts[chunk_path]
         out_path = out_dir / chunk_path.name
         quality_path = quality_dir / chunk_path.name
-        if out_path.exists():
+        obs_path = obs_dir / chunk_path.name
+        if out_path.exists() and (observations is None or obs_path.exists()):
             skipped += 1
             _report_progress(raw_rows)
             continue
 
         lf = pl.scan_parquet(chunk_path)
+        columns = ["id", "time", "lat", "lon"]
+        if observations is not None:
+            # Weights and dwell flags need whole trips: before any filter.
+            lf = prepare_fixes(lf, observations)
+            columns += [c for c in FIX_COLUMNS if c not in columns]
         if "is_stop" in lf.collect_schema():
             lf = lf.filter(~pl.col("is_stop"))
-        df = lf.select(["id", "time", "lat", "lon"]).collect()
+        df = lf.select(columns).collect()
         if df.is_empty():
             _report_progress(raw_rows)
             continue
         way_dfs: list[pl.DataFrame] = []
         quality_rows: list[dict[str, object]] = []
+        obs_dfs: list[pl.DataFrame] = []
         rows_pending = 0
         for _, trip in df.group_by("id"):
-            way_df, quality_row = _map_match_trip_row(
-                trip, config=config, debug=debug, bridges=bridges
+            way_df, quality_row, obs_df = _map_match_trip_row(
+                trip,
+                config=config,
+                debug=debug,
+                bridges=bridges,
+                observations=observations,
             )
             way_dfs.append(way_df)
             quality_rows.append(quality_row)
+            if obs_df is not None:
+                obs_dfs.append(obs_df)
             total_trips += 1
             rows_pending += len(trip)
             if rows_pending >= _PROGRESS_BATCH_ROWS:
@@ -316,6 +372,11 @@ def _process_partition(
 
         _atomic_write_parquet(matched, out_path)
         _atomic_write_parquet(quality, quality_path)
+        if observations is not None:
+            obs = pl.concat(obs_dfs).with_columns(
+                pl.lit(build_id, dtype=pl.Utf8).alias("tile_build_id")
+            )
+            _atomic_write_parquet(obs, obs_path)
 
     return tier, partition_id, skipped, total_trips, total_rows, perf_counter() - t0
 
@@ -329,6 +390,8 @@ def _process_chunk(
     *,
     debug: bool = False,
     bridges: BridgeConfig | None = None,
+    observations: ObservationConfig | None = None,
+    build_id: str | None = None,
 ) -> list[tuple[str, int, int, int, int, float]]:
     """Process a contiguous chunk of spatially adjacent partitions sequentially.
 
@@ -348,6 +411,8 @@ def _process_chunk(
             row_counts,
             debug=debug,
             bridges=bridges,
+            observations=observations,
+            build_id=build_id,
         )
         for pdir in partition_dirs
     ]
@@ -363,6 +428,7 @@ def run_map_matching(
     quiet: bool = False,
     debug: bool = False,
     bridges: BridgeConfig | None = None,
+    observations: ObservationConfig | None = None,
 ) -> None:
     """Map-match all trips across partitions in parallel.
 
@@ -376,7 +442,7 @@ def run_map_matching(
         input_dir/tier=.../partition_id=.../chunk.parquet
 
     *output_dir* mirrors the same hive layout. Re-running skips chunks
-    whose output file already exists.
+    whose requested outputs all exist.
 
     *max_workers* defaults to ``os.cpu_count()``.
 
@@ -393,6 +459,14 @@ def run_map_matching(
     and bridges gaps via ``/route`` + ``edge_walk``.  Populates
     ``n_bridges``, ``max_detour_ratio``, ``total_bridge_m``,
     ``any_bridge_failed`` in the quality rows.
+
+    *observations*, when supplied, also writes edge speed observations
+    (see :mod:`trucktrack.congestion`) to ``output_dir / "_observations"``
+    in the same hive layout: one row per GPS fix matched to an edge,
+    tagged with the tile build ID (see
+    :func:`~trucktrack.valhalla.tile_build_id`).  The input needs
+    ``speed`` (km/h) and ``heading`` columns.  The extra attributes ride
+    on the ``trace_attributes`` call already made for way IDs.
 
     *chunks_per_worker* controls how many chunks of
     spatially-contiguous partitions each worker sees on average
@@ -444,6 +518,8 @@ def run_map_matching(
     if max_workers is None:
         max_workers = os.cpu_count() or 1
     max_workers = min(max_workers, len(partition_dirs))
+
+    build_id = tile_build_id(config) if observations is not None else None
 
     if max_workers > 4 and "POLARS_MAX_THREADS" not in os.environ:
         print(
@@ -556,6 +632,8 @@ def run_map_matching(
                 sub_counts,
                 debug=debug,
                 bridges=bridges,
+                observations=observations,
+                build_id=build_id,
             )
             future_to_rows[fut] = rows
 
@@ -586,3 +664,8 @@ def run_map_matching(
     print(f"  Matched:     {total_trips:>10,} trip(s)", file=sys.stderr)
     print(f"  Rows out:    {total_rows:>10,}", file=sys.stderr)
     print(f"  Timing:      {output_dir / '_timing.parquet'}", file=sys.stderr)
+    if observations is not None:
+        print(
+            f"  Observations: {output_dir / '_observations'} (tiles {build_id})",
+            file=sys.stderr,
+        )

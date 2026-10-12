@@ -9,6 +9,7 @@ from trucktrack.valhalla._bridge import (
     bridge_gap,
     map_match_dataframe_with_bridges,
 )
+from trucktrack.valhalla._build_id import tile_build_id, write_tile_build_id
 from trucktrack.valhalla._parsing import decode_polyline6, parse_valhalla_response
 from trucktrack.valhalla.map_matching import (
     MatchedPoint,
@@ -18,6 +19,7 @@ from trucktrack.valhalla.map_matching import (
     map_match_full,
     map_match_route_shape,
     map_match_ways,
+    trace_attributes,
 )
 from trucktrack.valhalla.pipeline import map_match_trip, run_map_matching
 from trucktrack.valhalla.quality import evaluate_map_match_with_bridges
@@ -46,4 +48,7 @@ __all__ = [
     "parse_valhalla_response",
     "route",
     "run_map_matching",
+    "tile_build_id",
+    "trace_attributes",
+    "write_tile_build_id",
 ]

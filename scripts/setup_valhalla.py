@@ -31,6 +31,7 @@ import tarfile
 from pathlib import Path
 
 import valhalla
+from trucktrack.valhalla import write_tile_build_id
 
 GEOFABRIK_URL = (
     "https://download.geofabrik.de/north-america/canada/ontario-latest.osm.pbf"
@@ -234,6 +235,10 @@ def main(argv: list[str] | None = None) -> int:
         raise
     for subdir in tile_subdirs:
         shutil.rmtree(subdir)
+
+    # Before any predicted traffic: observations tag edges with this ID.
+    build_id = write_tile_build_id(tar_path)
+    print(f"Tile build ID: {build_id}", file=sys.stderr)
 
     print(f"Done: {tar_path}", file=sys.stderr)
     return 0

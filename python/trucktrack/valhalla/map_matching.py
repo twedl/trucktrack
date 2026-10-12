@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -195,6 +196,35 @@ def map_match(
     return _parse_matched_points(resp, points)
 
 
+def trace_attributes(
+    points: list[tuple[float, float]],
+    *,
+    attributes: Sequence[str],
+    costing: str = "auto",
+    costing_options: dict[str, object] | None = None,
+    config: str | Path | None = None,
+    trace_options: dict[str, object] | None = None,
+    max_breakage_m: float = _MAX_BREAKAGE_DISTANCE,
+) -> dict[str, Any]:
+    """Return the raw ``trace_attributes`` response, limited to *attributes*.
+
+    *attributes* are Valhalla filter keys such as ``"edge.way_id"`` or
+    ``"matched.edge_index"``.  ``matched_points`` has one entry per
+    input point, in order.
+    """
+    actor = get_actor(config=config)
+    body = _build_trace_body(
+        points,
+        costing,
+        costing_options,
+        filters={"attributes": list(dict.fromkeys(attributes)), "action": "include"},
+        trace_options=trace_options,
+        max_breakage_m=max_breakage_m,
+    )
+    resp: dict[str, Any] = _json_loads(actor.trace_attributes(_json_dumps(body)))
+    return resp
+
+
 def map_match_ways(
     points: list[tuple[float, float]],
     *,
@@ -209,16 +239,15 @@ def map_match_ways(
     Consecutive duplicate way IDs are collapsed (a single OSM way may
     span multiple graph edges).
     """
-    actor = get_actor(config=config)
-    body = _build_trace_body(
+    resp = trace_attributes(
         points,
-        costing,
-        costing_options,
-        filters={"attributes": ["edge.way_id"], "action": "include"},
+        attributes=["edge.way_id"],
+        costing=costing,
+        costing_options=costing_options,
+        config=config,
         trace_options=trace_options,
         max_breakage_m=max_breakage_m,
     )
-    resp = _json_loads(actor.trace_attributes(_json_dumps(body)))
     return _parse_way_ids(resp)
 
 
