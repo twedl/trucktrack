@@ -13,10 +13,18 @@ from __future__ import annotations
 import polars as pl
 
 from trucktrack.congestion.config import DEFAULT_CONFIG, ObservationConfig
-from trucktrack.congestion.fixes import flag_dwell, time_weights
+from trucktrack.congestion.fixes import flag_dwell, flag_speed_mismatch, time_weights
 
 # Columns the fixes carry into matching.
-FIX_COLUMNS: tuple[str, ...] = ("id", "time", "speed", "heading", "w", "dwell")
+FIX_COLUMNS: tuple[str, ...] = (
+    "id",
+    "time",
+    "speed",
+    "heading",
+    "w",
+    "dwell",
+    "speed_mismatch",
+)
 
 OBSERVATION_COLUMNS: tuple[str, ...] = (
     *FIX_COLUMNS,
@@ -33,8 +41,9 @@ OBSERVATION_COLUMNS: tuple[str, ...] = (
 def prepare_fixes[FrameT: (pl.DataFrame, pl.LazyFrame)](
     frame: FrameT, config: ObservationConfig = DEFAULT_CONFIG
 ) -> FrameT:
-    """Add ``w`` and ``dwell`` to a frame of whole trips, before matching."""
-    return flag_dwell(time_weights(frame, config), config)
+    """Add ``w``, ``dwell`` and ``speed_mismatch`` to whole trips, before matching."""
+    frame = flag_dwell(time_weights(frame, config), config)
+    return flag_speed_mismatch(frame, config)
 
 
 def _wrap180(deg: pl.Expr) -> pl.Expr:

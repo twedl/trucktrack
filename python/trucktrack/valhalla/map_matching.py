@@ -10,7 +10,7 @@ from typing import Any
 import polars as pl
 
 from trucktrack.generate.interpolator import haversine_m
-from trucktrack.valhalla._actor import get_actor
+from trucktrack.valhalla._actor import DEFAULT_TRUCK_COSTING, get_actor
 from trucktrack.valhalla._json import dumps as _json_dumps
 from trucktrack.valhalla._json import loads as _json_loads
 from trucktrack.valhalla._parsing import concat_leg_shapes
@@ -23,6 +23,10 @@ _BREAKAGE_MULTIPLIER = 1.5  # breakage = max_gap * multiplier
 # overshoot — without a cap, a 50 km gap would request 75 km breakage,
 # but 60 km is sufficient and avoids slow Meili searches.
 _MAX_BREAKAGE_DISTANCE = 60_000  # meters
+
+# Trucks match on truck costing: Meili then avoids roads trucks can't use,
+# the same way the routes they follow were planned.
+DEFAULT_COSTING = "truck"
 
 
 @dataclass
@@ -72,6 +76,24 @@ def _build_trace_options(
     return opts
 
 
+def _with_costing(
+    body: dict[str, object],
+    costing: str,
+    costing_options: dict[str, object] | None,
+) -> dict[str, object]:
+    """Set *costing* on a request body.
+
+    Truck costing without options gets :data:`DEFAULT_TRUCK_COSTING`,
+    the dimensions routes are planned with.
+    """
+    if costing_options is None and costing == "truck":
+        costing_options = dict(DEFAULT_TRUCK_COSTING)
+    body["costing"] = costing
+    if costing_options is not None:
+        body["costing_options"] = {costing: costing_options}
+    return body
+
+
 def _build_trace_body(
     points: list[tuple[float, float]],
     costing: str,
@@ -82,14 +104,12 @@ def _build_trace_body(
 ) -> dict[str, object]:
     body: dict[str, object] = {
         "shape": [{"lat": lat, "lon": lon} for lat, lon in points],
-        "costing": costing,
         "shape_match": "map_snap",
         "trace_options": _build_trace_options(
             points, trace_options, max_breakage_m=max_breakage_m
         ),
     }
-    if costing_options is not None:
-        body["costing_options"] = {costing: costing_options}
+    _with_costing(body, costing, costing_options)
     if filters is not None:
         body["filters"] = filters
     return body
@@ -267,7 +287,7 @@ def parse_fix_matches(resp: dict[str, Any], n_points: int) -> FixMatches:
 def map_match(
     points: list[tuple[float, float]],
     *,
-    costing: str = "auto",
+    costing: str = DEFAULT_COSTING,
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
     trace_options: dict[str, object] | None = None,
@@ -293,7 +313,7 @@ def trace_attributes(
     points: list[tuple[float, float]],
     *,
     attributes: Sequence[str],
-    costing: str = "auto",
+    costing: str = DEFAULT_COSTING,
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
     trace_options: dict[str, object] | None = None,
@@ -321,7 +341,7 @@ def trace_attributes(
 def map_match_ways(
     points: list[tuple[float, float]],
     *,
-    costing: str = "auto",
+    costing: str = DEFAULT_COSTING,
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
     trace_options: dict[str, object] | None = None,
@@ -347,7 +367,7 @@ def map_match_ways(
 def map_match_full(
     points: list[tuple[float, float]],
     *,
-    costing: str = "auto",
+    costing: str = DEFAULT_COSTING,
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
     trace_options: dict[str, object] | None = None,
@@ -387,7 +407,7 @@ def map_match_full(
 def map_match_route_shape(
     points: list[tuple[float, float]],
     *,
-    costing: str = "auto",
+    costing: str = DEFAULT_COSTING,
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
     trace_options: dict[str, object] | None = None,
@@ -428,7 +448,7 @@ def map_match_dataframe(
     *,
     lat_col: str = "lat",
     lon_col: str = "lon",
-    costing: str = "auto",
+    costing: str = DEFAULT_COSTING,
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
     trace_options: dict[str, object] | None = None,
@@ -455,7 +475,7 @@ def map_match_dataframe_full(
     *,
     lat_col: str = "lat",
     lon_col: str = "lon",
-    costing: str = "auto",
+    costing: str = DEFAULT_COSTING,
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
     trace_options: dict[str, object] | None = None,

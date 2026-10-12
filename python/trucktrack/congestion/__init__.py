@@ -1,7 +1,7 @@
 """Per-edge truck speeds from map-matched trips, for Valhalla predicted traffic."""
 
 from trucktrack.congestion.config import ObservationConfig
-from trucktrack.congestion.fixes import flag_dwell, time_weights
+from trucktrack.congestion.fixes import flag_dwell, flag_speed_mismatch, time_weights
 from trucktrack.congestion.observations import (
     FIX_COLUMNS,
     OBSERVATION_COLUMNS,
@@ -15,6 +15,7 @@ __all__ = [
     "ObservationConfig",
     "edge_observations",
     "flag_dwell",
+    "flag_speed_mismatch",
     "prepare_fixes",
     "time_weights",
 ]

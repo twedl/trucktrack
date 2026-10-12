@@ -12,10 +12,12 @@ from trucktrack.congestion import (
     ObservationConfig,
     edge_observations,
     flag_dwell,
+    flag_speed_mismatch,
     time_weights,
 )
-from trucktrack.generate.interpolator import FixSchedule
-from trucktrack.generate.models import SamplingConfig
+from trucktrack.generate.gps_errors import speed_heading_desync
+from trucktrack.generate.interpolator import FixSchedule, interpolate_route
+from trucktrack.generate.models import RouteSegment, SamplingConfig, TracePoint
 
 _T0 = datetime(2026, 1, 1, 8, 0, tzinfo=UTC)
 
@@ -222,6 +224,89 @@ class TestFlagDwell:
         assert not any(_dwell(df))
 
 
+def _mismatch(df: pl.DataFrame) -> list[bool]:
+    return flag_speed_mismatch(df)["speed_mismatch"].to_list()
+
+
+def _route(rng: random.Random) -> RouteSegment:
+    """A 20 km straight road east: urban, then highway, then urban, in 50 m steps.
+
+    The generator's speed model drives it, with its traffic stops.
+    """
+    n = 400
+    speeds = [11.0 if i < 100 or i >= 300 else 28.0 for i in range(n)]
+    step_lon = 50 / (111_320 * 0.7236)  # cos(43.65°)
+    coords = [(43.65, -79.38 + i * step_lon) for i in range(n + 1)]
+    return RouteSegment(
+        coords=coords,
+        speeds_mps=speeds,
+        distances_m=[50.0] * n,
+        total_distance_m=50.0 * n,
+        total_duration_s=sum(50.0 / v for v in speeds),
+    )
+
+
+def _trace_frame(points: list[TracePoint]) -> pl.DataFrame:
+    return pl.DataFrame(
+        {
+            "id": "t",
+            "time": [p.timestamp for p in points],
+            "lat": [p.lat for p in points],
+            "lon": [p.lon for p in points],
+            "speed": [p.speed_kmh for p in points],
+        }
+    )
+
+
+class TestFlagSpeedMismatch:
+    def test_stuck_zero_while_cruising(self) -> None:
+        # 100 km/h, a fix a minute: 1667 m apart.
+        metres = [0, 1667, 3333, 5000, 6667]
+        df = _fixes([0, 60, 120, 180, 240], speeds=[100, 0, 0, 0, 100], metres=metres)
+        assert _mismatch(df) == [False, True, True, True, False]
+
+    def test_dense_stuck_zero_at_city_speed(self) -> None:
+        # 50 km/h, a fix every 5 s: 69 m apart.
+        metres = [0, 69, 139, 208, 278]
+        df = _fixes([0, 5, 10, 15, 20], speeds=[50, 0, 0, 0, 50], metres=metres)
+        assert _mismatch(df) == [False, True, True, True, False]
+
+    def test_sparse_zeros_at_city_speed_could_be_stop_and_go(self) -> None:
+        metres = [0, 500, 1000, 1500]
+        df = _fixes([0, 60, 120, 180], speeds=[0, 0, 0, 0], metres=metres)
+        assert not any(_mismatch(df))
+
+    def test_either_speed_explaining_the_move_passes(self) -> None:
+        # Pulling away from a stop: 0 then 50 km/h, 60 m in 5 s.
+        df = _fixes([0, 5], speeds=[0, 50], metres=[0, 60])
+        assert not any(_mismatch(df))
+
+    @pytest.mark.parametrize("interval_s", [1.0, 5.0, 20.0, 60.0])
+    def test_generator_drives_pass(self, interval_s: float) -> None:
+        for seed in range(5):
+            rng = random.Random(seed)
+            schedule = FixSchedule(
+                SamplingConfig(interval_s, irregular_prob=0.05), _T0, rng
+            )
+            points, _ = interpolate_route(_route(rng), _T0, rng, schedule)
+            assert not any(_mismatch(_trace_frame(points))), seed
+
+    def test_generator_speed_stuck_at_zero_caught(self) -> None:
+        caught = stuck = 0
+        for seed in range(10):
+            rng = random.Random(seed)
+            schedule = FixSchedule(SamplingConfig(5.0), _T0, rng)
+            clean, _ = interpolate_route(_route(rng), _T0, rng, schedule)
+            faulty = speed_heading_desync(clean, rng)
+            flags = _mismatch(_trace_frame(faulty))
+            for before, after, flag in zip(clean, faulty, flags, strict=True):
+                if before.speed_kmh > 30 and after.speed_kmh == 0:
+                    stuck += 1
+                    caught += flag
+        assert stuck > 100
+        assert caught / stuck > 0.95
+
+
 def _matched(
     *,
     speed: list[float | None] | None = None,
@@ -238,6 +323,7 @@ def _matched(
             "heading": heading or [119.0, 135.0, 305.0],
             "w": w or [30.0, 60.0, 30.0],
             "dwell": [False] * 3,
+            "speed_mismatch": [False] * 3,
             "edge_id": [1634000558945, None, 1342686762890],
             "way_id": [370115604, None, 920928491],
             "distance_along_edge": [0.892249, None, 0.529403],

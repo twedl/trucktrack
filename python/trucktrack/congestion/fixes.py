@@ -13,6 +13,20 @@ import polars as pl
 from trucktrack.congestion.config import DEFAULT_CONFIG, ObservationConfig
 
 
+def _step_m() -> pl.Expr:
+    """Metres from the previous fix (flat-earth; fine at fix spacing)."""
+    lat = pl.col("lat").radians()
+    lon = pl.col("lon").radians()
+    return (
+        6_371_000.0
+        * ((lat - lat.shift(1)) ** 2 + ((lon - lon.shift(1)) * lat.cos()) ** 2).sqrt()
+    )
+
+
+def _seconds(duration: pl.Expr) -> pl.Expr:
+    return duration.dt.total_microseconds() / 1e6
+
+
 def time_weights[FrameT: (pl.DataFrame, pl.LazyFrame)](
     frame: FrameT, config: ObservationConfig = DEFAULT_CONFIG
 ) -> FrameT:
@@ -48,8 +62,9 @@ def time_weights[FrameT: (pl.DataFrame, pl.LazyFrame)](
     next_t = distinct_t.shift(-1).backward_fill()
 
     def half(gap: pl.Expr) -> pl.Expr:
-        seconds = gap.dt.total_microseconds() / 2e6
-        return seconds.clip(upper_bound=config.max_half_gap_s).fill_null(0.0)
+        return (
+            (_seconds(gap) / 2).clip(upper_bound=config.max_half_gap_s).fill_null(0.0)
+        )
 
     w = pl.when(first).then(half(t - prev_t) + half(next_t - t)).otherwise(0.0)
     return frame.sort("id", "time", maintain_order=True).with_columns(
@@ -88,15 +103,9 @@ def flag_dwell[FrameT: (pl.DataFrame, pl.LazyFrame)](
 
     A null speed is not stationary.
     """
-    lat = pl.col("lat").radians()
-    lon = pl.col("lon").radians()
-    step_m = (
-        6_371_000.0
-        * ((lat - lat.shift(1)) ** 2 + ((lon - lon.shift(1)) * lat.cos()) ** 2).sqrt()
-    )
     stationary = (pl.col("speed") < config.stationary_kmh).fill_null(False)
     run_start = (
-        stationary.ne(stationary.shift(1)) | (step_m > config.max_stationary_step_m)
+        stationary.ne(stationary.shift(1)) | (_step_m() > config.max_stationary_step_m)
     ).fill_null(True)
     run_s = pl.col("w").sum().over("id", "_run")
     return (
@@ -104,4 +113,51 @@ def flag_dwell[FrameT: (pl.DataFrame, pl.LazyFrame)](
         .with_columns(run_start.cum_sum().over("id").alias("_run"))
         .with_columns((stationary & (run_s > config.max_queue_stop_s)).alias("dwell"))
         .drop("_run")
+    )
+
+
+def _reach_m(v: pl.Expr, dt: pl.Expr, config: ObservationConfig) -> pl.Expr:
+    """Furthest a truck at *v* m/s gets in *dt* s, speeding up as hard as it can.
+
+    Speeds up at ``max_accel_mps2`` until ``max_truck_kmh`` (or *v*, if
+    faster), then holds.
+    """
+    a = config.max_accel_mps2
+    top = pl.max_horizontal(pl.lit(config.max_truck_kmh / 3.6), v)
+    t_top = ((top - v) / a).clip(0.0, dt)
+    return (v + (v + a * t_top)) / 2 * t_top + top * (dt - t_top)
+
+
+def flag_speed_mismatch[FrameT: (pl.DataFrame, pl.LazyFrame)](
+    frame: FrameT, config: ObservationConfig = DEFAULT_CONFIG
+) -> FrameT:
+    """Add ``speed_mismatch``: reported speeds too low for the ground covered.
+
+    Two consecutive fixes are a mismatch when they are further apart,
+    by more than ``config.position_noise_m``, than a truck could get
+    between them even leaving at the faster of their two speeds and
+    speeding up at ``config.max_accel_mps2`` to
+    ``config.max_truck_kmh``.  Neither speed explains the movement, so
+    both fixes are flagged.
+
+    This catches a speed stuck at zero while the truck drives on, a
+    device fault that would put false queue time on the edges it
+    passes.  A pair where either speed accounts for the distance
+    passes, so a real stop never trips it, nor does a lone stuck zero
+    between moving fixes.  The denser the fixes, the tighter the bound:
+    zeros 20 s apart are caught above about 40 km/h, zeros a minute
+    apart only above about 85 km/h, since slower than that they could
+    be stop-and-go traffic.  A position glitch also trips it.  A speed
+    too high for the ground covered isn't checked: the road can be
+    longer than the straight line.
+    """
+    v = pl.col("speed") / 3.6
+    dt = _seconds(pl.col("time") - pl.col("time").shift(1))
+    reach = _reach_m(pl.max_horizontal(v, v.shift(1)), dt, config)
+    too_far = (dt > 0) & (_step_m() > reach + config.position_noise_m)
+    too_far = too_far.fill_null(False)
+    return frame.sort("id", "time", maintain_order=True).with_columns(
+        (too_far | too_far.shift(-1).fill_null(False))
+        .over("id")
+        .alias("speed_mismatch")
     )

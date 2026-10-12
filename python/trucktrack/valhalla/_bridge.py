@@ -33,9 +33,11 @@ from trucktrack.valhalla._json import loads as _json_loads
 from trucktrack.valhalla._parsing import concat_leg_shapes
 from trucktrack.valhalla.map_matching import (
     _BASE_BREAKAGE_DISTANCE,
+    DEFAULT_COSTING,
     FIX_MATCH_ATTRIBUTES,
     FixMatches,
     _parse_way_ids,
+    _with_costing,
     map_match_dataframe_full,
     null_fix_matches,
     parse_fix_matches,
@@ -141,17 +143,6 @@ def _split_at(df: pl.DataFrame, gap_idxs: list[int]) -> list[pl.DataFrame]:
     ]
 
 
-def _with_costing(
-    body: dict[str, object],
-    costing: str,
-    costing_options: dict[str, object] | None,
-) -> dict[str, object]:
-    body["costing"] = costing
-    if costing_options is not None:
-        body["costing_options"] = {costing: costing_options}
-    return body
-
-
 def bridge_gap(
     a: tuple[float, float],
     b: tuple[float, float],
@@ -240,7 +231,7 @@ def map_match_dataframe_with_bridges(
     lat_col: str = "lat",
     lon_col: str = "lon",
     time_col: str = "time",
-    costing: str = "auto",
+    costing: str = DEFAULT_COSTING,
     costing_options: dict[str, object] | None = None,
     config: str | Path | None = None,
     trace_options: dict[str, object] | None = None,

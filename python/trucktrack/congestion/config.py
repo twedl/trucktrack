@@ -22,6 +22,14 @@ class ObservationConfig:
     *max_edge_turn_deg* (a cloverleaf loop doesn't), so other edges get
     no heading check.  Parallel roadways in the same direction (a
     collector beside an express lane) look alike and pass.
+
+    A pair of fixes is a ``speed_mismatch`` when they are further apart
+    than a truck could get between them from the faster of their
+    reported speeds (see
+    :func:`~trucktrack.congestion.flag_speed_mismatch`):
+    *max_accel_mps2* bounds how fast it speeds up, *max_truck_kmh* how
+    fast it gets (Ontario limits trucks to 105 km/h), and
+    *position_noise_m* allows for GPS error.
     """
 
     max_half_gap_s: float = 30.0
@@ -31,6 +39,9 @@ class ObservationConfig:
     heading_min_speed_kmh: float = 15.0
     wrong_way_deg: float = 90.0
     max_edge_turn_deg: float = 90.0
+    max_accel_mps2: float = 1.0
+    max_truck_kmh: float = 110.0
+    position_noise_m: float = 25.0
 
 
 DEFAULT_CONFIG = ObservationConfig()

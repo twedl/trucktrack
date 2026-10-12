@@ -41,6 +41,7 @@ from trucktrack.splitters import (
     split_by_observation_gap,
     split_by_stops,
 )
+from trucktrack.valhalla.map_matching import DEFAULT_COSTING
 from trucktrack.valhalla.quality import (
     MapMatchQuality,
     evaluate_map_match,
@@ -201,7 +202,7 @@ def split_trips(
 def map_match_trips(
     split_df: pl.DataFrame,
     *,
-    costing: str = "auto",
+    costing: str = DEFAULT_COSTING,
     costing_options: dict[str, Any] | None = None,
     trace_options: dict[str, Any] | None = None,
     config: str | Path | None = None,
@@ -270,7 +271,7 @@ def evaluate_quality(
     split_df: pl.DataFrame,
     *,
     trips: dict[int, TripMatch] | None = None,
-    costing: str = "auto",
+    costing: str = DEFAULT_COSTING,
     costing_options: dict[str, Any] | None = None,
     trace_options: dict[str, Any] | None = None,
     config: str | Path | None = None,
