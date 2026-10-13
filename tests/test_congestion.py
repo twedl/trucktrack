@@ -20,6 +20,7 @@ from trucktrack.generate.interpolator import FixSchedule, interpolate_route
 from trucktrack.generate.models import RouteSegment, SamplingConfig, TracePoint
 
 _T0 = datetime(2026, 1, 1, 8, 0, tzinfo=UTC)
+_RUSH = datetime(2026, 3, 3, 21, 30, tzinfo=UTC)  # Tuesday 16:30 in Toronto
 
 
 def _fixes(
@@ -281,14 +282,15 @@ class TestFlagSpeedMismatch:
         df = _fixes([0, 5], speeds=[0, 50], metres=[0, 60])
         assert not any(_mismatch(df))
 
+    @pytest.mark.parametrize("start", [_T0, _RUSH])
     @pytest.mark.parametrize("interval_s", [1.0, 5.0, 20.0, 60.0])
-    def test_generator_drives_pass(self, interval_s: float) -> None:
+    def test_generator_drives_pass(self, interval_s: float, start: datetime) -> None:
         for seed in range(5):
             rng = random.Random(seed)
             schedule = FixSchedule(
-                SamplingConfig(interval_s, irregular_prob=0.05), _T0, rng
+                SamplingConfig(interval_s, irregular_prob=0.05), start, rng
             )
-            points, _ = interpolate_route(_route(rng), _T0, rng, schedule)
+            points, _ = interpolate_route(_route(rng), start, rng, schedule)
             assert not any(_mismatch(_trace_frame(points))), seed
 
     def test_generator_speed_stuck_at_zero_caught(self) -> None:

@@ -37,6 +37,7 @@ from trucktrack.generate.parking import (
     generate_arrival_maneuver,
     generate_departure_maneuver,
 )
+from trucktrack.generate.speed_profile import congestion_factor
 
 
 def _valhalla_reachable() -> bool:
@@ -299,6 +300,59 @@ class TestInterpolateRoute:
         on_fine = {p.timestamp: (p.lat, p.lon, p.speed_kmh) for p in fine}
         for p in coarse + sparse:
             assert on_fine[p.timestamp] == (p.lat, p.lon, p.speed_kmh)
+
+
+# ── Rush hours ───────────────────────────────────────────────────────────
+
+# 08:00 on a Tuesday in Toronto, either side of the DST change on 8 March.
+_RUSH_EST = datetime(2026, 3, 3, 13, 0, tzinfo=UTC)
+_RUSH_EDT = datetime(2026, 3, 10, 12, 0, tzinfo=UTC)
+
+
+class TestRushHours:
+    def test_free_flow_overnight(self) -> None:
+        three_am = _RUSH_EST - timedelta(hours=5)
+        assert congestion_factor("highway", three_am) == pytest.approx(1.0, abs=1e-3)
+
+    def test_peaks_in_local_time(self) -> None:
+        est = congestion_factor("highway", _RUSH_EST)
+        assert est < 0.55
+        assert congestion_factor("highway", _RUSH_EDT) == pytest.approx(est)
+        # 13:00 UTC after the change is 09:00 local, past the peak.
+        assert congestion_factor("highway", _RUSH_EDT + timedelta(hours=1)) > est
+
+    def test_deeper_on_faster_roads(self) -> None:
+        factors = [
+            congestion_factor(c, _RUSH_EST) for c in ("highway", "arterial", "urban")
+        ]
+        assert factors == sorted(factors)
+        assert factors[-1] < 1.0
+
+    def test_no_rush_hour_on_weekends(self) -> None:
+        saturday = _RUSH_EST + timedelta(days=4)
+        assert congestion_factor("highway", saturday) > 0.95
+
+    def test_naive_time_is_utc(self) -> None:
+        naive = _RUSH_EST.replace(tzinfo=None)
+        assert congestion_factor("highway", naive) == congestion_factor(
+            "highway", _RUSH_EST
+        )
+
+    def test_slows_the_drive_with_positions_in_step(self) -> None:
+        def drive(start: datetime) -> tuple[list[TracePoint], datetime]:
+            sched = FixSchedule(SamplingConfig(), start, random.Random(0))
+            return interpolate_route(_ROUTE, start, random.Random(1), sched)
+
+        night = _RUSH_EST - timedelta(hours=5)
+        _, free_arrival = drive(night)
+        rush, rush_arrival = drive(_RUSH_EST)
+        assert rush_arrival - _RUSH_EST > 1.5 * (free_arrival - night)
+        # The truck covers the ground its reported speeds say it does.
+        for a, b in zip(rush, rush[1:], strict=False):
+            metres = haversine_m(a.lat, a.lon, b.lat, b.lon)
+            seconds = (b.timestamp - a.timestamp).total_seconds()
+            mean_mps = (a.speed_kmh + b.speed_kmh) / 2 / 3.6
+            assert metres == pytest.approx(mean_mps * seconds, rel=0.02)
 
 
 class TestGenerateTraceSampling:

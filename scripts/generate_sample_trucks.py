@@ -13,13 +13,17 @@ output — safe to commit the result.  Requires a discoverable
 
     uv run python scripts/generate_sample_trucks.py
 
-``--trucks N`` swaps the three fixed trucks for N generated IDs, and
+``--trucks N`` swaps the three fixed trucks for N generated IDs,
 ``--random-sampling`` gives each truck its own reporting schedule (see
 :func:`trucktrack.generate.random_sampling`) and records it in
-``sampling.json`` next to the partitions::
+``sampling.json`` next to the partitions, ``--trips N`` sets trips per
+truck, and ``--weeks W`` spreads each truck's first departure uniformly
+over W weeks from Monday 23 Feb 2026 (local time), so the trips cover
+every hour of the week and the DST change on 8 March::
 
     uv run python scripts/generate_sample_trucks.py \\
-        --trucks 50 --random-sampling --output data/trucks_sampling
+        --trucks 200 --random-sampling --trips 6 --weeks 4 \\
+        --output data/trucks_sampling
 """
 
 from __future__ import annotations
@@ -27,7 +31,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -66,16 +70,25 @@ WAYPOINTS: list[tuple[float, float]] = [
 ]
 
 N_TRIPS_PER_TRUCK = 2
+FIRST_DEPARTURE = datetime(2026, 1, 1, 8, 0, tzinfo=UTC)
+# Monday 00:00 in Toronto; two weeks before the DST change.
+SPREAD_START = datetime(2026, 2, 23, 5, 0, tzinfo=UTC)
+# Shortest wait between a truck's trips when a long one runs late.
+MIN_TURNAROUND = timedelta(minutes=30)
 # Deterministic master seed → deterministic per-trip seeds.
 MASTER_SEED = 20260101
 
 
 def _build_trip_configs(
-    truck_id: str, rng: random.Random, sampling: SamplingConfig
+    truck_id: str,
+    rng: random.Random,
+    sampling: SamplingConfig,
+    first_departure: datetime,
+    n_trips: int,
 ) -> list[TripConfig]:
     configs: list[TripConfig] = []
-    current_time = datetime(2026, 1, 1, 8, 0, tzinfo=UTC)
-    for _ in range(N_TRIPS_PER_TRUCK):
+    current_time = first_departure
+    for _ in range(n_trips):
         origin = rng.choice(WAYPOINTS)
         dest = rng.choice([w for w in WAYPOINTS if w != origin])
         configs.append(
@@ -94,11 +107,27 @@ def _build_trip_configs(
 
 
 def _collect_truck(
-    truck_id: str, truck_rng: random.Random, sampling: SamplingConfig
+    truck_id: str,
+    truck_rng: random.Random,
+    sampling: SamplingConfig,
+    first_departure: datetime,
+    n_trips: int,
 ) -> pl.DataFrame:
     rows: list[dict[str, object]] = []
-    for config in _build_trip_configs(truck_id, truck_rng, sampling):
-        points = generate_trace(config)
+    not_before = first_departure
+    for config in _build_trip_configs(
+        truck_id, truck_rng, sampling, first_departure, n_trips
+    ):
+        # A truck is never on two trips at once: a trip that runs long
+        # pushes the next one back, as does a yard dwell that starts the
+        # next one before its departure.
+        departure = max(config.departure_time, not_before)
+        points = generate_trace(replace(config, departure_time=departure))
+        if points and points[0].timestamp < not_before:
+            departure += not_before - points[0].timestamp
+            points = generate_trace(replace(config, departure_time=departure))
+        if points:
+            not_before = points[-1].timestamp + MIN_TURNAROUND
         for pt in points:
             rows.append(
                 {
@@ -126,6 +155,19 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="draw each truck's reporting schedule (default: fixed 60 s)",
     )
+    parser.add_argument(
+        "--trips",
+        type=int,
+        default=N_TRIPS_PER_TRUCK,
+        help=f"trips per truck (default: {N_TRIPS_PER_TRUCK})",
+    )
+    parser.add_argument(
+        "--weeks",
+        type=float,
+        default=None,
+        help="spread first departures over this many weeks from "
+        f"{SPREAD_START:%Y-%m-%d} (default: all at {FIRST_DEPARTURE:%Y-%m-%d %H:%M})",
+    )
     parser.add_argument("--output", type=Path, default=OUTPUT_DIR)
     return parser.parse_args()
 
@@ -134,9 +176,10 @@ def main() -> None:
     args = _parse_args()
     output_dir: Path = args.output
     master_rng = random.Random(MASTER_SEED)
-    # Separate streams so neither flag changes the trips themselves.
+    # Separate streams so no flag changes the trips themselves.
     id_rng = random.Random(f"{MASTER_SEED}:ids")
     sampling_rng = random.Random(f"{MASTER_SEED}:sampling")
+    departure_rng = random.Random(f"{MASTER_SEED}:departures")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     trucks = (
@@ -153,7 +196,12 @@ def main() -> None:
             random_sampling(sampling_rng) if args.random_sampling else SamplingConfig()
         )
         samplings[truck_id] = sampling
-        df = _collect_truck(truck_id, truck_rng, sampling)
+        first_departure = (
+            FIRST_DEPARTURE
+            if args.weeks is None
+            else SPREAD_START + timedelta(weeks=departure_rng.uniform(0, args.weeks))
+        )
+        df = _collect_truck(truck_id, truck_rng, sampling, first_departure, args.trips)
         parts.append(df)
         print(f"  {truck_id}: {df.height} points, every {sampling.interval_s:g} s")
 

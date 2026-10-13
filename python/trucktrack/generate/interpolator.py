@@ -17,8 +17,10 @@ from trucktrack.generate.models import (
     TracePoint,
 )
 from trucktrack.generate.speed_profile import (
+    congestion_factor,
     inject_traffic_stops,
     mps_to_kmh,
+    road_class,
     smooth_speeds,
 )
 
@@ -166,7 +168,8 @@ def interpolate_route(
         return [], departure_time
 
     speeds = smooth_speeds(route.speeds_mps, route.distances_m)
-    speeds, distances = inject_traffic_stops(speeds, route.distances_m, rng)
+    speeds, distances, sources = inject_traffic_stops(speeds, route.distances_m, rng)
+    classes = [road_class(route.speeds_mps[j]) for j in sources]
 
     orig_cum_dist = [0.0]
     for d in route.distances_m:
@@ -178,12 +181,19 @@ def interpolate_route(
         cum_dist.append(cum_dist[-1] + d)
     total_speed_dist = cum_dist[-1]
 
+    # Rush hours slow each segment by its factor at the time the truck
+    # reaches it, so positions keep pace with the reported speed.
     seg_times: list[float] = []
-    for spd, dist in zip(speeds, distances, strict=False):
+    elapsed = 0.0
+    for i, (spd, dist) in enumerate(zip(speeds, distances, strict=False)):
         if spd < 0.01:
-            seg_times.append(rng.uniform(15, 45))
+            seg_time = rng.uniform(15, 45)
         else:
-            seg_times.append(dist / spd)
+            reached = departure_time + timedelta(seconds=elapsed)
+            speeds[i] = spd * congestion_factor(classes[i], reached)
+            seg_time = dist / speeds[i]
+        seg_times.append(seg_time)
+        elapsed += seg_time
 
     points: list[TracePoint] = []
     total_time = sum(seg_times)
