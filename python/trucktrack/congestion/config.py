@@ -45,3 +45,32 @@ class ObservationConfig:
 
 
 DEFAULT_CONFIG = ObservationConfig()
+
+
+@dataclass(frozen=True)
+class AggregateConfig:
+    """Settings for aggregating edge observations into cell speeds.
+
+    *local_tz* is the clock time bins follow: Valhalla's predicted
+    speeds are in the edge's local time.  A cell needs *min_trucks*
+    effective trucks (see :func:`~trucktrack.congestion.cell_speeds`)
+    to give a speed.  A thinner edge cell falls back to its way's, but
+    only on edges at least *min_pool_edge_m* long (see
+    :func:`~trucktrack.congestion.edge_speeds`).  Speeds above
+    *max_speed_kmh* are glitches, not trucks (see
+    :func:`~trucktrack.congestion.usable_observations`).
+
+    At one truck, every cell with a fix counts.  Raising *min_trucks*
+    keeps one truck or fleet from setting a cell's speed, at the cost
+    of coverage: over 200 synthetic trucks and four weeks, 84% of edge
+    hour-of-week cells hold one truck, and at two only 1-4% of driving
+    time gets a speed.
+    """
+
+    local_tz: str = "America/Toronto"
+    min_trucks: float = 1.0
+    min_pool_edge_m: float = 200.0
+    max_speed_kmh: float = 130.0
+
+
+DEFAULT_AGGREGATE_CONFIG = AggregateConfig()

@@ -106,6 +106,9 @@ _RESPONSE: dict[str, Any] = {
             "id": 1634000558945,
             "begin_heading": 119,
             "end_heading": 119,
+            "forward": True,
+            "road_class": "motorway",
+            "length": 0.688,
         },
         {
             "way_id": 808977465,
@@ -138,6 +141,10 @@ class TestParseFixMatches:
         assert fm["way_id"] == [370115604, 808977465, None, None, 920928491]
         assert fm["match_type"][2:4] == ["unmatched", "interpolated"]
         assert fm["begin_heading"][4] == 334
+        assert fm["forward"][0] is True
+        assert fm["road_class"][0] == "motorway"
+        assert fm["edge_length"][0] == pytest.approx(688.0)
+        assert fm["edge_length"][4] is None
         df = pl.DataFrame(fm, schema=FIX_MATCH_SCHEMA)
         assert df.height == 5
 

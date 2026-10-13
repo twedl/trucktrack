@@ -62,6 +62,11 @@ def truck_id_from_trip(trip_id: str) -> str:
     return trip_id.split("_gap")[0]
 
 
+def truck_id_expr(col: str = "id") -> pl.Expr:
+    """:func:`truck_id_from_trip` as an expression over a trip-id column."""
+    return pl.col(col).str.split("_gap").list.first()
+
+
 def _scan_chunk_glob(
     data_dir: str | Path,
     glob: str,
@@ -126,13 +131,7 @@ class ChunkIndex:
         if not files:
             return cls(data_dir, index)
 
-        chunk_id_expr = (
-            pl.col("id")
-            .str.split("_gap")
-            .list.first()
-            .str.slice(-_INDEX_CHUNK_ID_LEN)
-            .unique()
-        )
+        chunk_id_expr = truck_id_expr().str.slice(-_INDEX_CHUNK_ID_LEN).unique()
 
         def _extract(p: Path) -> tuple[str, list[str]]:
             rel = str(p.relative_to(data_dir))

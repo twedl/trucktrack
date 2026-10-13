@@ -197,6 +197,9 @@ FIX_MATCH_ATTRIBUTES: tuple[str, ...] = (
     "edge.id",
     "edge.begin_heading",
     "edge.end_heading",
+    "edge.forward",
+    "edge.road_class",
+    "edge.length",
     "matched.type",
     "matched.edge_index",
     "matched.distance_along_edge",
@@ -211,6 +214,9 @@ FIX_MATCH_SCHEMA: dict[str, type[pl.DataType]] = {
     "distance_from_trace": pl.Float64,
     "begin_heading": pl.Float64,
     "end_heading": pl.Float64,
+    "forward": pl.Boolean,
+    "road_class": pl.Utf8,
+    "edge_length": pl.Float64,
 }
 
 # Column name -> one value per input point, in FIX_MATCH_SCHEMA order.
@@ -263,9 +269,10 @@ def parse_fix_matches(resp: dict[str, Any], n_points: int) -> FixMatches:
     """Where each input point landed, from a response with FIX_MATCH_ATTRIBUTES.
 
     Returns :data:`FIX_MATCH_SCHEMA` columns with one value per point:
-    the edge's GraphId, OSM way, begin/end headings, and the point's
-    fraction along it, match type and distance from the trace.  Edge
-    columns are null for points with no edge (see :func:`_edge_indices`).
+    the edge's GraphId, OSM way, begin/end headings, direction along the
+    way, road class and length (m), and the point's fraction along it,
+    match type and distance from the trace.  Edge columns are null for
+    points with no edge (see :func:`_edge_indices`).
     """
     matched: list[dict[str, Any]] = resp.get("matched_points", [])
     edges: list[dict[str, Any]] = resp.get("edges", [])
@@ -281,6 +288,10 @@ def parse_fix_matches(resp: dict[str, Any], n_points: int) -> FixMatches:
         out["distance_from_trace"].append(p.get("distance_from_trace_point"))
         out["begin_heading"].append(edge.get("begin_heading"))
         out["end_heading"].append(edge.get("end_heading"))
+        out["forward"].append(edge.get("forward"))
+        out["road_class"].append(edge.get("road_class"))
+        length_km = edge.get("length")
+        out["edge_length"].append(None if length_km is None else length_km * 1000.0)
     return out
 
 
