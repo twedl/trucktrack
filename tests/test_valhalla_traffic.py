@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import io
 import json
+import tarfile
 from pathlib import Path
 
 import numpy as np
@@ -16,7 +18,9 @@ from trucktrack.valhalla._build_id import (  # noqa: E402
     base_extract_path,
     pristine_extract,
 )
+from trucktrack.valhalla._tiles import read_edges  # noqa: E402
 from trucktrack.valhalla.traffic import (  # noqa: E402
+    class_rows,
     encode_week,
     speed_buckets,
     traffic_rows,
@@ -163,3 +167,88 @@ class TestPristineExtract:
         extract.write_bytes(b"rebuilt tiles")
         write_tile_build_id(extract)
         assert pristine_extract(config).read_bytes() == b"rebuilt tiles"
+
+
+def _edge(
+    speed: int,
+    *,
+    truck_speed: int = 0,
+    road_class: int = 0,
+    use: int = 0,
+    access: int = 8,
+    shortcut: bool = False,
+) -> bytes:
+    """One 48-byte DirectedEdge with the fields read_edges looks at."""
+    words = [0] * 6
+    words[2] = speed | truck_speed << 24 | use << 40 | road_class << 54
+    words[3] = access
+    words[4] = 120 << 32  # length, m
+    words[5] = int(shortcut) << 60
+    return np.array(words, dtype=np.uint64).tobytes()
+
+
+def _tile_tar(path: Path, edges: list[bytes]) -> Path:
+    """A tile extract with one level-2 tile: one node, no transitions, *edges*."""
+    header = np.zeros(34, dtype=np.uint64)
+    header[0] = 2 | 770804 << 3
+    header[5] = 1 | len(edges) << 21
+    tile = header.tobytes() + bytes(32) + b"".join(edges)
+    with tarfile.open(path, "w") as tar:
+        info = tarfile.TarInfo("2/000/770/804.gph")
+        info.size = len(tile)
+        tar.addfile(info, io.BytesIO(tile))
+    return path
+
+
+class TestReadEdges:
+    def test_road_edges_trucks_may_drive(self, tmp_path: Path) -> None:
+        extract = _tile_tar(
+            tmp_path / "tiles.tar",
+            [
+                _edge(100, truck_speed=90),  # motorway, trucks capped at 90
+                _edge(100, shortcut=True),
+                _edge(40, road_class=6, access=1),  # residential, cars only
+                _edge(20, use=41),  # ferry
+                _edge(50, road_class=3, truck_speed=60),  # secondary
+            ],
+        )
+        edges = read_edges(extract)
+        assert edges["edge_id"].to_list() == [
+            GraphId(770804, 2, 0).value,
+            GraphId(770804, 2, 4).value,
+        ]
+        assert edges["road_class"].cast(pl.String).to_list() == [
+            "motorway",
+            "secondary",
+        ]
+        assert edges["speed"].to_list() == [90.0, 50.0]
+        assert edges["length"].to_list() == [120.0, 120.0]
+
+
+class TestClassRows:
+    def test_each_edge_gets_its_class_week(self) -> None:
+        weeks = pl.DataFrame(
+            {
+                "road_class": ["motorway"] * 168,
+                "speed": [90.0] * 168,
+                "hour_of_week": list(range(168)),
+                # Slow at Tuesday 08:00, in the constrained window.
+                "week_speed": [45.0 if h == 2 * 24 + 8 else 90.0 for h in range(168)],
+            }
+        )
+        edges = pl.DataFrame(
+            {
+                "edge_id": [_EDGE, GraphId(770804, 2, 7).value, _EDGE + (1 << 25)],
+                "road_class": ["motorway", "motorway", "residential"],
+                "speed": [90.0, 90.0, 40.0],
+            },
+            schema_overrides={"edge_id": pl.UInt64},
+        )
+        rows = class_rows(weeks, edges)
+        assert rows["path"].to_list() == ["2/000/770/804.csv"] * 2
+        lines = sorted(rows["line"].to_list())
+        assert [line.split(",")[:3] for line in lines] == [
+            ["2/770804/31604", "90", "89"],
+            ["2/770804/7", "90", "89"],
+        ]
+        assert lines[0].split(",")[3] == lines[1].split(",")[3]

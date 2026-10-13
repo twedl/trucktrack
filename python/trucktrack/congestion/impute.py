@@ -55,6 +55,18 @@ _ITERATIONS = 5
 _PATTERN_RANGE = (0.05, 2.0)
 _DEPTH_RANGE = (0.0, 3.0)
 _SOURCES = pl.Enum(["imputed", "blended", "measured"])
+# class_weeks uses a class's pattern with at least this much measured
+# driving behind it (about 14 minutes for each hour of the week), and
+# only if it dips more than MIN_CLASS_DIP below night speed somewhere.
+MIN_CLASS_HOURS = 40.0
+MIN_CLASS_DIP = 0.05
+# Edge lengths (m) splitting the bands speed_ratios measures in, and the
+# seconds of driving at which a band's own ratio counts as much as its
+# class's.
+LENGTH_BANDS = (50.0, 200.0, 1000.0)
+RATIO_SECONDS = 3600.0
+# Model = (level, depth, pattern), as fit_model returns them.
+Model = tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]
 
 
 @dataclass(frozen=True)
@@ -68,6 +80,10 @@ class ImputeConfig:
     the class's depth of 1.  An edge has one depth before local hour
     *depth_split_hour* and another from it on (a road into a city slows
     in the morning, out of it in the evening); 24 gives it one.
+    *pattern_seconds* pulls each class-hour's pattern towards 1 (no
+    congestion): with W seconds of driving behind it, its log is scaled
+    by W / (W + pattern_seconds), so a class few trucks drove stays
+    nearly flat.
 
     Defaults are the best of those tried against held-out trucks'
     5 s data on the synthetic sample.
@@ -76,6 +92,7 @@ class ImputeConfig:
     cell_trucks: float = 1.0
     depth_seconds: float = 10.0
     depth_split_hour: int = 12
+    pattern_seconds: float = 600.0
 
 
 DEFAULT_IMPUTE_CONFIG = ImputeConfig()
@@ -88,7 +105,7 @@ def _half_day(config: ImputeConfig) -> pl.Expr:
 
 def fit_model(
     cells: pl.DataFrame, config: ImputeConfig = DEFAULT_IMPUTE_CONFIG
-) -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
+) -> Model:
     """Fit each edge's ``level`` and ``depth``, and each class's ``pattern``.
 
     *cells* are hour-of-week :func:`~trucktrack.congestion.edge_cells`.
@@ -96,15 +113,17 @@ def fit_model(
 
     - level: Σ speed·w / Σ w·pattern**depth over the edge's cells;
     - pattern: Σ speed·w / Σ w·level over the class's cells in the
-      hour, scaled to 1 at night (00:00-05:00);
+      hour, scaled to 1 at night (00:00-05:00) and pulled towards 1 by
+      ``config.pattern_seconds``;
     - depth: the slope of log(speed / level) on log(pattern), weighted
       by seconds, shrunk towards 1 by ``config.depth_seconds``, within
       0 to 3.  Cell speeds under 1 km/h count as 1.
 
     Returns ``level`` per edge, ``depth`` per edge and half of the day
     (``half``, see ``config.depth_split_hour``) it has cells in, and
-    ``pattern`` per class and hour.  An edge only ever seen stopped has
-    no level, and gets no speeds.
+    ``pattern`` per class and hour, with the ``seconds`` of driving
+    behind it.  An edge only ever seen stopped has no level, and gets
+    no speeds.
     """
     depth_key = [*_EDGE, "half"]
     c = cells.select(
@@ -131,22 +150,22 @@ def fit_model(
         pattern = g.group_by(_PATTERN).agg(
             pattern=pl.col("s").sum() / (pl.col("level") * pl.col("w")).sum(),
             pw=(pl.col("level") * pl.col("w")).sum(),
+            sw=pl.col("w").sum(),
         )
         night_mean = (
             pattern.filter(night)
             .group_by("road_class")
             .agg(n=(pl.col("pattern") * pl.col("pw")).sum() / pl.col("pw").sum())
         )
+        trust = pl.col("sw") / (pl.col("sw") + config.pattern_seconds)
+        scaled = (pl.col("pattern") / pl.col("n").fill_null(1.0)).clip(*_PATTERN_RANGE)
         pattern = pattern.join(night_mean, on="road_class", how="left").select(
-            *_PATTERN,
-            pattern=(pl.col("pattern") / pl.col("n").fill_null(1.0)).clip(
-                *_PATTERN_RANGE
-            ),
+            *_PATTERN, pattern=(trust * scaled.log()).exp(), seconds="sw"
         )
         x = pl.col("pattern").log()
         r = pl.col("log_v") - pl.col("level").log()
         fitted = (
-            g.join(pattern, on=_PATTERN)
+            g.join(pattern.drop("seconds"), on=_PATTERN)
             .group_by(depth_key)
             .agg(sxy=(pl.col("w") * x * r).sum(), sxx=(pl.col("w") * x * x).sum())
             .select(*depth_key, depth=((pl.col("sxy") + tau) / (pl.col("sxx") + tau)))
@@ -158,7 +177,9 @@ def fit_model(
 
 
 def historical_speeds(
-    cells: pl.LazyFrame | pl.DataFrame, config: ImputeConfig = DEFAULT_IMPUTE_CONFIG
+    cells: pl.LazyFrame | pl.DataFrame,
+    config: ImputeConfig = DEFAULT_IMPUTE_CONFIG,
+    model: Model | None = None,
 ) -> pl.DataFrame:
     """Every measured edge's speed in each of the 168 local hours of the week.
 
@@ -167,12 +188,13 @@ def historical_speeds(
     ``speed`` (km/h), ``own_weight``, the share of it from the hour's
     measurement, and ``source``: ``"imputed"`` for hours no truck
     measured, ``"blended"`` for the rest (``"measured"`` when
-    ``config.cell_trucks`` is 0).  :func:`fit_model` gives the model
-    behind it.  Edges no truck measured, or only ever saw stopped, get
-    no rows.
+    ``config.cell_trucks`` is 0).  The model behind it is *model*, or
+    :func:`fit_model` of *cells*.  Edges no truck measured, or only
+    ever saw stopped, get no rows.
     """
     measured = cells.lazy().collect()
-    level, depth, pattern = fit_model(measured, config)
+    level, depth, pattern = model or fit_model(measured, config)
+    pattern = pattern.drop("seconds")
     edges = measured.select(*_EDGE, "road_class").unique().sort(_EDGE)
     hours = pl.DataFrame(
         {"hour_of_week": pl.int_range(HOURS_PER_WEEK, dtype=pl.Int16, eager=True)}
@@ -180,7 +202,7 @@ def historical_speeds(
     k = config.cell_trucks
     n = pl.col("trucks").fill_null(0.0)
     own = pl.when(n > 0).then(n / (n + k)).otherwise(0.0)
-    model = pl.col("level") * pl.col("pattern").fill_null(1.0).pow(
+    prior = pl.col("level") * pl.col("pattern").fill_null(1.0).pow(
         pl.col("depth").fill_null(1.0)
     )
     return (
@@ -200,13 +222,132 @@ def historical_speeds(
             "road_class",
             "hour_of_week",
             speed=pl.col("own_weight") * pl.col("y").fill_null(0.0)
-            + (1.0 - pl.col("own_weight")) * model,
+            + (1.0 - pl.col("own_weight")) * prior,
             own_weight="own_weight",
             source=pl.when(n == 0)
             .then(pl.lit("imputed"))
             .otherwise(pl.lit("blended" if k > 0 else "measured"))
             .cast(_SOURCES),
         )
+    )
+
+
+def length_band(length: str | pl.Expr = "length") -> pl.Expr:
+    """``band``: 0 under 50 m, 1 to 200 m, 2 to 1 km, 3 beyond.
+
+    Short edges are mostly junction pieces, where trucks turn and stop,
+    so they run further below a road's free speed than mid-block ones.
+    """
+    m = pl.col(length) if isinstance(length, str) else length
+    return (
+        pl.sum_horizontal(m >= edge for edge in LENGTH_BANDS)
+        .cast(pl.Int8)
+        .alias("band")
+    )
+
+
+def speed_ratios(
+    level: pl.DataFrame,
+    cells: pl.DataFrame,
+    edges: pl.DataFrame,
+    ratio_seconds: float = RATIO_SECONDS,
+) -> pl.DataFrame:
+    """How fast trucks drive each road class and length band, against base speed.
+
+    *level* is :func:`fit_model`'s, *cells* the hourly cells it was fit
+    on, and *edges* every edge's ``road_class``, ``length`` and
+    ``speed`` without traffic (e.g. Valhalla's).  A class's ratio is
+    Σ level·s / Σ speed·s over its measured edges, s the seconds of
+    driving behind each; a band's is the same over the band's edges,
+    pulled towards the class's by *ratio_seconds*.  Returns
+    ``road_class``, ``band`` and ``ratio``.
+
+    On synthetic trucks, motorways run at 0.98 of Valhalla's speed at
+    every length, arterials at 0.4-0.5 under 200 m and 0.6-0.8 beyond.
+    """
+    measured = (
+        level.join(cells.group_by(_EDGE).agg(s=pl.col("seconds").sum()), on=_EDGE)
+        .join(edges.select("edge_id", "road_class", "length", "speed"), on="edge_id")
+        .with_columns(pl.col("road_class").cast(pl.String), length_band())
+    )
+
+    def ratio(keys: list[str], name: str) -> pl.DataFrame:
+        return measured.group_by(keys).agg(
+            **{
+                name: (pl.col("level") * pl.col("s")).sum()
+                / (pl.col("speed") * pl.col("s")).sum()
+            },
+            **{f"{name}_s": pl.col("s").sum()},
+        )
+
+    k = ratio_seconds
+    return (
+        ratio(["road_class", "band"], "rb")
+        .join(ratio(["road_class"], "rc"), on="road_class")
+        .select(
+            "road_class",
+            "band",
+            ratio=(pl.col("rb_s") * pl.col("rb") + k * pl.col("rc"))
+            / (pl.col("rb_s") + k),
+        )
+        .sort("road_class", "band")
+    )
+
+
+def class_weeks(
+    pattern: pl.DataFrame,
+    speeds: pl.DataFrame,
+    min_class_hours: float = MIN_CLASS_HOURS,
+    min_dip: float = MIN_CLASS_DIP,
+) -> pl.DataFrame:
+    """Weeks for edges no truck measured: their own speed shaped by their class.
+
+    *pattern* is :func:`fit_model`'s; *speeds* has ``road_class`` and
+    ``speed`` (an edge's speed without traffic: Valhalla's, or that
+    scaled by :func:`speed_ratios`) for each combination wanted.  Each
+    gets ``speed * pattern`` for every hour of the week, as
+    ``week_speed``, keyed by ``road_class``,
+    ``speed`` and ``hour_of_week``.  A road class gets none if less
+    than *min_class_hours* of measured driving is behind its pattern
+    (it would be mostly noise), or if the pattern never dips more than
+    *min_dip* below night speed (its edges would be as they were, at
+    the cost of a predicted-speed record each).
+
+    On synthetic trucks, for edges half the trucks never drove, scored
+    against the other half's 5 s data, this takes Valhalla's flat speed
+    from 19.1 km/h off to 12.5 (motorways 22.1 to 8.5).
+    """
+    supported = (
+        pattern.group_by("road_class")
+        .agg(hours=pl.col("seconds").sum() / 3600.0, low=pl.col("pattern").min())
+        .filter(pl.col("hours") >= min_class_hours, pl.col("low") < 1.0 - min_dip)
+        .select("road_class")
+    )
+    hours = pl.DataFrame(
+        {"hour_of_week": pl.int_range(HOURS_PER_WEEK, dtype=pl.Int16, eager=True)}
+    )
+    # Hours the class has no cells in keep its night speed, as in
+    # historical_speeds.
+    shape = (
+        supported.join(hours, how="cross")
+        .join(pattern, on=_PATTERN, how="left")
+        .select(
+            pl.col("road_class").cast(pl.String),
+            "hour_of_week",
+            pl.col("pattern").fill_null(1.0),
+        )
+    )
+    return (
+        speeds.select(pl.col("road_class").cast(pl.String), "speed")
+        .unique()
+        .join(shape, on="road_class")
+        .select(
+            "road_class",
+            "speed",
+            "hour_of_week",
+            week_speed=pl.col("speed") * pl.col("pattern"),
+        )
+        .sort("road_class", "speed", "hour_of_week")
     )
 
 

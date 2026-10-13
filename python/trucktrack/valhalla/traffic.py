@@ -36,10 +36,15 @@ from valhalla.utils import (
     encode_compressed_speeds,
 )
 
-from trucktrack.congestion import HOURS_PER_WEEK, flow_speeds
+from trucktrack.congestion import (
+    HOURS_PER_WEEK,
+    class_weeks,
+    flow_speeds,
+    length_band,
+)
 from trucktrack.valhalla._actor import resolve_config
 from trucktrack.valhalla._build_id import pristine_extract, tile_build_id
-from trucktrack.valhalla._tiles import pack_tiles, valhalla_bin
+from trucktrack.valhalla._tiles import pack_tiles, read_edges, valhalla_bin
 
 # Valhalla takes any speed of at least 1 km/h, and warns about speeds
 # above the 140 km/h it assumes no road exceeds.
@@ -85,16 +90,13 @@ def encode_week(buckets: np.ndarray) -> str:
     return encoded
 
 
-def traffic_rows(
+def _encoded_weeks(
     historical: pl.DataFrame, flows: pl.DataFrame | None = None
 ) -> pl.DataFrame:
-    """One line of traffic CSV per edge, and the CSV it belongs in.
+    """Each edge's week encoded for Valhalla, and its flow speeds in whole km/h.
 
-    *historical* is :func:`~trucktrack.congestion.historical_speeds`,
-    *flows* :func:`~trucktrack.congestion.flow_speeds` (by default, of
-    *historical*).  Speeds are clipped to ``SPEED_RANGE_KMH``; flow
-    speeds are whole km/h.  Returns ``path`` (the CSV, relative to the
-    traffic directory) and ``line``.
+    Speeds are clipped to ``SPEED_RANGE_KMH``.  Returns ``edge_id``,
+    ``freeflow_speed``, ``constrained_speed`` and ``week``.
     """
     lo, hi = SPEED_RANGE_KMH
     flows = flow_speeds(historical) if flows is None else flows
@@ -108,28 +110,108 @@ def traffic_rows(
     buckets = speed_buckets(
         h["speed"].clip(lo, hi).to_numpy().reshape(-1, HOURS_PER_WEEK)
     )
-    flow = (
+    return (
         pl.DataFrame({"edge_id": edge_ids[:, 0]})
-        .join(flows, on="edge_id", how="left", maintain_order="left")
-        .select(
+        .join(
+            flows.select("edge_id", "freeflow_speed", "constrained_speed"),
+            on="edge_id",
+            how="left",
+            maintain_order="left",
+        )
+        .with_columns(
             pl.col("freeflow_speed", "constrained_speed")
             .clip(lo, hi)
             .round()
-            .cast(pl.Int32)
+            .cast(pl.Int32),
+            week=pl.Series([encode_week(b) for b in buckets], dtype=pl.String),
         )
     )
-    rows = []
-    for edge_id, week, (free, constrained) in zip(
-        edge_ids[:, 0], buckets, flow.iter_rows(), strict=True
-    ):
-        graph_id = GraphId(int(edge_id))
-        rows.append(
-            (
-                str(Path(graph_id).with_suffix(".csv")),
-                f"{graph_id},{free},{constrained},{encode_week(week)}",
+
+
+def _csv_lines(weeks: pl.DataFrame) -> pl.DataFrame:
+    """Traffic CSV ``path`` and ``line`` for each edge of :func:`_encoded_weeks`."""
+    graph_id = weeks.with_columns(
+        level=pl.col("edge_id") % 8,
+        tile=(pl.col("edge_id") // 8) % (1 << 22),
+        index=pl.col("edge_id") // (1 << 25),
+    )
+    tiles = (
+        graph_id.select("level", "tile")
+        .unique()
+        .with_columns(
+            path=pl.struct("level", "tile").map_elements(
+                lambda t: str(
+                    Path(GraphId(t["tile"], t["level"], 0)).with_suffix(".csv")
+                ),
+                return_dtype=pl.String,
             )
         )
-    return pl.DataFrame(rows, schema=["path", "line"], orient="row")
+    )
+    return graph_id.join(tiles, on=["level", "tile"]).select(
+        "path",
+        line=pl.format(
+            "{}/{}/{},{},{},{}",
+            "level",
+            "tile",
+            "index",
+            "freeflow_speed",
+            "constrained_speed",
+            "week",
+        ),
+    )
+
+
+def traffic_rows(
+    historical: pl.DataFrame, flows: pl.DataFrame | None = None
+) -> pl.DataFrame:
+    """One line of traffic CSV per edge, and the CSV it belongs in.
+
+    *historical* is :func:`~trucktrack.congestion.historical_speeds`,
+    *flows* :func:`~trucktrack.congestion.flow_speeds` (by default, of
+    *historical*).  Speeds are clipped to ``SPEED_RANGE_KMH``; flow
+    speeds are whole km/h.  Returns ``path`` (the CSV, relative to the
+    traffic directory) and ``line``.
+    """
+    return _csv_lines(_encoded_weeks(historical, flows))
+
+
+def class_rows(weeks: pl.DataFrame, edges: pl.DataFrame) -> pl.DataFrame:
+    """Traffic CSV lines for *edges* no truck measured, from their class's week.
+
+    *weeks* is :func:`~trucktrack.congestion.class_weeks`; *edges* has
+    ``edge_id``, ``road_class`` and ``speed`` (see :func:`read_edges`).
+    Edges whose class has no week are left out.  Each distinct week is
+    encoded once.
+    """
+    combos = (
+        weeks.select("road_class", "speed")
+        .unique(maintain_order=True)
+        .with_row_index("combo")
+        .with_columns(pl.col("combo").cast(pl.UInt64))
+    )
+    encoded = _encoded_weeks(
+        weeks.join(combos, on=["road_class", "speed"]).select(
+            pl.lit("").alias("tile_build_id"),
+            pl.col("combo").alias("edge_id"),
+            "hour_of_week",
+            speed="week_speed",
+        )
+    ).rename({"edge_id": "combo"})
+    return _csv_lines(
+        edges.select("edge_id", pl.col("road_class").cast(pl.String), "speed")
+        .join(combos, on=["road_class", "speed"])
+        .join(encoded, on="combo")
+        .select("edge_id", "freeflow_speed", "constrained_speed", "week")
+    )
+
+
+def graph_edges(config: str | Path | None = None) -> pl.DataFrame:
+    """Every road edge a truck may drive in the tiles *config* points at.
+
+    See :func:`~trucktrack.valhalla._tiles.read_edges`; read from the
+    extract as first packed.
+    """
+    return read_edges(pristine_extract(resolve_config(config)))
 
 
 def write_traffic_csvs(rows: pl.DataFrame, traffic_dir: str | Path) -> int:
@@ -146,16 +228,30 @@ def add_predicted_traffic(
     historical: pl.DataFrame,
     flows: pl.DataFrame | None = None,
     config: str | Path | None = None,
+    *,
+    pattern: pl.DataFrame | None = None,
+    ratios: pl.DataFrame | None = None,
 ) -> dict[str, int]:
     """Rebuild the tile extract *config* points at with these speeds.
 
     Starts from the extract as first packed (see the module notes), so
-    edges left out of *historical* get Valhalla's own speeds back.  The
-    speeds must come from observations matched on these tiles: their
-    ``tile_build_id`` must be the tiles'.  *flows* defaults to
+    edges left out get Valhalla's own speeds back.  The speeds must come
+    from observations matched on these tiles: their ``tile_build_id``
+    must be the tiles'.  *flows* defaults to
     :func:`~trucktrack.congestion.flow_speeds` of *historical*.
-    Returns counts of ``edges`` and traffic ``files`` written.  Restart
-    any process holding the old extract open to see the new speeds.
+
+    With *pattern* (:func:`~trucktrack.congestion.fit_model`'s), every
+    other road edge a truck may drive takes its own Valhalla speed
+    shaped by its class's week (:func:`~trucktrack.congestion.class_weeks`),
+    so roads no truck drove slow down at rush hour too and routes don't
+    escape onto them.  With *ratios*
+    (:func:`~trucktrack.congestion.speed_ratios`), that speed is first
+    scaled to how fast trucks were measured driving roads of the class
+    and length; classes and bands without one keep Valhalla's.
+
+    Returns counts of measured ``edges``, ``class_edges`` and traffic
+    ``files`` written.  Restart any process holding the old extract
+    open to see the new speeds.
     """
     config_path = resolve_config(config)
     build_id = tile_build_id(config_path)
@@ -168,6 +264,21 @@ def add_predicted_traffic(
     settings = json.loads(config_path.read_text())
     extract = Path(settings["mjolnir"]["tile_extract"])
     rows = traffic_rows(historical, flows)
+    class_edges = 0
+    if pattern is not None:
+        edges = read_edges(base).join(
+            historical.select("edge_id").unique(), on="edge_id", how="anti"
+        )
+        if ratios is not None:
+            edges = (
+                edges.with_columns(pl.col("road_class").cast(pl.String), length_band())
+                .join(ratios, on=["road_class", "band"], how="left")
+                .with_columns(speed=pl.col("speed") * pl.col("ratio").fill_null(1.0))
+            )
+        weeks = class_weeks(pattern, edges.select("road_class", "speed").unique())
+        others = class_rows(weeks, edges)
+        class_edges = others.height
+        rows = pl.concat([rows, others])
 
     with tempfile.TemporaryDirectory(dir=extract.parent, prefix=".traffic-") as tmp:
         work = Path(tmp)
@@ -192,4 +303,8 @@ def add_predicted_traffic(
             capture_output=True,
         )
         pack_tiles(tiles, extract)
-    return {"edges": rows.height, "files": files}
+    return {
+        "edges": rows.height - class_edges,
+        "class_edges": class_edges,
+        "files": files,
+    }

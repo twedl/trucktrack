@@ -13,9 +13,12 @@ from trucktrack.congestion.config import AggregateConfig, ObservationConfig
 from trucktrack.congestion.fixes import flag_dwell, flag_speed_mismatch, time_weights
 from trucktrack.congestion.impute import (
     ImputeConfig,
+    class_weeks,
     fit_model,
     flow_speeds,
     historical_speeds,
+    length_band,
+    speed_ratios,
 )
 from trucktrack.congestion.observations import (
     FIX_COLUMNS,
@@ -33,6 +36,7 @@ __all__ = [
     "ImputeConfig",
     "ObservationConfig",
     "cell_speeds",
+    "class_weeks",
     "edge_cells",
     "edge_observations",
     "fit_model",
@@ -42,7 +46,9 @@ __all__ = [
     "flow_window",
     "historical_speeds",
     "hour_of_week",
+    "length_band",
     "prepare_fixes",
+    "speed_ratios",
     "time_weights",
     "usable_observations",
 ]

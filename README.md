@@ -140,6 +140,10 @@ run_map_matching(
 uv run python scripts/add_predicted_traffic.py data/matched
 ```
 
+Roads no truck drove take their own Valhalla speed, scaled to how fast
+trucks drove roads of the same class and length and shaped by their
+class's week (`--measured-only` leaves them alone).
+
 ```python
 from datetime import datetime
 from trucktrack.valhalla import route

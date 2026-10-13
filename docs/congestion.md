@@ -27,10 +27,20 @@ and when the trucks did.
    the shape of the week (when roads of a class slow down) is borrowed
    from other edges. `constrained_speed` and `freeflow_speed` are the
    harmonic means of the 168 hours over 07:00–19:00 and the rest.
-4. **Loading** (`scripts/add_predicted_traffic.py data/matched`): writes
-   Valhalla's traffic CSVs, runs `valhalla_add_predicted_traffic`, and
-   repacks the tile extract. Each run starts again from a pristine copy
-   of the extract (`valhalla_tiles.base.tar`).
+4. **Roads no truck drove** (`speed_ratios`, `class_weeks`): every other
+   road edge a truck may drive, read straight from the tiles, takes its
+   own Valhalla speed, scaled to how fast trucks drove measured roads of
+   the same class and length band (pulled to the class's ratio where a
+   band has little data), and shaped by its class's week, so it is as
+   slow as truck roads like it and slows at rush hour too. Only classes
+   with at least 40 hours of measured driving and a dip of more than 5%
+   somewhere; the rest keep Valhalla's speeds.
+5. **Loading** (`scripts/add_predicted_traffic.py data/matched`, or
+   `--measured-only` to skip step 4): writes Valhalla's traffic CSVs,
+   runs `valhalla_add_predicted_traffic`, and repacks the tile extract.
+   Each run starts again from a pristine copy of the extract
+   (`valhalla_tiles.base.tar`). On the sample, step 4 adds 594k edges,
+   246 MB of tiles (to 579 MB) and about a minute.
 
 Route with a departure time to use the speeds:
 
@@ -62,22 +72,43 @@ direction (into Toronto in the morning, out in the evening). Borrowing an
 edge's OSM way's speed for an unmeasured hour does worse than the model
 (13.9 vs 11.2 where the way has one), so ways aren't used.
 
+For edges half the trucks never drove, Valhalla's flat speed is off by
+19.1 km/h; shaped by the class's week, 12.5 (motorways 22.1 to 8.5,
+secondary 17.6 to 15.9, primary 11.0 to 10.1).
+
+On the synthetic sample, trucks drive motorways at 0.98 of Valhalla's
+speed at every length, trunk roads at 0.7, and arterials at 0.3-0.55
+under 200 m and 0.64-0.77 beyond.
+
+End to end, Valhalla's time-dependent truck ETAs against the generator's
+own drive of the same route (4 routes x 5 departure times):
+
+| Loaded | mean \|error\| | bias | peak direction | worst |
+|---|---|---|---|---|
+| measured edges only | 11.0% | -9.0% | 32.2% | 44.9% |
+| + class weeks on Valhalla's speed | 8.3% | -5.9% | 21.6% | 31.0% |
+| + speed scaled by class and length | 6.9% | +5.8% | 2.9% | 24.7% |
+
 ## Caveats
 
-- **Only measured edges slow down.** Edges no truck drove keep Valhalla's
-  free-flow defaults, so at rush hour a time-dependent route can leave
-  congested truck corridors for unmeasured roads that look fast. On the
-  synthetic sample, Brampton → Toronto at Tuesday 08:00 takes 46 minutes
-  with 5% of its length on loaded edges; driven on the usual route it
-  takes 83. Giving unmeasured edges their class's pattern would fix the
-  asymmetry but puts truck-shaped congestion on roads with no data.
+- **Unmeasured roads take their class's average.** Their speed and rush
+  hour come from measured roads of the same class and length, in both
+  directions: on the synthetic sample, peak-direction trips come out
+  right (Brampton → Toronto at Tuesday 08:00: 78 minutes against 83
+  driven), counter-peak ones too slow (at 17:00: 67 against 53), and
+  night trips 3-8% slow. Scaling changes every unmeasured road's
+  free-flow speed, not just its rush hour. Classes with too little data
+  or no rush hour (here residential, service, unclassified) keep
+  Valhalla's speeds entirely; `--measured-only` leaves every unmeasured
+  road alone.
 - **Truck speeds apply to every costing.** Predicted, constrained and
   free-flow speeds belong to the edge, not the vehicle, so car routes on
   the same tiles get truck speeds too. They are also not capped by
   Valhalla's truck speed limit.
 - **Signal delay counts twice on urban edges.** Measured speeds include
   time spent waiting at lights, and Valhalla adds its own intersection
-  costs on top.
+  costs on top. Scaling unmeasured roads by measured ratios spreads this
+  to every road of a scaled class.
 - **One time zone.** Every edge is binned in `America/Toronto`; edges west
   of 90°W (Kenora, Rainy River) run on Central time and would be an hour
   off.
