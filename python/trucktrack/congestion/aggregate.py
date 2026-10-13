@@ -39,6 +39,16 @@ _WAY: tuple[str, ...] = ("tile_build_id", "way_id", "forward")
 _EDGE_ATTRIBUTES: tuple[str, ...] = ("way_id", "forward", "road_class", "edge_length")
 _CELL_STATS: tuple[str, ...] = ("speed", "seconds", "fixes", "trucks")
 
+# Local hours [start, end) in which Valhalla uses an edge's
+# constrained_speed (and for requests with no time); freeflow_speed
+# outside them.  Fixed in Valhalla (GraphTile::GetSpeed), not a setting.
+VALHALLA_DAYTIME_HOURS = (7, 19)
+
+
+def _local_time(tz: str) -> pl.Expr:
+    """``time`` on the clock in *tz*; a tz-naive ``time`` is taken as UTC."""
+    return pl.col("time").dt.convert_time_zone(tz)
+
 
 def hour_of_week(tz: str = DEFAULT_AGGREGATE_CONFIG.local_tz) -> pl.Expr:
     """Hour of the week of ``time`` in *tz*, 0-167, counted from Sunday 00:00.
@@ -48,9 +58,26 @@ def hour_of_week(tz: str = DEFAULT_AGGREGATE_CONFIG.local_tz) -> pl.Expr:
     rush is hour 8 of its day in winter and in summer, across the DST
     change.  A tz-naive ``time`` is taken as UTC.
     """
-    local = pl.col("time").dt.convert_time_zone(tz)
+    local = _local_time(tz)
     day = (local.dt.weekday() % 7).cast(pl.Int16)  # Monday is 1, Sunday 7
     return (day * 24 + local.dt.hour()).alias("hour_of_week")
+
+
+def flow_window(tz: str = DEFAULT_AGGREGATE_CONFIG.local_tz) -> pl.Expr:
+    """``"constrained"`` from 07:00 to 19:00 in *tz*, any day, else ``"freeflow"``.
+
+    The windows in which Valhalla falls back on an edge's
+    ``constrained_speed`` and ``freeflow_speed`` when it has no
+    predicted speed (see :data:`VALHALLA_DAYTIME_HOURS`), as a bin for
+    :func:`edge_cells`.
+    """
+    day = _local_time(tz).dt.hour().is_between(*VALHALLA_DAYTIME_HOURS, closed="left")
+    return (
+        pl.when(day)
+        .then(pl.lit("constrained"))
+        .otherwise(pl.lit("freeflow"))
+        .alias("flow")
+    )
 
 
 def usable_observations(
@@ -105,6 +132,50 @@ def cell_speeds(
     )
 
 
+def _prefixed(cells: pl.LazyFrame, prefix: str) -> pl.LazyFrame:
+    return cells.rename({c: f"{prefix}{c}" for c in _CELL_STATS})
+
+
+def _edge_rows(lf: pl.LazyFrame) -> pl.LazyFrame:
+    """One row per edge with its attributes.
+
+    Valhalla gives the first and last edge of a match the length
+    driven on it, so an edge's own length is the longest seen.
+    """
+    return lf.group_by(_EDGE).agg(
+        pl.col(_EDGE_ATTRIBUTES[:-1]).first(), pl.col("edge_length").max()
+    )
+
+
+def edge_cells(
+    obs: pl.LazyFrame,
+    *,
+    by: pl.Expr | None = None,
+    quality: pl.LazyFrame | None = None,
+    config: AggregateConfig = DEFAULT_AGGREGATE_CONFIG,
+) -> pl.LazyFrame:
+    """Each edge's measured space-mean speed per time bin, from its own fixes.
+
+    *obs* and *quality* are as for :func:`edge_speeds`; *by* names the
+    bin (default: :func:`hour_of_week` in ``config.local_tz``).  Rows
+    carry the edge's attributes, the bin, and the cell statistics of
+    :func:`cell_speeds`, one per edge and bin with a usable fix.
+    Nothing is borrowed from other edges or bins: a bin the trucks
+    didn't measure has no row.
+
+    ``by=flow_window()`` measures Valhalla's ``constrained_speed`` and
+    ``freeflow_speed``.
+    """
+    by = hour_of_week(config.local_tz) if by is None else by
+    bin_col = by.meta.output_name()
+    lf = usable_observations(obs, quality, config).with_columns(by)
+    return (
+        _edge_rows(lf)
+        .join(cell_speeds(lf, [*_EDGE, bin_col]), on=_EDGE)
+        .sort(*_EDGE, bin_col)
+    )
+
+
 def edge_speeds(
     obs: pl.LazyFrame,
     *,
@@ -132,7 +203,8 @@ def edge_speeds(
     bin can still take its way's speed.
 
     Rows carry the edge's attributes (``way_id``, ``forward``,
-    ``road_class``, ``edge_length``) and both cells' statistics,
+    ``road_class``, and ``edge_length``, the longest length seen) and
+    both cells' statistics,
     prefixed ``edge_`` and ``way_`` (``speed``, ``seconds``, ``fixes``,
     ``trucks``), so later steps can weigh them differently.  Each
     ``tile_build_id`` is aggregated separately.
@@ -145,12 +217,9 @@ def edge_speeds(
     )
     truck = pl.col("_truck")
 
-    def prefixed(cells: pl.LazyFrame, prefix: str) -> pl.LazyFrame:
-        return cells.rename({c: f"{prefix}{c}" for c in _CELL_STATS})
-
-    edges = lf.group_by(_EDGE).agg(pl.col(_EDGE_ATTRIBUTES).first())
-    way_cells = prefixed(cell_speeds(lf, [*_WAY, bin_col], truck), "way_")
-    edge_cells = prefixed(cell_speeds(lf, [*_EDGE, bin_col], truck), "edge_")
+    edges = _edge_rows(lf)
+    way_cells = _prefixed(cell_speeds(lf, [*_WAY, bin_col], truck), "way_")
+    own_cells = _prefixed(cell_speeds(lf, [*_EDGE, bin_col], truck), "edge_")
 
     edge_ok = pl.col("edge_trucks") >= config.min_trucks
     way_ok = (pl.col("way_trucks") >= config.min_trucks) & (
@@ -158,7 +227,7 @@ def edge_speeds(
     )
     return (
         edges.join(way_cells, on=_WAY)
-        .join(edge_cells, on=[*_EDGE, bin_col], how="left")
+        .join(own_cells, on=[*_EDGE, bin_col], how="left")
         .with_columns(
             speed=pl.when(edge_ok)
             .then(pl.col("edge_speed"))

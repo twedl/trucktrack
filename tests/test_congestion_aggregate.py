@@ -11,7 +11,9 @@ from trucktrack.congestion import (
     OBSERVATION_COLUMNS,
     AggregateConfig,
     cell_speeds,
+    edge_cells,
     edge_speeds,
+    flow_window,
     hour_of_week,
     usable_observations,
 )
@@ -202,3 +204,55 @@ class TestEdgeSpeeds:
         out = _speeds(obs, min_trucks=1)
         assert out["tile_build_id"].to_list() == ["x", "y"]
         assert out["speed"].to_list() == [40.0, 60.0]
+
+
+def _at(obs: pl.DataFrame, *local_hours: float) -> pl.DataFrame:
+    """*obs* with each row moved to its hour of _T0's day, local clock."""
+    return obs.with_columns(
+        time=pl.Series([_T0 + timedelta(hours=h - 8) for h in local_hours])
+    )
+
+
+def _cells(obs: pl.DataFrame, by: pl.Expr | None = None) -> pl.DataFrame:
+    return edge_cells(obs.lazy(), by=by).collect()
+
+
+class TestEdgeCells:
+    def test_hourly_cells_by_default(self) -> None:
+        obs = _at(_obs(*_PAIR, ("c", 1, 90.0, 30.0)), 8, 8, 2)
+        out = _cells(obs)
+        assert out["hour_of_week"].to_list() == [2 * 24 + 2, 2 * 24 + 8]
+        assert out["speed"].to_list() == pytest.approx([90.0, 50.0])
+        assert out["trucks"].to_list() == pytest.approx([1.0, 2.0])
+        assert out["road_class"].to_list() == ["primary"] * 2
+
+    def test_only_cells_the_trucks_measured(self) -> None:
+        # Edge 2 is seen in the day only, and its way's other edge says
+        # nothing about it.
+        obs = _at(_obs(*_PAIR, ("c", 2, 10.0, 30.0)), 8, 2, 8)
+        out = _cells(obs, flow_window())
+        assert out.select("edge_id", "flow").rows() == [
+            (1, "constrained"),
+            (1, "freeflow"),
+            (2, "constrained"),
+        ]
+        assert out["speed"].to_list() == [40.0, 60.0, 10.0]
+
+    def test_valhalla_daytime_is_seven_to_seven(self) -> None:
+        # 07:00 is day; 06:59 and 19:00 are night.
+        obs = _at(
+            _obs(("a", 1, 40.0, 30.0), ("b", 1, 60.0, 30.0), ("c", 1, 60.0, 30.0)),
+            7,
+            6 + 59 / 60,
+            19,
+        )
+        out = _cells(obs, flow_window())
+        assert dict(out.select("flow", "speed").rows()) == {
+            "constrained": 40.0,
+            "freeflow": 60.0,
+        }
+
+    def test_edge_length_is_the_longest_seen(self) -> None:
+        # A match's first edge comes with only the part driven.
+        obs = _obs(*_PAIR).with_columns(edge_length=pl.Series([120.0, 400.0]))
+        assert _cells(obs)["edge_length"].item() == 400.0
