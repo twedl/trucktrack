@@ -39,6 +39,13 @@ RUSH_HOUR_WEIGHTS = (
     (0.0, 0.35, 0.0),
     (0.0, 0.25, 0.0),
 )
+# Rush hours run deepest in Toronto and ease off with distance from it:
+# the depth scales from RUSH_HOUR_SCALE_PEAK downtown towards
+# RUSH_HOUR_SCALE_FLOOR, by e^(-km / RUSH_HOUR_SCALE_KM).
+TORONTO = (43.6532, -79.3832)  # City Hall
+RUSH_HOUR_SCALE_PEAK = 1.6
+RUSH_HOUR_SCALE_FLOOR = 0.4
+RUSH_HOUR_SCALE_KM = 40.0
 
 
 def road_class(speed_mps: float) -> str:
@@ -56,21 +63,38 @@ def classify_and_cap(speed_mps: float) -> float:
     return min(speed_mps, ROAD_CLASS_CAP[road_class(speed_mps)])
 
 
-def congestion_factor(road_class: str, when: datetime) -> float:
+def rush_hour_scale(lat: float, lon: float) -> float:
+    """How deep rush hours run at (*lat*, *lon*), as a multiple of the class depth.
+
+    1.6 in downtown Toronto, 1.0 about 28 km out (Brampton, Pickering),
+    0.7 at 60 km (Hamilton, Oshawa) and 0.5 at 100 km (Kitchener),
+    approaching 0.4 beyond.  A road class's rush hour is the same shape
+    everywhere but not the same depth, so a class-wide pattern misses
+    edges near the core and far from it.
+    """
+    dlat = math.radians(lat - TORONTO[0])
+    dlon = math.radians(lon - TORONTO[1]) * math.cos(math.radians(TORONTO[0]))
+    km = 6371.0 * math.hypot(dlat, dlon)
+    spread = RUSH_HOUR_SCALE_PEAK - RUSH_HOUR_SCALE_FLOOR
+    return RUSH_HOUR_SCALE_FLOOR + spread * math.exp(-km / RUSH_HOUR_SCALE_KM)
+
+
+def congestion_factor(road_class: str, when: datetime, scale: float = 1.0) -> float:
     """Recurring-congestion speed multiplier for *road_class* at *when*.
 
     1.0 overnight.  Weekdays dip around 08:00 and 16:30 local time with
     a shallower dip at midday; weekends have only the midday dip.  Each
     dip multiplies speed by ``1 - depth * weight * bump``, where the
-    bump is a Gaussian in the local hour that peaks at 1.  This is the
-    ground truth that per-edge hour-of-week speeds should recover.
-    Naive *when* is taken as UTC.
+    bump is a Gaussian in the local hour that peaks at 1 and the depth
+    is the class's times *scale* (see :func:`rush_hour_scale`).  This
+    is the ground truth that per-edge hour-of-week speeds should
+    recover.  Naive *when* is taken as UTC.
     """
     if when.tzinfo is None:
         when = when.replace(tzinfo=UTC)
     local = when.astimezone(LOCAL_TZ)
     hour = local.hour + local.minute / 60 + local.second / 3600
-    depth = RUSH_HOUR_DEPTH[road_class]
+    depth = RUSH_HOUR_DEPTH[road_class] * scale
     factor = 1.0
     for (centre, width), weight in zip(
         RUSH_HOUR_DIPS, RUSH_HOUR_WEIGHTS[local.weekday()], strict=True

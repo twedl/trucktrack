@@ -37,7 +37,11 @@ from trucktrack.generate.parking import (
     generate_arrival_maneuver,
     generate_departure_maneuver,
 )
-from trucktrack.generate.speed_profile import congestion_factor
+from trucktrack.generate.speed_profile import (
+    TORONTO,
+    congestion_factor,
+    rush_hour_scale,
+)
 
 
 def _valhalla_reachable() -> bool:
@@ -206,10 +210,12 @@ class TestStaleReemissionInjector:
 # ── Sampling schedule ────────────────────────────────────────────────────
 
 
-def _straight_route(km: float = 60.0, mps: float = 25.0) -> RouteSegment:
+def _straight_route(
+    km: float = 60.0, mps: float = 25.0, start: tuple[float, float] = (43.0, -80.0)
+) -> RouteSegment:
     """Due-east route in 500 m steps at a constant speed."""
     n = int(km * 2)
-    coords = [offset_to_latlon(43.0, -80.0, 500.0 * i, 0.0) for i in range(n + 1)]
+    coords = [offset_to_latlon(*start, 500.0 * i, 0.0) for i in range(n + 1)]
     distances = [
         haversine_m(*coords[i], *coords[i + 1]) for i in range(len(coords) - 1)
     ]
@@ -338,21 +344,50 @@ class TestRushHours:
             "highway", _RUSH_EST
         )
 
-    def test_slows_the_drive_with_positions_in_step(self) -> None:
-        def drive(start: datetime) -> tuple[list[TracePoint], datetime]:
-            sched = FixSchedule(SamplingConfig(), start, random.Random(0))
-            return interpolate_route(_ROUTE, start, random.Random(1), sched)
+    def test_deepest_in_toronto(self) -> None:
+        downtown = rush_hour_scale(*TORONTO)
+        brampton = rush_hour_scale(43.7387, -79.7271)
+        kitchener = rush_hour_scale(43.4643, -80.5204)
+        assert downtown == pytest.approx(1.6)
+        assert brampton == pytest.approx(1.0, abs=0.05)
+        assert kitchener == pytest.approx(0.5, abs=0.05)
+        factors = [congestion_factor("highway", _RUSH_EST, s) for s in (1.6, 1.0, 0.5)]
+        assert factors == sorted(factors)
+        assert factors[0] < 0.25
 
+    def test_scale_leaves_nights_free(self) -> None:
+        three_am = _RUSH_EST - timedelta(hours=5)
+        assert congestion_factor("highway", three_am, 1.6) == pytest.approx(
+            1.0, abs=1e-3
+        )
+
+    @staticmethod
+    def _drive(
+        start: datetime, route: RouteSegment = _ROUTE
+    ) -> tuple[list[TracePoint], datetime]:
+        sched = FixSchedule(SamplingConfig(), start, random.Random(0))
+        return interpolate_route(route, start, random.Random(1), sched)
+
+    def test_slows_the_drive_with_positions_in_step(self) -> None:
         night = _RUSH_EST - timedelta(hours=5)
-        _, free_arrival = drive(night)
-        rush, rush_arrival = drive(_RUSH_EST)
-        assert rush_arrival - _RUSH_EST > 1.5 * (free_arrival - night)
+        _, free_arrival = self._drive(night)
+        rush, rush_arrival = self._drive(_RUSH_EST)
+        # The route is ~80 km from Toronto, where rush hours run shallow.
+        assert rush_arrival - _RUSH_EST > 1.25 * (free_arrival - night)
         # The truck covers the ground its reported speeds say it does.
         for a, b in zip(rush, rush[1:], strict=False):
             metres = haversine_m(a.lat, a.lon, b.lat, b.lon)
             seconds = (b.timestamp - a.timestamp).total_seconds()
             mean_mps = (a.speed_kmh + b.speed_kmh) / 2 / 3.6
             assert metres == pytest.approx(mean_mps * seconds, rel=0.02)
+
+    def test_slows_more_near_toronto(self) -> None:
+        # The same 20 km drive, ~75 km out and starting downtown.
+        far = _straight_route(km=20.0)
+        near = _straight_route(km=20.0, start=TORONTO)
+        _, far_arrival = self._drive(_RUSH_EST, far)
+        _, near_arrival = self._drive(_RUSH_EST, near)
+        assert near_arrival - _RUSH_EST > 1.4 * (far_arrival - _RUSH_EST)
 
 
 class TestGenerateTraceSampling:
