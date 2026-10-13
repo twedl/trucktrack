@@ -12,7 +12,6 @@ from trucktrack.congestion import (
     AggregateConfig,
     cell_speeds,
     edge_cells,
-    edge_speeds,
     flow_window,
     hour_of_week,
     usable_observations,
@@ -59,10 +58,6 @@ def _obs(*rows: tuple[str, int, float, float]) -> pl.DataFrame:
         .select(OBSERVATION_COLUMNS)
         .with_columns(tile_build_id=pl.lit("b"))
     )
-
-
-def _speeds(obs: pl.DataFrame, **config: Any) -> pl.DataFrame:
-    return edge_speeds(obs.lazy(), config=AggregateConfig(**config)).collect()
 
 
 class TestHourOfWeek:
@@ -137,75 +132,6 @@ class TestCellSpeeds:
         assert self._cells(obs)["trucks"].item() == pytest.approx(1.0)
 
 
-class TestEdgeSpeeds:
-    def test_well_covered_edge_gives_its_own_speed(self) -> None:
-        obs = _obs(*_PAIR, ("c", 2, 10.0, 30.0))
-        row = _speeds(obs, min_trucks=2).filter(pl.col("edge_id") == 1)
-        assert row["source"].item() == "edge"
-        assert row["speed"].item() == pytest.approx(50.0)
-        assert row["hour_of_week"].item() == 2 * 24 + 8
-
-    def test_thin_edge_takes_its_ways_speed(self) -> None:
-        obs = _obs(*_PAIR, ("c", 2, 10.0, 30.0))
-        row = _speeds(obs, min_trucks=2).filter(pl.col("edge_id") == 2)
-        assert row["source"].item() == "way"
-        assert row["speed"].item() == pytest.approx(110 / 3)
-        assert row["edge_speed"].item() == 10.0
-        assert row["way_trucks"].item() == pytest.approx(3.0)
-
-    def test_short_edge_does_not_take_its_ways_speed(self) -> None:
-        obs = _obs(*_PAIR, ("c", 4, 10.0, 30.0))
-        row = _speeds(obs, min_trucks=2).filter(pl.col("edge_id") == 4)
-        assert row["speed"].item() is None
-        assert row["way_speed"].item() == pytest.approx(110 / 3)
-        pooled = _speeds(obs, min_trucks=2, min_pool_edge_m=0.0)
-        assert pooled.filter(pl.col("edge_id") == 4)["source"].item() == "way"
-
-    def test_way_pools_one_direction_only(self) -> None:
-        obs = _obs(*_PAIR, ("c", 3, 10.0, 30.0))
-        row = _speeds(obs, min_trucks=2).filter(pl.col("edge_id") == 3)
-        assert row["speed"].item() is None
-        assert row["source"].item() is None
-        assert row["way_trucks"].item() == pytest.approx(1.0)
-
-    def test_edge_without_a_fix_in_a_bin_takes_its_ways(self) -> None:
-        # Edge 2 is seen at 08:00 only; at 09:00 only edge 1 is.
-        later = _obs(*_PAIR).with_columns(time=pl.lit(_T0 + timedelta(hours=1)))
-        obs = pl.concat([_obs(*_PAIR, ("c", 2, 10.0, 30.0)), later])
-        rows = _speeds(obs).filter(pl.col("edge_id") == 2)
-        assert rows["hour_of_week"].to_list() == [56, 57]
-        assert rows["source"].to_list() == ["edge", "way"]
-        assert rows["edge_fixes"].to_list() == [1, None]
-        assert rows["speed"].to_list() == pytest.approx([10.0, 50.0])
-
-    def test_default_keeps_every_edge_cell(self) -> None:
-        obs = _obs(*_PAIR, ("c", 4, 10.0, 30.0))
-        row = _speeds(obs).filter(pl.col("edge_id") == 4)
-        assert row["source"].item() == "edge"
-        assert row["speed"].item() == 10.0
-
-    def test_flagged_observations_left_out(self) -> None:
-        obs = _obs(("a", 1, 40.0, 30.0), ("b", 1, 0.0, 300.0)).with_columns(
-            dwell=pl.Series([False, True])
-        )
-        row = _speeds(obs, min_trucks=1)
-        assert row["speed"].item() == 40.0
-        assert row["edge_fixes"].item() == 1
-
-    def test_custom_bin(self) -> None:
-        obs = _obs(*_PAIR)
-        out = edge_speeds(obs.lazy(), by=pl.lit(0).alias("all_day")).collect()
-        assert out["all_day"].to_list() == [0]
-        assert out["speed"].item() == pytest.approx(50.0)
-
-    def test_tile_builds_kept_apart(self) -> None:
-        obs = _obs(*_PAIR)
-        obs = obs.with_columns(tile_build_id=pl.Series(["x", "y"]))
-        out = _speeds(obs, min_trucks=1)
-        assert out["tile_build_id"].to_list() == ["x", "y"]
-        assert out["speed"].to_list() == [40.0, 60.0]
-
-
 def _at(obs: pl.DataFrame, *local_hours: float) -> pl.DataFrame:
     """*obs* with each row moved to its hour of _T0's day, local clock."""
     return obs.with_columns(
@@ -256,3 +182,22 @@ class TestEdgeCells:
         # A match's first edge comes with only the part driven.
         obs = _obs(*_PAIR).with_columns(edge_length=pl.Series([120.0, 400.0]))
         assert _cells(obs)["edge_length"].item() == 400.0
+
+    def test_flagged_observations_left_out(self) -> None:
+        obs = _obs(("a", 1, 40.0, 30.0), ("b", 1, 0.0, 300.0)).with_columns(
+            dwell=pl.Series([False, True])
+        )
+        row = _cells(obs)
+        assert row["speed"].item() == 40.0
+        assert row["fixes"].item() == 1
+
+    def test_custom_bin(self) -> None:
+        out = _cells(_obs(*_PAIR), pl.lit(0).alias("all_day"))
+        assert out["all_day"].to_list() == [0]
+        assert out["speed"].item() == pytest.approx(50.0)
+
+    def test_tile_builds_kept_apart(self) -> None:
+        obs = _obs(*_PAIR).with_columns(tile_build_id=pl.Series(["x", "y"]))
+        out = _cells(obs)
+        assert out["tile_build_id"].to_list() == ["x", "y"]
+        assert out["speed"].to_list() == [40.0, 60.0]

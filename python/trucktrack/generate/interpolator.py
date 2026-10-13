@@ -21,6 +21,7 @@ from trucktrack.generate.speed_profile import (
     inject_traffic_stops,
     mps_to_kmh,
     road_class,
+    rush_hour_inbound,
     rush_hour_scale,
     smooth_speeds,
 )
@@ -172,6 +173,10 @@ def interpolate_route(
     speeds, distances, sources = inject_traffic_stops(speeds, route.distances_m, rng)
     classes = [road_class(route.speeds_mps[j]) for j in sources]
     scales = [rush_hour_scale(*coords[j]) for j in sources]
+    inbound = [
+        rush_hour_inbound(*coords[j], bearing(*coords[j], *coords[j + 1]))
+        for j in sources
+    ]
 
     orig_cum_dist = [0.0]
     for d in route.distances_m:
@@ -183,9 +188,9 @@ def interpolate_route(
         cum_dist.append(cum_dist[-1] + d)
     total_speed_dist = cum_dist[-1]
 
-    # Rush hours slow each segment by its factor where it lies, at the
-    # time the truck reaches it, so positions keep pace with the
-    # reported speed.
+    # Rush hours slow each segment by its factor where it lies and the
+    # way it heads, at the time the truck reaches it, so positions keep
+    # pace with the reported speed.
     seg_times: list[float] = []
     elapsed = 0.0
     for i, (spd, dist) in enumerate(zip(speeds, distances, strict=False)):
@@ -193,7 +198,8 @@ def interpolate_route(
             seg_time = rng.uniform(15, 45)
         else:
             reached = departure_time + timedelta(seconds=elapsed)
-            speeds[i] = spd * congestion_factor(classes[i], reached, scales[i])
+            factor = congestion_factor(classes[i], reached, scales[i], inbound[i])
+            speeds[i] = spd * factor
             seg_time = dist / speeds[i]
         seg_times.append(seg_time)
         elapsed += seg_time

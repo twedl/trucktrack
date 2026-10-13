@@ -1,25 +1,12 @@
 """Space-mean speed per edge and time bin, from edge observations.
 
-A cell is an edge (or a way, in one direction) over a time bin, by
-default the local hour of the week.  Its speed is Σ speed·w / Σ w over
-the cell's usable observations: Σ metres / Σ seconds, the space-mean
-speed (see :func:`~trucktrack.congestion.time_weights`).
-
-A cell is only as good as the trucks behind it.  A truck reporting
-every minute gets a fix on a small share of its traversals of a short
-edge, so many edge cells have no fix even though trucks drove them.
-Such a cell can take its way's cell (the same OSM way, in the same
-direction, over the same bin), which pools the way's edges.
-
-Pooling along a way fills gaps but adds little evidence: one truck
-drives the whole way, so the way's cell is mostly the edge cell's own
-trucks on neighbouring edges.  It also only suits edges that share
-the way's flow.  Measured on synthetic trucks against held-out trucks
-reporting every 5 s, a way's hourly speed misses an edge of 200 m to
-1 km by 6 km/h where the edge's own mean over the week misses by
-11 km/h.  Under 200 m it misses by 17-19 km/h against 13: short edges
-are junction pieces whose speed depends on whether a truck turns or
-stops, not on the flow along the way.
+A cell is an edge over a time bin, by default the local hour of the
+week.  Its speed is Σ speed·w / Σ w over the cell's usable
+observations: Σ metres / Σ seconds, the space-mean speed (see
+:func:`~trucktrack.congestion.time_weights`).  This is measurement
+only: each cell is what trucks saw on that edge in that bin.  Filling
+in the bins they didn't see, and steadying thin cells, is
+:mod:`trucktrack.congestion.impute`.
 """
 
 from __future__ import annotations
@@ -31,13 +18,13 @@ import polars as pl
 from trucktrack.congestion.config import DEFAULT_AGGREGATE_CONFIG, AggregateConfig
 from trucktrack.query import truck_id_expr
 
-# Keys of an edge and of a way (in one direction), before the time bin.
-# Edge ids are only valid within a tile build.
+# An edge's key; edge ids are only valid within a tile build.
 _EDGE: tuple[str, ...] = ("tile_build_id", "edge_id")
-_WAY: tuple[str, ...] = ("tile_build_id", "way_id", "forward")
 # Edge attributes carried from the observations to every edge cell.
 _EDGE_ATTRIBUTES: tuple[str, ...] = ("way_id", "forward", "road_class", "edge_length")
-_CELL_STATS: tuple[str, ...] = ("speed", "seconds", "fixes", "trucks")
+
+# Bins of hour_of_week, from Sunday 00:00.
+HOURS_PER_WEEK = 168
 
 # Local hours [start, end) in which Valhalla uses an edge's
 # constrained_speed (and for requests with no time); freeflow_speed
@@ -132,10 +119,6 @@ def cell_speeds(
     )
 
 
-def _prefixed(cells: pl.LazyFrame, prefix: str) -> pl.LazyFrame:
-    return cells.rename({c: f"{prefix}{c}" for c in _CELL_STATS})
-
-
 def _edge_rows(lf: pl.LazyFrame) -> pl.LazyFrame:
     """One row per edge with its attributes.
 
@@ -156,12 +139,18 @@ def edge_cells(
 ) -> pl.LazyFrame:
     """Each edge's measured space-mean speed per time bin, from its own fixes.
 
-    *obs* and *quality* are as for :func:`edge_speeds`; *by* names the
-    bin (default: :func:`hour_of_week` in ``config.local_tz``).  Rows
-    carry the edge's attributes, the bin, and the cell statistics of
-    :func:`cell_speeds`, one per edge and bin with a usable fix.
-    Nothing is borrowed from other edges or bins: a bin the trucks
-    didn't measure has no row.
+    *obs* are edge observations as written to ``_observations/``
+    (:data:`OBSERVATION_COLUMNS` plus ``tile_build_id``);
+    :func:`usable_observations` drops the ones that don't measure
+    traffic, using *quality* if given.  *by* names the bin (default:
+    :func:`hour_of_week` in ``config.local_tz``).
+
+    Rows carry the edge's attributes (``way_id``, ``forward``,
+    ``road_class``, and ``edge_length``, the longest length seen), the
+    bin, and the cell statistics of :func:`cell_speeds`, one per edge
+    and bin with a usable fix.  Nothing is borrowed from other edges or
+    bins: a bin the trucks didn't measure has no row.  Each
+    ``tile_build_id`` is aggregated separately.
 
     ``by=flow_window()`` measures Valhalla's ``constrained_speed`` and
     ``freeflow_speed``.
@@ -172,80 +161,5 @@ def edge_cells(
     return (
         _edge_rows(lf)
         .join(cell_speeds(lf, [*_EDGE, bin_col]), on=_EDGE)
-        .sort(*_EDGE, bin_col)
-    )
-
-
-def edge_speeds(
-    obs: pl.LazyFrame,
-    *,
-    by: pl.Expr | None = None,
-    quality: pl.LazyFrame | None = None,
-    config: AggregateConfig = DEFAULT_AGGREGATE_CONFIG,
-) -> pl.LazyFrame:
-    """Space-mean speed per edge and time bin, pooling thin cells along the way.
-
-    *obs* are edge observations as written to ``_observations/``
-    (:data:`OBSERVATION_COLUMNS` plus ``tile_build_id``);
-    :func:`usable_observations` drops the ones that don't measure
-    traffic, using *quality* if given.  *by* names the time bin
-    (default: :func:`hour_of_week` in ``config.local_tz``).
-
-    An edge cell with ``config.min_trucks`` effective trucks or more
-    (see :func:`cell_speeds`) gives its own speed.  A thinner one, on
-    an edge at least ``config.min_pool_edge_m`` long, takes its way's
-    cell (the edge's OSM way, same direction, same bin) if that has
-    enough.  Otherwise it has no speed: a short edge's own speed over
-    other bins is a better guess than its way's (see the module
-    notes), and that is for the next step to weigh.  ``source`` says
-    which: ``"edge"``, ``"way"`` or null.  Every edge seen at all gets a
-    row for each bin its way was seen in, so an edge with no fix in a
-    bin can still take its way's speed.
-
-    Rows carry the edge's attributes (``way_id``, ``forward``,
-    ``road_class``, and ``edge_length``, the longest length seen) and
-    both cells' statistics,
-    prefixed ``edge_`` and ``way_`` (``speed``, ``seconds``, ``fixes``,
-    ``trucks``), so later steps can weigh them differently.  Each
-    ``tile_build_id`` is aggregated separately.
-    """
-    by = hour_of_week(config.local_tz) if by is None else by
-    bin_col = by.meta.output_name()
-    # Derive each fix's truck once, for both cell levels.
-    lf = usable_observations(obs, quality, config).with_columns(
-        by, _truck=truck_id_expr().cast(pl.Categorical)
-    )
-    truck = pl.col("_truck")
-
-    edges = _edge_rows(lf)
-    way_cells = _prefixed(cell_speeds(lf, [*_WAY, bin_col], truck), "way_")
-    own_cells = _prefixed(cell_speeds(lf, [*_EDGE, bin_col], truck), "edge_")
-
-    edge_ok = pl.col("edge_trucks") >= config.min_trucks
-    way_ok = (pl.col("way_trucks") >= config.min_trucks) & (
-        pl.col("edge_length") >= config.min_pool_edge_m
-    )
-    return (
-        edges.join(way_cells, on=_WAY)
-        .join(own_cells, on=[*_EDGE, bin_col], how="left")
-        .with_columns(
-            speed=pl.when(edge_ok)
-            .then(pl.col("edge_speed"))
-            .when(way_ok)
-            .then(pl.col("way_speed")),
-            source=pl.when(edge_ok)
-            .then(pl.lit("edge"))
-            .when(way_ok)
-            .then(pl.lit("way")),
-        )
-        .select(
-            *_EDGE,
-            *_EDGE_ATTRIBUTES,
-            bin_col,
-            "speed",
-            "source",
-            *(f"edge_{c}" for c in _CELL_STATS),
-            *(f"way_{c}" for c in _CELL_STATS),
-        )
         .sort(*_EDGE, bin_col)
     )

@@ -122,6 +122,34 @@ On any `/route` failure the orchestrator falls back to a single full
 HMM call with `breakage_distance` pinned to the base value and sets
 `any_bridge_failed=True`.
 
+### Truck speeds as predicted traffic
+
+Match with observations, then load each edge's hourly truck speeds into
+the tiles; time-dependent truck routes then slow down where and when the
+trucks did:
+
+```python
+from trucktrack.congestion import ObservationConfig
+
+run_map_matching(
+    Path("data/partitioned"), Path("data/matched"), observations=ObservationConfig()
+)
+```
+
+```bash
+uv run python scripts/add_predicted_traffic.py data/matched
+```
+
+```python
+from datetime import datetime
+from trucktrack.valhalla import route
+
+route(origin, destination, depart_at=datetime(2026, 3, 10, 8, 0))  # local time
+```
+
+See [docs/congestion.md](docs/congestion.md) for the method, how it
+measures up on synthetic data, and its caveats.
+
 ## Querying
 
 Pull individual trucks or trips without scanning the full dataset.

@@ -46,6 +46,15 @@ TORONTO = (43.6532, -79.3832)  # City Hall
 RUSH_HOUR_SCALE_PEAK = 1.6
 RUSH_HOUR_SCALE_FLOOR = 0.4
 RUSH_HOUR_SCALE_KM = 40.0
+# Rush hours also lean by direction: a segment heading into Toronto
+# takes up to RUSH_HOUR_LEAN more of the morning dip's weight and that
+# much less of the evening's, one heading out the reverse.  Near
+# downtown in and out mean little, so the lean fades in over
+# RUSH_HOUR_LEAN_KM.
+RUSH_HOUR_LEAN = 0.6
+RUSH_HOUR_LEAN_KM = 5.0
+# No dip takes more than this share of a road's speed.
+MAX_DIP = 0.85
 
 
 def road_class(speed_mps: float) -> str:
@@ -63,6 +72,13 @@ def classify_and_cap(speed_mps: float) -> float:
     return min(speed_mps, ROAD_CLASS_CAP[road_class(speed_mps)])
 
 
+def _to_toronto_km(lat: float, lon: float) -> tuple[float, float]:
+    """(east, north) km from (*lat*, *lon*) to Toronto City Hall."""
+    north = math.radians(TORONTO[0] - lat)
+    east = math.radians(TORONTO[1] - lon) * math.cos(math.radians(TORONTO[0]))
+    return 6371.0 * east, 6371.0 * north
+
+
 def rush_hour_scale(lat: float, lon: float) -> float:
     """How deep rush hours run at (*lat*, *lon*), as a multiple of the class depth.
 
@@ -72,22 +88,38 @@ def rush_hour_scale(lat: float, lon: float) -> float:
     everywhere but not the same depth, so a class-wide pattern misses
     edges near the core and far from it.
     """
-    dlat = math.radians(lat - TORONTO[0])
-    dlon = math.radians(lon - TORONTO[1]) * math.cos(math.radians(TORONTO[0]))
-    km = 6371.0 * math.hypot(dlat, dlon)
+    km = math.hypot(*_to_toronto_km(lat, lon))
     spread = RUSH_HOUR_SCALE_PEAK - RUSH_HOUR_SCALE_FLOOR
     return RUSH_HOUR_SCALE_FLOOR + spread * math.exp(-km / RUSH_HOUR_SCALE_KM)
 
 
-def congestion_factor(road_class: str, when: datetime, scale: float = 1.0) -> float:
+def rush_hour_inbound(lat: float, lon: float, heading: float) -> float:
+    """How directly a segment heads into Toronto: 1 straight in, -1 straight out.
+
+    The cosine between *heading* (degrees, 0 = north) and the bearing
+    from (*lat*, *lon*) to City Hall, faded to 0 downtown (see
+    ``RUSH_HOUR_LEAN_KM``).
+    """
+    east, north = _to_toronto_km(lat, lon)
+    km = math.hypot(east, north)
+    to_toronto = math.atan2(east, north)
+    fade = 1.0 - math.exp(-km / RUSH_HOUR_LEAN_KM)
+    return math.cos(math.radians(heading) - to_toronto) * fade
+
+
+def congestion_factor(
+    road_class: str, when: datetime, scale: float = 1.0, inbound: float = 0.0
+) -> float:
     """Recurring-congestion speed multiplier for *road_class* at *when*.
 
     1.0 overnight.  Weekdays dip around 08:00 and 16:30 local time with
     a shallower dip at midday; weekends have only the midday dip.  Each
-    dip multiplies speed by ``1 - depth * weight * bump``, where the
-    bump is a Gaussian in the local hour that peaks at 1 and the depth
-    is the class's times *scale* (see :func:`rush_hour_scale`).  This
-    is the ground truth that per-edge hour-of-week speeds should
+    dip multiplies speed by ``1 - depth * weight * bump``, at most
+    ``MAX_DIP``, where the bump is a Gaussian in the local hour that
+    peaks at 1 and the depth is the class's times *scale* (see
+    :func:`rush_hour_scale`).  *inbound* (see :func:`rush_hour_inbound`)
+    shifts weight from the evening dip to the morning one, or back.
+    This is the ground truth that per-edge hour-of-week speeds should
     recover.  Naive *when* is taken as UTC.
     """
     if when.tzinfo is None:
@@ -95,12 +127,16 @@ def congestion_factor(road_class: str, when: datetime, scale: float = 1.0) -> fl
     local = when.astimezone(LOCAL_TZ)
     hour = local.hour + local.minute / 60 + local.second / 3600
     depth = RUSH_HOUR_DEPTH[road_class] * scale
+    lean = RUSH_HOUR_LEAN * inbound
     factor = 1.0
-    for (centre, width), weight in zip(
-        RUSH_HOUR_DIPS, RUSH_HOUR_WEIGHTS[local.weekday()], strict=True
+    for (centre, width), weight, tilt in zip(
+        RUSH_HOUR_DIPS,
+        RUSH_HOUR_WEIGHTS[local.weekday()],
+        (1.0 + lean, 1.0, 1.0 - lean),  # morning, midday, evening
+        strict=True,
     ):
         bump = math.exp(-0.5 * ((hour - centre) / width) ** 2)
-        factor *= 1.0 - depth * weight * bump
+        factor *= 1.0 - min(MAX_DIP, depth * weight * tilt * bump)
     return factor
 
 

@@ -38,8 +38,10 @@ from trucktrack.generate.parking import (
     generate_departure_maneuver,
 )
 from trucktrack.generate.speed_profile import (
+    MAX_DIP,
     TORONTO,
     congestion_factor,
+    rush_hour_inbound,
     rush_hour_scale,
 )
 
@@ -355,6 +357,26 @@ class TestRushHours:
         assert factors == sorted(factors)
         assert factors[0] < 0.25
 
+    def test_inbound_is_the_cosine_to_city_hall(self) -> None:
+        hamilton = (43.2557, -79.8711)  # Toronto lies ~42 degrees east of north
+        assert rush_hour_inbound(*hamilton, 42.0) == pytest.approx(1.0, abs=0.01)
+        assert rush_hour_inbound(*hamilton, 222.0) == pytest.approx(-1.0, abs=0.01)
+        assert rush_hour_inbound(*hamilton, 132.0) == pytest.approx(0.0, abs=0.02)
+        assert rush_hour_inbound(*TORONTO, 0.0) == 0.0
+
+    def test_inbound_leans_into_the_morning(self) -> None:
+        evening = _RUSH_EST + timedelta(hours=8, minutes=30)
+        in_am, out_am = (
+            congestion_factor("highway", _RUSH_EST, 1.0, d) for d in (1, -1)
+        )
+        in_pm, out_pm = (congestion_factor("highway", evening, 1.0, d) for d in (1, -1))
+        assert in_am < out_am
+        assert in_pm > out_pm
+
+    def test_no_dip_takes_more_than_its_cap(self) -> None:
+        factor = congestion_factor("highway", _RUSH_EST, scale=1.6, inbound=1.0)
+        assert factor >= 1.0 - MAX_DIP - 0.05  # the midday dip's tail adds a little
+
     def test_scale_leaves_nights_free(self) -> None:
         three_am = _RUSH_EST - timedelta(hours=5)
         assert congestion_factor("highway", three_am, 1.6) == pytest.approx(
@@ -382,12 +404,30 @@ class TestRushHours:
             assert metres == pytest.approx(mean_mps * seconds, rel=0.02)
 
     def test_slows_more_near_toronto(self) -> None:
-        # The same 20 km drive, ~75 km out and starting downtown.
+        # The same 20 km drive, ~75 km out and starting downtown, at the
+        # midday dip, which doesn't lean by direction.
+        midday = _RUSH_EST + timedelta(hours=5)
         far = _straight_route(km=20.0)
         near = _straight_route(km=20.0, start=TORONTO)
-        _, far_arrival = self._drive(_RUSH_EST, far)
-        _, near_arrival = self._drive(_RUSH_EST, near)
-        assert near_arrival - _RUSH_EST > 1.4 * (far_arrival - _RUSH_EST)
+        _, far_arrival = self._drive(midday, far)
+        _, near_arrival = self._drive(midday, near)
+        assert near_arrival - midday > 1.1 * (far_arrival - midday)
+
+    def test_inbound_slower_in_the_morning_outbound_in_the_evening(self) -> None:
+        # 20 km heading east out of Toronto, and the same road back in.
+        out = _straight_route(km=20.0, start=TORONTO)
+        back = RouteSegment(
+            coords=out.coords[::-1],
+            speeds_mps=out.speeds_mps[::-1],
+            distances_m=out.distances_m[::-1],
+            total_distance_m=out.total_distance_m,
+            total_duration_s=out.total_duration_s,
+        )
+        evening = _RUSH_EST + timedelta(hours=8, minutes=30)
+        for start, slower, faster in ((_RUSH_EST, back, out), (evening, out, back)):
+            _, slow_arrival = self._drive(start, slower)
+            _, fast_arrival = self._drive(start, faster)
+            assert slow_arrival - start > 1.3 * (fast_arrival - start)
 
 
 class TestGenerateTraceSampling:

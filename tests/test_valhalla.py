@@ -115,3 +115,14 @@ class TestMapMatch:
         assert "matched_lon" in result.columns
         assert "distance_from_trace" in result.columns
         assert len(result) == len(df)
+
+
+def test_route_depart_at_is_local_clock_time() -> None:
+    from datetime import UTC, datetime
+
+    from trucktrack.valhalla import route
+
+    with pytest.raises(ValueError, match="local clock time"):
+        route(
+            (43.7, -79.7), (43.6, -79.4), depart_at=datetime(2026, 3, 10, 8, tzinfo=UTC)
+        )

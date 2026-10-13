@@ -11,6 +11,8 @@ Running with no arguments downloads the Ontario OSM extract from Geofabrik
 4. Build the tile hierarchy via ``valhalla_build_tiles`` and pack it into
    ``valhalla_tiles/valhalla_tiles.tar``.
 
+Truck speeds go in afterwards with ``scripts/add_predicted_traffic.py``.
+
 All outputs live under ``valhalla_tiles/`` (gitignored).  trucktrack's
 ``trucktrack.valhalla.find_config()`` then discovers the json automatically.
 
@@ -27,11 +29,10 @@ import json
 import shutil
 import subprocess
 import sys
-import tarfile
 from pathlib import Path
 
-import valhalla
 from trucktrack.valhalla import write_tile_build_id
+from trucktrack.valhalla._tiles import pack_tiles, valhalla_bin
 
 GEOFABRIK_URL = (
     "https://download.geofabrik.de/north-america/canada/ontario-latest.osm.pbf"
@@ -89,16 +90,6 @@ def _run(cmd: list[str], description: str) -> None:
     if result.returncode != 0:
         print(f"{cmd[0]} exited with code {result.returncode}", file=sys.stderr)
         raise SystemExit(result.returncode)
-
-
-def _valhalla_bin(name: str) -> Path:
-    """Locate a pyvalhalla-bundled binary (valhalla_build_tiles, ...)."""
-    path = Path(valhalla.__file__).parent / "bin" / name
-    if not path.is_file():
-        raise SystemExit(
-            f"{name} not found at {path}. Install pyvalhalla: uv sync --extra valhalla"
-        )
-    return path
 
 
 def _download_pbf(dest: Path) -> None:
@@ -201,7 +192,7 @@ def main(argv: list[str] | None = None) -> int:
 
     _run(
         [
-            str(_valhalla_bin("valhalla_build_admins")),
+            str(valhalla_bin("valhalla_build_admins")),
             "-c",
             str(config_path),
             str(pbf_path.resolve()),
@@ -211,7 +202,7 @@ def main(argv: list[str] | None = None) -> int:
 
     _run(
         [
-            str(_valhalla_bin("valhalla_build_tiles")),
+            str(valhalla_bin("valhalla_build_tiles")),
             "-c",
             str(config_path),
             str(pbf_path.resolve()),
@@ -219,22 +210,9 @@ def main(argv: list[str] | None = None) -> int:
         "Building tiles",
     )
 
-    tile_subdirs = sorted(
-        p for p in tile_dir.iterdir() if p.is_dir() and p.name.isdigit()
-    )
-    print(
-        f"Packing {len(tile_subdirs)} tile directories into {tar_path}",
-        file=sys.stderr,
-    )
-    try:
-        with tarfile.open(tar_path, "w") as tar:
-            for subdir in tile_subdirs:
-                tar.add(subdir, arcname=subdir.name)
-    except Exception:
-        tar_path.unlink(missing_ok=True)
-        raise
-    for subdir in tile_subdirs:
-        shutil.rmtree(subdir)
+    print(f"Packing tile directories into {tar_path}", file=sys.stderr)
+    for level in pack_tiles(tile_dir, tar_path):
+        shutil.rmtree(level)
 
     # Before any predicted traffic: observations tag edges with this ID.
     build_id = write_tile_build_id(tar_path)
