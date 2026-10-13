@@ -20,13 +20,17 @@ and when the trucks did.
 3. **Imputation** (`historical_speeds`, `flow_speeds`): every measured
    edge gets all 168 hours from a model of the edge,
 
-   `speed(edge, hour) = level(edge) × pattern(hour | road class) ^ depth(edge, half of day)`
+   `speed(edge, hour) = level(edge) × pattern(hour | road class) ^ depth(edge, time of day)`
 
    blended with the edge's own measurement for the hour by
-   `trucks / (trucks + 1)`. `level` and `depth` are the edge's own; only
-   the shape of the week (when roads of a class slow down) is borrowed
-   from other edges. `constrained_speed` and `freeflow_speed` are the
-   harmonic means of the 168 hours over 07:00–19:00 and the rest.
+   `trucks / (trucks + 1)`. `level` and `depth` are the edge's own, the
+   depth separately for the morning peak (before 10:00), midday and the
+   evening peak (from 15:00), since commutes lean by direction and
+   midday doesn't. Only the shape of the week (when roads of a class
+   slow down) is borrowed from other edges, and Monday to Friday share
+   it, so no weekday hour hangs on which edges trucks happened to drive
+   then. `constrained_speed` and `freeflow_speed` are the harmonic means
+   of the 168 hours over 07:00–19:00 and the rest.
 4. **Roads no truck drove** (`speed_ratios`, `class_weeks`): every other
    road edge a truck may drive, read straight from the tiles, takes its
    own Valhalla speed, scaled to how fast trucks drove measured roads of
@@ -62,19 +66,22 @@ other half's 5 s data (|error| in km/h, weighted by driving time):
 | Hourly speed of an edge | |error| |
 |---|---|
 | hours it was measured: its own cell | 5.0 |
-| hours it was measured: blended with the model | 4.5 |
+| hours it was measured: blended with the model | 4.2 |
 | hours it wasn't: the edge's all-week mean | 14.4 |
-| hours it wasn't: imputed | 6.5 |
+| hours it wasn't: imputed | 5.4 |
 
-`freeflow_speed` is off by 3.0 km/h, `constrained_speed` by 4.8. The
+`freeflow_speed` is off by 2.1 km/h, `constrained_speed` by 4.3. The
 synthetic rush hours vary by road class, by distance from Toronto, and by
 direction (into Toronto in the morning, out in the evening). Borrowing an
 edge's OSM way's speed for an unmeasured hour does worse than the model
-(13.9 vs 11.2 where the way has one), so ways aren't used.
+(13.9 vs 11.2 where the way has one), so ways aren't used. Giving each
+weekday hour its own class pattern does worse than sharing one across
+Monday to Friday (5.8 vs 5.2 over all hours, 8.9 vs 7.5 at rush hours):
+four weeks of trucks put too few in any one hour of the week.
 
 For edges half the trucks never drove, Valhalla's flat speed is off by
-19.1 km/h; shaped by the class's week, 12.5 (motorways 22.1 to 8.5,
-secondary 17.6 to 15.9, primary 11.0 to 10.1).
+19.9 km/h; shaped by the class's week, 10.5 (motorways 22.1 to 8.2,
+secondary 17.6 to 15.0, primary 11.0 to 9.5).
 
 On the synthetic sample, trucks drive motorways at 0.98 of Valhalla's
 speed at every length, trunk roads at 0.7, and arterials at 0.3-0.55
@@ -88,19 +95,23 @@ own drive of the same route (4 routes x 5 departure times):
 | measured edges only | 11.0% | -9.0% | 32.2% | 44.9% |
 | + class weeks on Valhalla's speed | 8.3% | -5.9% | 21.6% | 31.0% |
 | + speed scaled by class and length | 6.9% | +5.8% | 2.9% | 24.7% |
+| + weekdays share the pattern, midday depth | 6.0% | +5.4% | 1.8% | 18.5% |
 
 ## Caveats
 
+- **Counter-peak and night trips run slow.** On the synthetic sample,
+  peak-direction trips come out right (Brampton → Toronto at Tuesday
+  08:00: 80 minutes against 83 driven), counter-peak ones slow (at
+  17:00: 63 against 53) and night trips 3-8% slow. That route is all
+  measured edges, and their raw 5 s cells alone give 58 minutes at
+  17:00: about half the gap is in the measurements themselves, as at
+  night, the rest is the model.
 - **Unmeasured roads take their class's average.** Their speed and rush
   hour come from measured roads of the same class and length, in both
-  directions: on the synthetic sample, peak-direction trips come out
-  right (Brampton → Toronto at Tuesday 08:00: 78 minutes against 83
-  driven), counter-peak ones too slow (at 17:00: 67 against 53), and
-  night trips 3-8% slow. Scaling changes every unmeasured road's
-  free-flow speed, not just its rush hour. Classes with too little data
-  or no rush hour (here residential, service, unclassified) keep
-  Valhalla's speeds entirely; `--measured-only` leaves every unmeasured
-  road alone.
+  directions. Scaling changes every unmeasured road's free-flow speed,
+  not just its rush hour. Classes with too little data or no rush hour
+  (here residential, service, unclassified) keep Valhalla's speeds
+  entirely; `--measured-only` leaves every unmeasured road alone.
 - **Truck speeds apply to every costing.** Predicted, constrained and
   free-flow speeds belong to the edge, not the vehicle, so car routes on
   the same tiles get truck speeds too. They are also not capped by
@@ -123,5 +134,8 @@ own drive of the same route (4 routes x 5 departure times):
 - **Validated on synthetic data only.** The settings (`ImputeConfig`) are
   the best of those tried on the synthetic sample, whose congestion is
   close to the model's form: a class shape deepened by place and leaning
-  by direction (each dip capped at 85%). Real congestion that departs
-  from that form leans more on each edge's own measurements.
+  by direction (each dip capped at 85%), the same every weekday but for
+  Monday's and Friday's slightly lighter peaks. Real congestion that
+  departs from that form leans more on each edge's own measurements; a
+  fleet with many trucks in every hour of the week can let each weekday
+  keep its own shape (`ImputeConfig.weekday_seconds`).

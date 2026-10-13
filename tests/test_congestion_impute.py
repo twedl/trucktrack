@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import polars as pl
 import pytest
 from trucktrack.congestion import (
@@ -76,7 +78,8 @@ class TestFitModel:
         p = dict(pattern.select("hour_of_week", "pattern").rows())
         assert p[_AM] == pytest.approx(0.5, rel=1e-6)
         assert p[_NIGHT] == pytest.approx(1.0, rel=1e-6)
-        assert depth["depth"].to_list() == pytest.approx([1.0] * 4, rel=1e-3)
+        assert depth["depth"].to_list() == pytest.approx([1.0] * 6, rel=1e-3)
+        assert sorted(depth["window"].unique()) == [0, 1, 2]  # morning, midday, evening
 
     def test_deeper_edge_gets_deeper_depth(self) -> None:
         cells = _cells({1: (100.0, 0.5, 0.5), 2: (100.0, 1.5, 1.5)})
@@ -88,11 +91,11 @@ class TestFitModel:
         # Edge 1 slows only in the morning, edge 2 only in the evening.
         cells = _cells({1: (100.0, 1.0, 0.0), 2: (100.0, 0.0, 1.0)})
         _, depth, _ = fit_model(cells)
-        d = {(e, h): v for e, h, v in depth.select("edge_id", "half", "depth").rows()}
-        assert d[(1, False)] > d[(1, True)]
-        assert d[(2, True)] > d[(2, False)]
-        _, one_depth, _ = fit_model(cells, ImputeConfig(depth_split_hour=24))
-        assert one_depth["half"].to_list() == [False, False]
+        d = {(e, w): v for e, w, v in depth.select("edge_id", "window", "depth").rows()}
+        assert d[(1, 0)] > d[(1, 2)]
+        assert d[(2, 2)] > d[(2, 0)]
+        _, one_depth, _ = fit_model(cells, ImputeConfig(depth_split_hours=()))
+        assert one_depth["window"].to_list() == [0, 0]
 
     def test_stopped_edge_does_not_spoil_the_fit(self) -> None:
         cells = _cells({1: (100.0, 1.0, 1.0), 2: (0.0, 1.0, 1.0)})
@@ -106,8 +109,35 @@ class TestFitModel:
         cells = _cells({1: (100.0, 1.0, 1.0)})  # 600 s behind each hour
         _, _, pattern = fit_model(cells, ImputeConfig(pattern_seconds=600.0))
         p = dict(pattern.select("hour_of_week", "pattern").rows())
-        assert p[_AM] == pytest.approx(0.5**0.5, rel=1e-6)
+        # Five weekdays' 08:00, 3000 s, against 600: 5/6 of the dip's log.
+        assert p[_AM] == pytest.approx(0.5 ** (5 / 6), rel=1e-6)
+        # Sunday 08:00 has its own 600 s, and no dip to pull.
+        assert p[8] == pytest.approx(1.0)
         assert pattern["seconds"].unique().to_list() == [600.0]
+
+    def test_weekdays_share_a_pattern(self) -> None:
+        # The one Tuesday at 17:00 trucks were in a jam; other days weren't.
+        cells = _cells({1: (100.0, 1.0, 1.0)})
+        jam = pl.col("hour_of_week") == _PM
+        cells = cells.with_columns(speed=pl.when(jam).then(20.0).otherwise("speed"))
+        _, _, shared = fit_model(cells, _EXACT)
+        _, _, own = fit_model(cells, replace(_EXACT, weekday_seconds=0.0))
+        p, q = (dict(x.select("hour_of_week", "pattern").rows()) for x in (shared, own))
+        assert p[_PM] == pytest.approx(p[_PM + 24])
+        assert p[_PM] < 0.5
+        assert q[_PM] < p[_PM] < q[_PM + 24]
+        assert q[_PM + 24] == pytest.approx(0.5, rel=0.05)
+
+    def test_weekday_hour_no_truck_drove_takes_the_weekdays_shape(self) -> None:
+        cells = _cells({1: (100.0, 1.0, 1.0)}, {1: [h for h in _ALL if h != _AM]})
+        _, _, pattern = fit_model(cells, _EXACT)
+        assert pattern.height == 168
+        row = pattern.filter(pl.col("hour_of_week") == _AM).row(0, named=True)
+        assert row["pattern"] == pytest.approx(0.5, rel=1e-6)
+        assert row["seconds"] == 0.0
+        assert _at(historical_speeds(cells, _EXACT), 1, _AM)["speed"] == (
+            pytest.approx(50.0, rel=1e-3)
+        )
 
     def test_given_model_is_used(self) -> None:
         cells = _cells({1: (100.0, 1.0, 1.0)}, {1: [_NIGHT]})
@@ -178,13 +208,6 @@ class TestClassWeeks:
         speeds = pl.DataFrame({"road_class": ["motorway"], "speed": [80.0]})
         assert class_weeks(self._pattern(10.0), speeds).is_empty()
         assert class_weeks(self._pattern(10.0), speeds, min_class_hours=5).height == 168
-
-    def test_hours_the_class_wasnt_measured_stay_at_its_speed(self) -> None:
-        pattern = self._pattern(60.0).filter(pl.col("hour_of_week") != _AM)
-        speeds = pl.DataFrame({"road_class": ["motorway"], "speed": [80.0]})
-        week = class_weeks(pattern, speeds)
-        assert week.height == 168
-        assert dict(week.select("hour_of_week", "week_speed").rows())[_AM] == 80.0
 
     def test_flat_classes_left_out(self) -> None:
         flat = self._pattern(60.0).with_columns(pattern=pl.lit(0.97))

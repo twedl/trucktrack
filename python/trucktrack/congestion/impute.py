@@ -5,20 +5,23 @@ edge's space-mean speed in the hours they drove it, nothing more.  Most
 edge-hours have no truck, and most that do have one.  Imputation fills
 them in from a model of the edge,
 
-    speed(e, h) = level(e) * pattern(h | class) ** depth(e, half of day),
+    speed(e, h) = level(e) * pattern(h | class) ** depth(e, time of day),
 
 and steadies the measured ones by blending them with it.
 
 - ``pattern`` is the road class's hour-of-week shape, 1 at night: when
-  roads of that kind slow down, and by how much on average.  It is the
-  one thing borrowed from other edges.
+  roads of that kind slow down, and by how much on average.  Monday to
+  Friday share one shape, so an hour's pattern doesn't hang on which
+  edges trucks happened to drive that one weekday.  It is the one thing
+  borrowed from other edges.
 - ``level`` is the edge's own night-time speed, from all its cells,
   each deflated by the model at its hour.
 - ``depth`` scales the class's dips to the edge's, in log terms: 0 is
   flat, 1 the class's, 2 twice as deep.  Deeper near a city core,
-  shallower out of it, and separately before and after noon: a road
-  into a city slows in the morning, out of it in the evening.  An edge
-  with little rush-hour time stays near the class's 1.
+  shallower out of it, and separately for the morning peak, midday and
+  the evening peak: a road into a city slows in the morning, out of it
+  in the evening, and both ways at midday.  An edge with little
+  rush-hour time stays near the class's 1.
 
 A cell with ``trucks`` effective trucks gets ``trucks / (trucks + k)``
 of its own speed and the rest from the model.  The more trucks behind
@@ -26,15 +29,17 @@ it, the less the class matters.
 
 Measured on synthetic trucks against held-out trucks' 5 s data (km/h,
 weighted by driving time): hours an edge measured, 5.0 from the cell
-alone, 4.5 blended; hours it didn't, 14.4 from the edge's all-week
-mean, 6.5 imputed.  Borrowing the edge's OSM way's cell for the hour,
-as a speed or as a ratio to the model, does worse (11.2 vs 13.9 where
-the way has one): one truck drives the whole way, and short edges are
-junction pieces that don't share its flow.
+alone, 4.2 blended; hours it didn't, 14.4 from the edge's all-week
+mean, 5.4 imputed (6.3 with a class pattern for each hour of the week
+and an edge's depths split at noon).  Borrowing the edge's OSM way's
+cell for the hour, as a speed or as a ratio to the model, does worse
+(11.2 vs 13.9 where the way has one): one truck drives the whole way,
+and short edges are junction pieces that don't share its flow.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import polars as pl
@@ -48,6 +53,8 @@ from trucktrack.congestion.aggregate import (
 _PATTERN = ("road_class", "hour_of_week")
 # The class pattern is 1 here: [start, end) local hours, any day.
 _NIGHT_HOURS = (0, 5)
+# Monday 00:00 to Friday 24:00, as [start, end) hours of the week.
+_WEEKDAYS = (24, 6 * 24)
 _ITERATIONS = 5
 # A class-hour of stopped trucks or a few odd cells can't take the
 # pattern to 0 (log(0) in the depth fit) or past twice the night speed;
@@ -77,13 +84,19 @@ class ImputeConfig:
     speed and the model's count equally.  *depth_seconds* is how much
     of an edge's own evidence on its depth (seconds of driving, times
     the squared log of the class pattern at the time) counts as much as
-    the class's depth of 1.  An edge has one depth before local hour
-    *depth_split_hour* and another from it on (a road into a city slows
-    in the morning, out of it in the evening); 24 gives it one.
+    the class's depth of 1.  An edge's depth changes at each local hour
+    of *depth_split_hours*: by default one before 10:00 (the morning
+    peak), one to 15:00 (midday) and one after (the evening peak), as a
+    road into a city slows in the morning, out of it in the evening,
+    and both ways at midday; ``()`` gives it one.
     *pattern_seconds* pulls each class-hour's pattern towards 1 (no
     congestion): with W seconds of driving behind it, its log is scaled
     by W / (W + pattern_seconds), so a class few trucks drove stays
-    nearly flat.
+    nearly flat.  *weekday_seconds* is the driving a weekday hour needs
+    for its own shape to count as much as the shape Monday to Friday
+    share at that hour of the day; by default (infinite) they share it
+    outright.  A fleet with many trucks in every hour of the week can
+    lower it to keep, say, Friday's lighter morning.
 
     Defaults are the best of those tried against held-out trucks'
     5 s data on the synthetic sample.
@@ -91,16 +104,84 @@ class ImputeConfig:
 
     cell_trucks: float = 1.0
     depth_seconds: float = 10.0
-    depth_split_hour: int = 12
+    depth_split_hours: tuple[int, ...] = (10, 15)
     pattern_seconds: float = 600.0
+    weekday_seconds: float = math.inf
 
 
 DEFAULT_IMPUTE_CONFIG = ImputeConfig()
 
 
-def _half_day(config: ImputeConfig) -> pl.Expr:
-    """Which of an edge's depths applies at ``hour_of_week``."""
-    return ((pl.col("hour_of_week") % 24) >= config.depth_split_hour).alias("half")
+def _window(config: ImputeConfig) -> pl.Expr:
+    """``window``: which of an edge's depths applies at ``hour_of_week``."""
+    hour = pl.col("hour_of_week") % 24
+    splits = (hour >= h for h in config.depth_split_hours)
+    return pl.sum_horizontal(pl.lit(0), *splits).cast(pl.Int8).alias("window")
+
+
+def _class_pattern(g: pl.DataFrame, config: ImputeConfig) -> pl.DataFrame:
+    """Each class's pattern in all 168 hours, from cells and their edge's level.
+
+    An hour's own pattern is Σ speed·w / Σ level·w over the class's
+    cells in it, over the same at night.  A weekday hour takes the
+    pattern of its hour of the day over Monday to Friday, its log
+    pulled towards 0 by ``config.pattern_seconds``, mixed with its own
+    by ``config.weekday_seconds``; a weekend hour its own, pulled
+    towards 1.  Hours no truck drove get 1, or the weekdays' shape.
+    """
+    hour = pl.col("hour_of_week")
+    cells = g.group_by(_PATTERN).agg(
+        s=pl.col("s").sum(),
+        lw=(pl.col("level") * pl.col("w")).sum(),
+        w=pl.col("w").sum(),
+    )
+    night = (
+        cells.filter((hour % 24).is_between(*_NIGHT_HOURS, closed="left"))
+        .group_by("road_class")
+        .agg(n=pl.col("s").sum() / pl.col("lw").sum())
+    )
+    weekdays = (
+        cells.filter(hour.is_between(*_WEEKDAYS, closed="left"))
+        .group_by("road_class", hour % 24)
+        .agg(ds=pl.col("s").sum(), dlw=pl.col("lw").sum(), dw=pl.col("w").sum())
+    )
+    hours = pl.DataFrame(
+        {"hour_of_week": pl.int_range(HOURS_PER_WEEK, dtype=pl.Int16, eager=True)}
+    )
+
+    def log_ratio(s: str, lw: str) -> pl.Expr:
+        return (pl.col(s) / pl.col(lw) / pl.col("n")).clip(*_PATTERN_RANGE).log()
+
+    def pull(x: pl.Expr, toward: pl.Expr | float, w: str, seconds: float) -> pl.Expr:
+        """*x* pulled towards *toward* by *seconds* against *w*; else *toward*."""
+        weight = pl.col(w) / (pl.col(w) + seconds)
+        return (toward + weight * (x - toward)).fill_null(toward)
+
+    own = log_ratio("s", "lw")  # null in hours without cells
+    shared = pull(log_ratio("ds", "dlw"), 0.0, "dw", config.pattern_seconds)
+    weekday = pull(own, shared, "w", config.weekday_seconds)
+    return (
+        cells.select("road_class")
+        .unique()
+        .join(hours, how="cross")
+        .join(cells, on=_PATTERN, how="left")
+        .join(night, on="road_class", how="left")
+        .with_columns(pl.col("n").fill_null(1.0))
+        .join(
+            weekdays,
+            left_on=["road_class", hour % 24],
+            right_on=["road_class", "hour_of_week"],
+            how="left",
+        )
+        .select(
+            *_PATTERN,
+            pattern=pl.when(hour.is_between(*_WEEKDAYS, closed="left"))
+            .then(weekday)
+            .otherwise(pull(own, 0.0, "w", config.pattern_seconds))
+            .exp(),
+            seconds=pl.col("w").fill_null(0.0),
+        )
+    )
 
 
 def fit_model(
@@ -114,22 +195,23 @@ def fit_model(
     - level: Σ speed·w / Σ w·pattern**depth over the edge's cells;
     - pattern: Σ speed·w / Σ w·level over the class's cells in the
       hour, scaled to 1 at night (00:00-05:00) and pulled towards 1 by
-      ``config.pattern_seconds``;
+      ``config.pattern_seconds``; Monday to Friday share one per hour
+      of the day (see ``config.weekday_seconds``);
     - depth: the slope of log(speed / level) on log(pattern), weighted
       by seconds, shrunk towards 1 by ``config.depth_seconds``, within
       0 to 3.  Cell speeds under 1 km/h count as 1.
 
-    Returns ``level`` per edge, ``depth`` per edge and half of the day
-    (``half``, see ``config.depth_split_hour``) it has cells in, and
-    ``pattern`` per class and hour, with the ``seconds`` of driving
-    behind it.  An edge only ever seen stopped has no level, and gets
-    no speeds.
+    Returns ``level`` per edge, ``depth`` per edge and time of day
+    (``window``, see ``config.depth_split_hours``) it has cells in, and
+    ``pattern`` per class and hour of the week, all 168, with the
+    ``seconds`` of the class's own driving in the hour.  An edge only
+    ever seen stopped has no level, and gets no speeds.
     """
-    depth_key = [*_EDGE, "half"]
+    depth_key = [*_EDGE, "window"]
     c = cells.select(
         *_EDGE,
         *_PATTERN,
-        _half_day(config),
+        _window(config),
         s=pl.col("speed") * pl.col("seconds"),  # Σ speed·w
         w=pl.col("seconds"),
         log_v=pl.col("speed").clip(lower_bound=1.0).log(),
@@ -137,7 +219,6 @@ def fit_model(
     depth_keys = c.select(depth_key).unique()
     edges = depth_keys.with_columns(depth=pl.lit(1.0))
     pattern = c.select(_PATTERN).unique().with_columns(pattern=pl.lit(1.0))
-    night = (pl.col("hour_of_week") % 24).is_between(*_NIGHT_HOURS, closed="left")
     tau = config.depth_seconds
     for _ in range(_ITERATIONS):
         g = c.join(edges, on=depth_key).join(pattern, on=_PATTERN)
@@ -147,21 +228,7 @@ def fit_model(
         )
         level = level.filter(pl.col("level") > 0)
         g = g.drop("pattern").join(level, on=_EDGE)
-        pattern = g.group_by(_PATTERN).agg(
-            pattern=pl.col("s").sum() / (pl.col("level") * pl.col("w")).sum(),
-            pw=(pl.col("level") * pl.col("w")).sum(),
-            sw=pl.col("w").sum(),
-        )
-        night_mean = (
-            pattern.filter(night)
-            .group_by("road_class")
-            .agg(n=(pl.col("pattern") * pl.col("pw")).sum() / pl.col("pw").sum())
-        )
-        trust = pl.col("sw") / (pl.col("sw") + config.pattern_seconds)
-        scaled = (pl.col("pattern") / pl.col("n").fill_null(1.0)).clip(*_PATTERN_RANGE)
-        pattern = pattern.join(night_mean, on="road_class", how="left").select(
-            *_PATTERN, pattern=(trust * scaled.log()).exp(), seconds="sw"
-        )
+        pattern = _class_pattern(g, config)
         x = pl.col("pattern").log()
         r = pl.col("log_v") - pl.col("level").log()
         fitted = (
@@ -198,17 +265,15 @@ def historical_speeds(
     edges = measured.select(*_EDGE, "road_class").unique().sort(_EDGE)
     hours = pl.DataFrame(
         {"hour_of_week": pl.int_range(HOURS_PER_WEEK, dtype=pl.Int16, eager=True)}
-    ).with_columns(_half_day(config))
+    ).with_columns(_window(config))
     k = config.cell_trucks
     n = pl.col("trucks").fill_null(0.0)
     own = pl.when(n > 0).then(n / (n + k)).otherwise(0.0)
-    prior = pl.col("level") * pl.col("pattern").fill_null(1.0).pow(
-        pl.col("depth").fill_null(1.0)
-    )
+    prior = pl.col("level") * pl.col("pattern").pow(pl.col("depth").fill_null(1.0))
     return (
         edges.join(hours, how="cross", maintain_order="left_right")
         .join(level, on=_EDGE, maintain_order="left")
-        .join(depth, on=[*_EDGE, "half"], how="left", maintain_order="left")
+        .join(depth, on=[*_EDGE, "window"], how="left", maintain_order="left")
         .join(pattern, on=_PATTERN, how="left", maintain_order="left")
         .join(
             measured.select(*_EDGE, "hour_of_week", "trucks", y="speed"),
@@ -315,7 +380,7 @@ def class_weeks(
 
     On synthetic trucks, for edges half the trucks never drove, scored
     against the other half's 5 s data, this takes Valhalla's flat speed
-    from 19.1 km/h off to 12.5 (motorways 22.1 to 8.5).
+    from 19.9 km/h off to 10.5 (motorways 22.1 to 8.2).
     """
     supported = (
         pattern.group_by("road_class")
@@ -323,19 +388,8 @@ def class_weeks(
         .filter(pl.col("hours") >= min_class_hours, pl.col("low") < 1.0 - min_dip)
         .select("road_class")
     )
-    hours = pl.DataFrame(
-        {"hour_of_week": pl.int_range(HOURS_PER_WEEK, dtype=pl.Int16, eager=True)}
-    )
-    # Hours the class has no cells in keep its night speed, as in
-    # historical_speeds.
-    shape = (
-        supported.join(hours, how="cross")
-        .join(pattern, on=_PATTERN, how="left")
-        .select(
-            pl.col("road_class").cast(pl.String),
-            "hour_of_week",
-            pl.col("pattern").fill_null(1.0),
-        )
+    shape = supported.join(pattern, on="road_class").select(
+        pl.col("road_class").cast(pl.String), "hour_of_week", "pattern"
     )
     return (
         speeds.select(pl.col("road_class").cast(pl.String), "speed")
