@@ -15,13 +15,25 @@ the old speeds of edges it isn't given, so the tiles are always rebuilt
 from the extract as first packed (see
 :func:`~trucktrack.valhalla._build_id.pristine_extract`).  Edge GraphIds
 don't change, so the tile build ID still holds.
+
+From the command line, measure, impute and load the speeds in
+``run_map_matching(..., observations=ObservationConfig())`` output::
+
+    python -m trucktrack.valhalla.traffic data/matched
+
+Edges no truck drove take their own Valhalla speed, scaled to how fast
+trucks drove roads of their class and length, shaped by their road
+class's week (where enough trucks measured the class), unless
+``--measured-only``.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import subprocess
+import sys
 import tarfile
 import tempfile
 from pathlib import Path
@@ -39,8 +51,12 @@ from valhalla.utils import (
 from trucktrack.congestion import (
     HOURS_PER_WEEK,
     class_weeks,
+    edge_cells,
+    fit_model,
     flow_speeds,
+    historical_speeds,
     length_band,
+    speed_ratios,
 )
 from trucktrack.valhalla._actor import resolve_config
 from trucktrack.valhalla._build_id import pristine_extract, tile_build_id
@@ -308,3 +324,54 @@ def add_predicted_traffic(
         "class_edges": class_edges,
         "files": files,
     }
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Measure, impute and load speeds: ``python -m trucktrack.valhalla.traffic``."""
+    parser = argparse.ArgumentParser(
+        prog="python -m trucktrack.valhalla.traffic",
+        description="Load truck speeds from map-matched observations into the "
+        "Valhalla tiles.",
+    )
+    parser.add_argument("matched", type=Path, help="run_map_matching output directory")
+    parser.add_argument(
+        "--config", type=Path, default=None, help="valhalla.json (default: discovered)"
+    )
+    parser.add_argument(
+        "--measured-only",
+        action="store_true",
+        help="leave edges no truck drove at Valhalla's own speeds",
+    )
+    args = parser.parse_args(argv)
+
+    obs = pl.scan_parquet(args.matched / "_observations" / "**" / "*.parquet")
+    quality = pl.scan_parquet(args.matched / "_quality" / "**" / "*.parquet")
+    cells = edge_cells(obs, quality=quality).collect()
+    level, depth, pattern = fit_model(cells)
+    historical = historical_speeds(cells, model=(level, depth, pattern))
+    sources = dict(historical["source"].value_counts().rows())
+    print(
+        f"{historical['edge_id'].n_unique()} measured edges; "
+        f"edge-hours by source: {sources}",
+        file=sys.stderr,
+    )
+    ratios = None
+    if not args.measured_only:
+        ratios = speed_ratios(level, cells, graph_edges(args.config))
+        print(f"Truck speed / Valhalla speed: {ratios.rows()}", file=sys.stderr)
+    counts = add_predicted_traffic(
+        historical,
+        config=args.config,
+        pattern=None if args.measured_only else pattern,
+        ratios=ratios,
+    )
+    print(
+        f"Loaded {counts['edges']} measured and {counts['class_edges']} other edges "
+        f"into {counts['files']} tiles",
+        file=sys.stderr,
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

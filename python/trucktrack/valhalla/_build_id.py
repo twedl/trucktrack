@@ -92,7 +92,7 @@ def pristine_extract(config: str | Path | None = None) -> Path:
             f"{extract} isn't the archive its tile build ID {build_id} was "
             f"taken from (predicted traffic already added?) and there is no "
             f"{base.name} to start again from.  Rebuild the tiles with "
-            "scripts/setup_valhalla.py."
+            "python -m trucktrack.valhalla.setup."
         )
     fd, tmp = tempfile.mkstemp(dir=extract.parent, suffix=".tar.tmp")
     os.close(fd)

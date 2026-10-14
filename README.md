@@ -66,11 +66,12 @@ compact_partitions("data/partitioned")
 
 ### Building Valhalla tiles
 
-Map-matching and route generation need a local Valhalla install.  One-time
-setup (downloads Ontario from Geofabrik, builds config + admins + tiles):
+Map-matching and route generation need a local Valhalla install
+(`pip install trucktrack[valhalla]`).  One-time setup (downloads Ontario
+from Geofabrik, builds config + admins + tiles):
 
 ```bash
-uv run python scripts/setup_valhalla.py
+python -m trucktrack.valhalla.setup
 ```
 
 Produces `valhalla_tiles/valhalla.json`, `valhalla_tiles/admin.sqlite`, and
@@ -137,7 +138,7 @@ run_map_matching(
 ```
 
 ```bash
-uv run python scripts/add_predicted_traffic.py data/matched
+python -m trucktrack.valhalla.traffic data/matched
 ```
 
 Roads no truck drove take their own Valhalla speed, scaled to how fast
@@ -151,8 +152,13 @@ from trucktrack.valhalla import route
 route(origin, destination, depart_at=datetime(2026, 3, 10, 8, 0))  # local time
 ```
 
-See [docs/congestion.md](docs/congestion.md) for the method, how it
-measures up on synthetic data, and its caveats.
+[`trucktrack/examples/congestion.py`](https://github.com/twedl/trucktrack/blob/main/python/trucktrack/examples/congestion.py)
+runs each step and prints what it produces. It is installed with the
+package: copy it from the directory
+`python -c "import trucktrack.examples as e; print(e.__path__[0])"`
+prints, point its settings at your data, and run it.
+[docs/congestion.md](https://github.com/twedl/trucktrack/blob/main/docs/congestion.md)
+covers the method, how it measures up on synthetic data, and its caveats.
 
 ## Querying
 

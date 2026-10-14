@@ -158,7 +158,7 @@ class TestPristineExtract:
     def test_refuses_a_changed_extract_without_a_copy(self, tmp_path: Path) -> None:
         config, extract = self._config(tmp_path)
         extract.write_bytes(b"tiles with traffic")
-        with pytest.raises(RuntimeError, match="setup_valhalla"):
+        with pytest.raises(RuntimeError, match="trucktrack.valhalla.setup"):
             pristine_extract(config)
 
     def test_new_build_drops_the_old_copy(self, tmp_path: Path) -> None:

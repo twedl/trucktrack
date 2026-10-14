@@ -32,7 +32,11 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
-# Valhalla tiles / OSM data (built locally by scripts/setup_valhalla.py)
+# Example outputs
+examples/*_output/
+congestion_output/
+
+# Valhalla tiles / OSM data (built locally by python -m trucktrack.valhalla.setup)
 valhalla_tiles/
 data/osm/
 duplicateways.txt

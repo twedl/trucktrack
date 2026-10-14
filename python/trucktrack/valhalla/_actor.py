@@ -83,8 +83,8 @@ def resolve_config(config: str | Path | None) -> Path:
     found = find_config()
     if found is None:
         raise FileNotFoundError(
-            "No valhalla.json found. Create one at ./valhalla.json "
-            "pointing at your tile extract, or pass config=..."
+            "No valhalla.json found in ./ or ./valhalla_tiles/. Build tiles "
+            "with python -m trucktrack.valhalla.setup, or pass config=..."
         )
     return found
 

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Build local Valhalla routing tiles via the bundled pyvalhalla binaries.
 
 Running with no arguments downloads the Ontario OSM extract from Geofabrik
@@ -11,15 +10,15 @@ Running with no arguments downloads the Ontario OSM extract from Geofabrik
 4. Build the tile hierarchy via ``valhalla_build_tiles`` and pack it into
    ``valhalla_tiles/valhalla_tiles.tar``.
 
-Truck speeds go in afterwards with ``scripts/add_predicted_traffic.py``.
+Truck speeds go in afterwards with ``python -m trucktrack.valhalla.traffic``.
 
 All outputs live under ``valhalla_tiles/`` (gitignored).  trucktrack's
 ``trucktrack.valhalla.find_config()`` then discovers the json automatically.
 
-Usage::
+Usage (needs the ``valhalla`` extra)::
 
-    uv run python scripts/setup_valhalla.py                      # Ontario default
-    uv run python scripts/setup_valhalla.py --pbf my-region.osm.pbf
+    python -m trucktrack.valhalla.setup                          # Ontario default
+    python -m trucktrack.valhalla.setup --pbf my-region.osm.pbf
 """
 
 from __future__ import annotations
@@ -152,7 +151,11 @@ def build_config(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        prog="python -m trucktrack.valhalla.setup",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument(
         "--pbf",
         type=Path,

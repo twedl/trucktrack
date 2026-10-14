@@ -5,7 +5,7 @@ then drive the rest of the workflow through :mod:`trucktrack.inspect`:
 split at observation gaps / stops, map-match each trip, evaluate match
 quality, and plot all stages on one interactive map.
 
-Requires pyvalhalla and a tile extract built by scripts/setup_valhalla.py.
+Requires pyvalhalla and a tile extract built by python -m trucktrack.valhalla.setup.
 
 Usage::
 

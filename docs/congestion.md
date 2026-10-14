@@ -39,12 +39,16 @@ and when the trucks did.
    slow as truck roads like it and slows at rush hour too. Only classes
    with at least 40 hours of measured driving and a dip of more than 5%
    somewhere; the rest keep Valhalla's speeds.
-5. **Loading** (`scripts/add_predicted_traffic.py data/matched`, or
+5. **Loading** (`python -m trucktrack.valhalla.traffic data/matched`, or
    `--measured-only` to skip step 4): writes Valhalla's traffic CSVs,
    runs `valhalla_add_predicted_traffic`, and repacks the tile extract.
    Each run starts again from a pristine copy of the extract
    (`valhalla_tiles.base.tar`). On the sample, step 4 adds 594k edges,
    246 MB of tiles (to 579 MB) and about a minute.
+
+[`trucktrack/examples/congestion.py`](https://github.com/twedl/trucktrack/blob/main/python/trucktrack/examples/congestion.py),
+installed with the package, runs each step and prints what it produces;
+copy it, point its settings at your data, and run it.
 
 Route with a departure time to use the speeds:
 
@@ -130,7 +134,7 @@ own drive of the same route (4 routes x 5 departure times):
 - **Tile builds.** Observations carry the `tile_build_id` of the tiles
   they were matched on; edge ids mean nothing on other tiles, so loading
   refuses speeds from another build. Rebuilding the tiles with
-  `scripts/setup_valhalla.py` means re-matching.
+  `python -m trucktrack.valhalla.setup` means re-matching.
 - **Validated on synthetic data only.** The settings (`ImputeConfig`) are
   the best of those tried on the synthetic sample, whose congestion is
   close to the model's form: a class shape deepened by place and leaning
