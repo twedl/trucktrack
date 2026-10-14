@@ -1,4 +1,4 @@
-"""Map-match trips from hive-partitioned output (example wrapper).
+"""Map-match trips from the split pipeline's output (example wrapper).
 
 This script is a thin wrapper around
 :func:`trucktrack.valhalla.pipeline.run_map_matching`.
@@ -6,7 +6,7 @@ See that module for the full implementation and parameters.
 
 Usage::
 
-    uv run python examples/map_match_partitions.py data/partitioned data/matched
+    uv run python examples/map_match_buckets.py data/split data/matched
 
 Requires a ``valhalla.json`` in cwd (or under ``valhalla_tiles/``).
 """

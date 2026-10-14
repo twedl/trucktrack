@@ -1,3 +1,5 @@
+use pyo3::prelude::*;
+
 /// Forward bearing in degrees (0–360) from point 1 to point 2.
 #[must_use]
 pub fn bearing_degrees(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
@@ -23,6 +25,13 @@ pub fn haversine_distance_meters(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> 
 
     let a = (dlat / 2.0).sin().powi(2) + lat1_r.cos() * lat2_r.cos() * (dlon / 2.0).sin().powi(2);
     2.0 * R * a.sqrt().asin()
+}
+
+/// Haversine distance between two (lat, lon) points in kilometres.
+#[pyfunction]
+#[must_use]
+pub fn haversine_km(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
+    haversine_distance_meters(lat1, lon1, lat2, lon2) / 1000.0
 }
 
 #[cfg(test)]
@@ -52,6 +61,12 @@ mod tests {
         // JFK (40.6413, -73.7781) to LHR (51.4700, -0.4543) ≈ 5,555 km
         let d = haversine_distance_meters(40.6413, -73.7781, 51.4700, -0.4543);
         assert!((d - 5_555_000.0).abs() < 20_000.0, "got {d}");
+    }
+
+    #[test]
+    fn haversine_km_is_metres_over_1000() {
+        let d = haversine_km(0.0, 0.0, 1.0, 0.0);
+        assert!((d - 111.195).abs() < 0.1, "got {d}");
     }
 
     #[test]

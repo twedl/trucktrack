@@ -33,7 +33,7 @@ from typing import Any
 import polars as pl
 
 from trucktrack.pipeline import IMPOSSIBLE_SPEED_KMH, MIN_SEGMENT_LENGTH
-from trucktrack.query import ChunkIndex, scan_raw_truck
+from trucktrack.query import scan_truck
 from trucktrack.splitters import (
     filter_impossible_speeds,
     filter_stale_pings,
@@ -87,27 +87,21 @@ def load_truck_trace(
     start: datetime | str,
     end: datetime | str,
     *,
-    data_dir: str | Path | None = None,
-    index: ChunkIndex | None = None,
+    data_dir: str | Path,
     time_col: str = "time",
 ) -> pl.DataFrame:
     """Load a truck's raw points within ``[start, end)``, sorted by time.
 
-    Provide either *data_dir* (raw hive layout) or a pre-built *index*.
-    ``ChunkIndex`` is best-suited to the partitioned layout; for raw
-    traces pass ``data_dir`` directly.
+    *data_dir* is the raw input, in any layout, or its
+    :func:`~trucktrack.buckets.bucket_by_truck` output, which opens only
+    the truck's bucket (see :func:`~trucktrack.query.scan_truck`).
 
     String timestamps are parsed with :func:`datetime.fromisoformat`.
     Naive timestamps are coerced to UTC when the underlying column is
     tz-aware.  Raises ``ValueError`` when the filtered result is empty
     so notebooks fail fast instead of propagating empty frames.
     """
-    if index is not None:
-        lf = index.scan_truck(truck_id)
-    elif data_dir is not None:
-        lf = scan_raw_truck(data_dir, truck_id)
-    else:
-        raise ValueError("provide data_dir or index")
+    lf = scan_truck(data_dir, truck_id)
 
     start_dt = _coerce_datetime(start)
     end_dt = _coerce_datetime(end)
@@ -151,7 +145,7 @@ def split_trips(
 ) -> pl.DataFrame:
     """Apply stale-ping, impossible-speed, gap, stop, and (optionally) traffic filters.
 
-    Mirrors the pipeline's per-chunk processing (same filters, same
+    Mirrors the pipeline's per-bucket processing (same filters, same
     order) so inspect results match what ``run_pipeline`` produces for
     the same input.
 

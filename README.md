@@ -1,6 +1,6 @@
 # trucktrack
 
-High-performance trajectory splitting, generation, and partitioning, powered by Rust.
+High-performance trajectory splitting, generation, and map-matching, powered by Rust.
 
 A Python package implementing logic similar to 
 [movingpandas](https://movingpandas.org/) trajectory splitters
@@ -10,7 +10,7 @@ to process entirely in Rust (parquet in, parquet out) or share DataFrames
 between Python and Rust zero-copy via `pyo3-polars`.
 
 In addition to the Rust splitters, trucktrack ships pure-Python
-subpackages for trace generation, spatial partitioning, map-matching,
+subpackages for trace generation, map-matching,
 per-edge truck speeds as Valhalla predicted traffic (`congestion`),
 querying, and visualization.  What's new in each release:
 [CHANGELOG.md](https://github.com/twedl/trucktrack/blob/main/CHANGELOG.md).
@@ -41,30 +41,24 @@ maturin develop
 
 ## Pipelines
 
-### Split + partition
+### Group by truck, then split
 
-Process raw GPS traces into a spatially partitioned hive dataset:
+Raw GPS can arrive in any file layout: parquet files anywhere under one
+folder, with columns `id` (truck), `time`, `lat`, `lon`, `speed` (km/h)
+and `heading`.  First gather each truck's points into one bucket, then
+split each bucket's trucks into trips:
 
 ```python
 from pathlib import Path
-from trucktrack import run_pipeline
+from trucktrack import bucket_by_truck, run_pipeline
 
-run_pipeline(Path("data/raw"), Path("data/partitioned"))
-
-# Group input chunks for fewer output files (uses more memory per worker)
-run_pipeline(Path("data/raw"), Path("data/partitioned"), group_size=256)
-
-# Compact multi-file partitions into single files after processing
-run_pipeline(Path("data/raw"), Path("data/partitioned"), compact=True)
+bucket_by_truck(Path("data/raw"), Path("data/bucketed"))  # n_buckets=256
+run_pipeline(Path("data/bucketed"), Path("data/split"))
 ```
 
-To compact an existing dataset without re-running the pipeline:
-
-```python
-from trucktrack import compact_partitions
-
-compact_partitions("data/partitioned")
-```
+Buckets are a stable hash of the truck id, and every later stage keeps
+them (`bucket=K/` folders plus a `_buckets.json`).  `run_pipeline` loads
+one bucket per worker, so set `n_buckets` for your data's size.
 
 ### Building Valhalla tiles
 
@@ -90,7 +84,7 @@ Map-match all trips against a local Valhalla instance:
 from trucktrack.valhalla.pipeline import run_map_matching
 
 run_map_matching(
-    Path("data/partitioned"),
+    Path("data/split"),
     Path("data/matched"),
     # config="valhalla.json"  # omit to auto-discover in cwd
 )
@@ -109,7 +103,7 @@ call to recover way IDs:
 from trucktrack.valhalla import BridgeConfig, run_map_matching
 
 run_map_matching(
-    Path("data/partitioned"),
+    Path("data/split"),
     Path("data/matched"),
     bridges=BridgeConfig(max_dist_m=5000, time_s=240, min_dist_m=1000),
 )
@@ -136,7 +130,7 @@ trucks did:
 from trucktrack.congestion import ObservationConfig
 
 run_map_matching(
-    Path("data/partitioned"), Path("data/matched"), observations=ObservationConfig()
+    Path("data/split"), Path("data/matched"), observations=ObservationConfig()
 )
 ```
 
@@ -165,39 +159,18 @@ covers the method, how it measures up on synthetic data, and its caveats.
 
 ## Querying
 
-Pull individual trucks or trips without scanning the full dataset.
-Each function filters by `chunk_id` (last 2 hex chars of the truck UUID)
-to read only the relevant files:
+Pull individual trucks or trips from any stage.  On a bucketed stage
+the lookup hashes the truck id and opens only its bucket; the raw input,
+in whatever layout, is scanned in full:
 
 ```python
 import trucktrack as tt
 
-# Raw traces — filters by chunk_id hive partition
-df = tt.scan_raw_truck("data/raw", truck_id).collect()
-
-# Partitioned trips — filters by chunk_id in filename
-df = tt.scan_partitioned_truck("data/partitioned", truck_id).collect()
-df = tt.scan_partitioned_trip("data/partitioned", trip_id).collect()
-
-# Map-matched results
-df = tt.scan_matched_truck("data/matched", truck_id).collect()
-df = tt.scan_matched_trip("data/matched", trip_id).collect()
-```
-
-### ChunkIndex — persistent file-path index
-
-For repeated queries, build an index once and reload it instantly in
-later sessions:
-
-```python
-# First time — one rglob, then save to disk
-idx = tt.ChunkIndex.build("data/partitioned")
-idx.save()  # writes .chunk_index.json
-
-# Later sessions — instant load, no filesystem scan
-idx = tt.ChunkIndex.load("data/partitioned")
-df = idx.scan_truck(truck_id).collect()
-df = idx.scan_trip(trip_id).collect()
+df = tt.scan_truck("data/bucketed", truck_id).collect()  # or data/raw
+df = tt.scan_truck("data/split", truck_id).collect()
+df = tt.scan_trip("data/split", trip_id).collect()
+df = tt.scan_trip("data/matched", [trip_id_1, trip_id_2]).collect()
+df = tt.scan_truck("data/matched/_quality", truck_id).collect()
 ```
 
 ## Visualization
@@ -208,30 +181,26 @@ One-call helpers to query, plot, and serve an interactive map:
 from trucktrack.visualize import inspect_truck, inspect_trip
 
 # All trips for a truck — opens a Flask server
-inspect_truck("data/partitioned", truck_id)
+inspect_truck("data/split", truck_id)
 
 # Filter to a date range
 from datetime import date
-inspect_truck("data/partitioned", truck_id,
+inspect_truck("data/split", truck_id,
               date_range=(date(2025, 1, 1), date(2025, 3, 1)))
 
 # Single trip or multiple trips
-inspect_trip("data/partitioned", trip_id)
-inspect_trip("data/partitioned", [trip_id_1, trip_id_2])
+inspect_trip("data/split", trip_id)
+inspect_trip("data/split", [trip_id_1, trip_id_2])
 
-# Use a ChunkIndex for fast lookups on large datasets
-idx = tt.ChunkIndex.load("data/partitioned")
-inspect_truck("data/partitioned", truck_id, index=idx)
-
-# Raw traces or matched results
-inspect_truck("data/raw", truck_id, stage="raw")
-inspect_trip("data/matched", trip_id, stage="matched")
+# Any stage: raw points or matched results
+inspect_truck("data/bucketed", truck_id)
+inspect_trip("data/matched", trip_id)
 
 # Get the map object without serving (e.g. for Jupyter display)
-m = inspect_trip("data/partitioned", trip_id, serve=False)
+m = inspect_trip("data/split", trip_id, serve=False)
 
 # Forward kwargs to plot_trace
-inspect_trip("data/partitioned", trip_id, color_by="speed")
+inspect_trip("data/split", trip_id, color_by="speed")
 ```
 
 ### Multi-stage overlay
@@ -244,17 +213,16 @@ from trucktrack.visualize import inspect_pipeline
 # All stages for one truck
 inspect_pipeline(
     truck_id,
-    raw_dir="data/raw",
-    partitioned_dir="data/partitioned",
+    raw_dir="data/bucketed",
+    split_dir="data/split",
     matched_dir="data/matched",
 )
 
 # Scope to specific trips (raw layer auto-filtered to matching dates)
 inspect_pipeline(
     trip_id=[trip_id_1, trip_id_2],
-    raw_dir="data/raw",
-    partitioned_dir="data/partitioned",
-    partitioned_index=idx,
+    raw_dir="data/bucketed",
+    split_dir="data/split",
 )
 ```
 

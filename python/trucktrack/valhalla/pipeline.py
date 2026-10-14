@@ -1,10 +1,10 @@
-"""Map-match trips from hive-partitioned output.
+"""Map-match trips from the split pipeline's truck buckets.
 
-Reads the partitioned parquet dataset produced by
-:func:`trucktrack.pipeline.run_pipeline`, iterates over partitions, and
+Reads the bucketed trips produced by
+:func:`trucktrack.pipeline.run_pipeline`, iterates over buckets, and
 applies a map-matching function to each trip.
 
-Resumable: the output directory mirrors the input hive layout. On
+Resumable: the output directory mirrors the input buckets. On
 restart, chunks whose requested outputs all exist are skipped. Writes
 use atomic temp-file-then-rename to avoid partial output from crashes.
 
@@ -12,9 +12,8 @@ Opt-in edge speed observations (one row per matched GPS fix, see
 :mod:`trucktrack.congestion`) come from the same ``trace_attributes``
 call and land in ``_observations/`` beside ``_quality/``.
 
-Partitions are processed in parallel using worker processes
-(ProcessPoolExecutor), assigned in contiguous spatial blocks to keep
-each worker's Valhalla tile cache warm.  Processes (not threads)
+Buckets are processed in parallel using worker processes
+(ProcessPoolExecutor), one bucket per task.  Processes (not threads)
 because per-trip Python work, however thin, is GIL-serialized across
 workers — at 29 workers on a long run, active CPU plateaus around
 14/29 with threads no matter how much Python we trim.
@@ -22,7 +21,7 @@ workers — at 29 workers on a long run, active CPU plateaus around
 Usage::
 
     from trucktrack.valhalla.pipeline import run_map_matching
-    run_map_matching(Path("data/processed"), Path("data/matched"))
+    run_map_matching(Path("data/split"), Path("data/matched"))
 """
 
 from __future__ import annotations
@@ -43,13 +42,21 @@ from typing import Any, cast
 import polars as pl
 from tqdm import tqdm
 
+from trucktrack.buckets import (
+    bucket_dirs,
+    bucket_files,
+    bucket_number,
+    read_n_buckets,
+    require_bucketed,
+    write_n_buckets,
+)
 from trucktrack.congestion import (
     FIX_COLUMNS,
     ObservationConfig,
     edge_observations,
     prepare_fixes,
 )
-from trucktrack.pipeline import parquet_row_count, partition_sort_key
+from trucktrack.pipeline import parquet_row_count
 from trucktrack.valhalla._bridge import BridgeConfig
 from trucktrack.valhalla._build_id import tile_build_id
 from trucktrack.valhalla.map_matching import (
@@ -80,8 +87,7 @@ _QUALITY_SCHEMA = {
     "any_bridge_failed": pl.Boolean,
 }
 _TIMING_SCHEMA = {
-    "tier": pl.Utf8,
-    "partition_id": pl.Int64,
+    "bucket": pl.Int64,
     "skipped": pl.Int64,
     "trips": pl.Int64,
     "rows_out": pl.Int64,
@@ -130,7 +136,7 @@ def _worker_init(quiet: bool, progress_queue: Any) -> None:
     """ProcessPoolExecutor initializer: silence stdout, wire progress queue.
 
     Stashes the shared progress queue in a module global so
-    ``_report_progress`` can stream per-partition updates back to the
+    ``_report_progress`` can stream per-bucket updates back to the
     main process' tqdm drainer without round-tripping through each
     future's result.  No stdout restore — the worker never writes to
     stdout for its own output.
@@ -265,9 +271,8 @@ def _atomic_write_parquet(df: pl.DataFrame, dest: Path) -> None:
         raise
 
 
-def _process_partition(
-    partition_dir: Path,
-    input_dir: Path,
+def _process_bucket(
+    bucket_dir: Path,
     output_dir: Path,
     config: str | Path | None,
     row_counts: dict[Path, int],
@@ -276,27 +281,25 @@ def _process_partition(
     bridges: BridgeConfig | None = None,
     observations: ObservationConfig | None = None,
     build_id: str | None = None,
-) -> tuple[str, int, int, int, int, float]:
-    """Read one partition chunk-by-chunk, map-match each trip, and write results.
+) -> tuple[int, int, int, int, float]:
+    """Read one bucket chunk-by-chunk, map-match each trip, and write results.
 
     Processes one chunk at a time to keep memory free for Valhalla.
     Skips chunks whose requested outputs all exist.  *build_id* tags
     observation rows (see :func:`~trucktrack.valhalla.tile_build_id`).
-    Returns (tier, partition_id, chunks_skipped, trips_matched, rows_out, elapsed_s).
+    Returns (bucket, chunks_skipped, trips_matched, rows_out, elapsed_s).
     """
     t0 = perf_counter()
-    rel = partition_dir.relative_to(input_dir)
-    tier = rel.parent.name.removeprefix("tier=")
-    partition_id = int(rel.name.removeprefix("partition_id="))
-    out_dir = output_dir / rel
-    quality_dir = output_dir / "_quality" / rel
-    obs_dir = output_dir / "_observations" / rel
+    bucket = bucket_number(bucket_dir)
+    out_dir = output_dir / bucket_dir.name
+    quality_dir = output_dir / "_quality" / bucket_dir.name
+    obs_dir = output_dir / "_observations" / bucket_dir.name
     out_dir.mkdir(parents=True, exist_ok=True)
     quality_dir.mkdir(parents=True, exist_ok=True)
     if observations is not None:
         obs_dir.mkdir(parents=True, exist_ok=True)
 
-    chunks = sorted(partition_dir.glob("*.parquet"))
+    chunks = bucket_files(bucket_dir)
     skipped = 0
     total_trips = 0
     total_rows = 0
@@ -372,44 +375,7 @@ def _process_partition(
             )
             _atomic_write_parquet(obs, obs_path)
 
-    return tier, partition_id, skipped, total_trips, total_rows, perf_counter() - t0
-
-
-def _process_chunk(
-    partition_dirs: list[Path],
-    input_dir: Path,
-    output_dir: Path,
-    config: str | Path | None,
-    row_counts: dict[Path, int],
-    *,
-    debug: bool = False,
-    bridges: BridgeConfig | None = None,
-    observations: ObservationConfig | None = None,
-    build_id: str | None = None,
-) -> list[tuple[str, int, int, int, int, float]]:
-    """Process a contiguous chunk of spatially adjacent partitions sequentially.
-
-    One chunk owns a geographically-coherent slice of Ontario, so the
-    Valhalla tile LRU and the OS page cache over the mmapped tile tar
-    stay hot across successive partitions.  With many chunks per
-    worker, fast workers still steal from the queue after finishing
-    their own chunk — we get locality within a chunk and load balance
-    across chunks.
-    """
-    return [
-        _process_partition(
-            pdir,
-            input_dir,
-            output_dir,
-            config,
-            row_counts,
-            debug=debug,
-            bridges=bridges,
-            observations=observations,
-            build_id=build_id,
-        )
-        for pdir in partition_dirs
-    ]
+    return bucket, skipped, total_trips, total_rows, perf_counter() - t0
 
 
 def run_map_matching(
@@ -418,25 +384,26 @@ def run_map_matching(
     *,
     config: str | Path | None = None,
     max_workers: int | None = None,
-    chunks_per_worker: int = 4,
     quiet: bool = False,
     debug: bool = False,
     bridges: BridgeConfig | None = None,
     observations: ObservationConfig | None = None,
 ) -> None:
-    """Map-match all trips across partitions in parallel.
+    """Map-match all trips across buckets in parallel.
 
     *config* is an optional path to ``valhalla.json``; when ``None``
     :func:`trucktrack.valhalla.find_config` discovers one in cwd
     (e.g. ``./valhalla.json``).
 
-    *input_dir* should be the hive-partitioned output of
+    *input_dir* should be the output of
     :func:`trucktrack.pipeline.run_pipeline`, with layout::
 
-        input_dir/tier=.../partition_id=.../chunk.parquet
+        input_dir/bucket=K/chunk.parquet
 
-    *output_dir* mirrors the same hive layout. Re-running skips chunks
-    whose requested outputs all exist.
+    *output_dir* mirrors the same buckets, as do its ``_quality/`` and
+    ``_observations/``, each with a ``_buckets.json`` from the start, so
+    lookups work mid-run.  Re-running skips chunks whose requested
+    outputs all exist.
 
     *max_workers* defaults to ``os.cpu_count()``.
 
@@ -445,7 +412,7 @@ def run_map_matching(
     parquet rather than logged.
 
     *debug* adds an ``elapsed_s`` column to each quality row, so you
-    can isolate pathological trips within a slow partition. Per-partition
+    can isolate pathological trips within a slow bucket. Per-bucket
     timing is always written to ``output_dir / "_timing.parquet"``.
 
     *bridges*, when supplied, splits trips at large gaps (see
@@ -456,30 +423,20 @@ def run_map_matching(
 
     *observations*, when supplied, also writes edge speed observations
     (see :mod:`trucktrack.congestion`) to ``output_dir / "_observations"``
-    in the same hive layout: one row per GPS fix matched to an edge,
+    in the same buckets: one row per GPS fix matched to an edge,
     tagged with the tile build ID (see
     :func:`~trucktrack.valhalla.tile_build_id`).  The input needs
     ``speed`` (km/h) and ``heading`` columns.  The extra attributes ride
     on the ``trace_attributes`` call already made for way IDs.
 
-    *chunks_per_worker* controls how many chunks of
-    spatially-contiguous partitions each worker sees on average
-    (default 4).  Partitions are sorted spatially and sliced into
-    ``max_workers * chunks_per_worker`` chunks; workers claim whole
-    chunks so the Valhalla tile LRU and OS page cache stay hot across
-    a chunk's partitions, and the queue's extra chunks let fast
-    workers steal from slow ones to trim the tail.  Lower values
-    (1-2) bias toward locality; higher values (8+) bias toward
-    balance.
-
     .. note::
         For best CPU utilization, set ``POLARS_MAX_THREADS=1`` in your
-        environment before launching.  Each partition worker does its
-        own ``pl.scan_parquet().collect()`` on a small chunk; polars'
-        global rayon pool then fans that tiny work out across all
-        cores, and with ``max_workers`` partition threads doing it
+        environment before launching.  Each bucket worker does its
+        own ``pl.scan_parquet().collect()`` on a chunk; polars'
+        global rayon pool then fans that work out across all
+        cores, and with ``max_workers`` bucket workers doing it
         simultaneously, every polars call fights every other one for
-        CPU.  Serializing polars means partition-level parallelism
+        CPU.  Serializing polars means bucket-level parallelism
         runs cleanly.  A warning fires at startup if the env var isn't
         set and ``max_workers > 4``.
 
@@ -496,29 +453,37 @@ def run_map_matching(
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
 
-    all_chunk_paths: list[Path] = []
-    partition_chunks: dict[Path, list[Path]] = {}
-    for p in input_dir.rglob("*.parquet"):
-        if p.parent.name.startswith("partition_id="):
-            partition_chunks.setdefault(p.parent, []).append(p)
-            all_chunk_paths.append(p)
-    partition_dirs = sorted(partition_chunks, key=partition_sort_key)
+    n_buckets = require_bucketed(input_dir, made_by="run_pipeline")
+    out_n = read_n_buckets(output_dir)
+    if out_n is not None and out_n != n_buckets:
+        raise ValueError(
+            f"{output_dir} holds {out_n} buckets, {input_dir} {n_buckets}; "
+            "delete the output to redo it"
+        )
+    # First, so a resumed run is checked against it even after a crash.
+    write_n_buckets(output_dir, n_buckets)
+    write_n_buckets(output_dir / "_quality", n_buckets)
+    if observations is not None:
+        write_n_buckets(output_dir / "_observations", n_buckets)
+
+    bucket_chunks = {b: bucket_files(b) for b in bucket_dirs(input_dir)}
+    all_chunk_paths = [p for chunks in bucket_chunks.values() for p in chunks]
     total_chunks = len(all_chunk_paths)
 
-    if not partition_dirs:
-        print(f"No partitions found under {input_dir}", file=sys.stderr)
+    if not bucket_chunks:
+        print(f"No buckets found under {input_dir}", file=sys.stderr)
         return
 
     if max_workers is None:
         max_workers = os.cpu_count() or 1
-    max_workers = min(max_workers, len(partition_dirs))
+    max_workers = min(max_workers, len(bucket_chunks))
 
     build_id = tile_build_id(config) if observations is not None else None
 
     if max_workers > 4 and "POLARS_MAX_THREADS" not in os.environ:
         print(
             f"warning: POLARS_MAX_THREADS not set with max_workers={max_workers}. "
-            "Polars' global rayon pool will oversubscribe CPU as each partition "
+            "Polars' global rayon pool will oversubscribe CPU as each bucket "
             "worker's scan_parquet/collect fans out across all cores. "
             "Set POLARS_MAX_THREADS=1 before launching for best throughput.",
             file=sys.stderr,
@@ -535,22 +500,11 @@ def run_map_matching(
     row_counts = dict(zip(all_chunk_paths, counts, strict=True))
     total_input_rows = sum(counts)
 
-    n = len(partition_dirs)
-
-    # Slice partitions into spatially-contiguous chunks.  More chunks
-    # than workers so the executor queue can still smooth out
-    # imbalance after a worker finishes its first chunk.
-    target_chunks = max(max_workers, max_workers * chunks_per_worker)
-    chunk_size = max(1, (n + target_chunks - 1) // target_chunks)
-    chunks: list[list[Path]] = [
-        partition_dirs[i : i + chunk_size] for i in range(0, n, chunk_size)
-    ]
-
+    n = len(bucket_chunks)
     print(
-        f"Found {n} partition(s) "
+        f"Found {n} bucket(s) "
         f"({total_chunks:,} chunks, {total_input_rows:,} rows), "
-        f"processing with {max_workers} worker(s) "
-        f"over {len(chunks)} chunk(s) of ~{chunk_size} partition(s) each",
+        f"processing with {max_workers} worker(s)",
         file=sys.stderr,
     )
 
@@ -558,22 +512,18 @@ def run_map_matching(
     total_trips = 0
     total_rows = 0
 
-    # Longest-Processing-Time-first: submit the heaviest chunk-futures
+    # Longest-Processing-Time-first: submit the heaviest buckets
     # earliest so the longest tasks start when the pool is full and
-    # shorter tasks fill idle workers at the end.  Cuts the long tail
-    # when partitions have skewed row counts (downtown vs rural).
-    def _chunk_rows(pdirs: list[Path]) -> int:
-        return sum(row_counts[p] for pdir in pdirs for p in partition_chunks[pdir])
-
-    chunks_with_rows: list[tuple[list[Path], int]] = sorted(
-        ((pdirs, _chunk_rows(pdirs)) for pdirs in chunks),
-        key=lambda cr: cr[1],
+    # shorter tasks fill idle workers at the end.
+    buckets_by_rows = sorted(
+        bucket_chunks,
+        key=lambda b: sum(row_counts[p] for p in bucket_chunks[b]),
         reverse=True,
     )
 
     # Shared queue — workers stream per-batch row counts; a main-process
     # drainer thread forwards them to tqdm so the bar advances inside
-    # each chunk, not only when a whole chunk-future completes.
+    # each bucket, not only when a whole bucket-future completes.
     ctx = mp.get_context("spawn")
     progress_queue: Any = ctx.Queue()
 
@@ -612,47 +562,41 @@ def run_map_matching(
         # With hundreds of thousands of chunks, the full dict pickles to
         # tens of MB × N workers and stalls the submit queue before any
         # worker starts.
-        future_to_rows = {}
-        for chunk, rows in chunks_with_rows:
-            sub_counts = {
-                f: row_counts[f] for pdir in chunk for f in partition_chunks[pdir]
-            }
-            fut = pool.submit(
-                _process_chunk,
-                chunk,
-                input_dir,
+        futures = [
+            pool.submit(
+                _process_bucket,
+                bucket,
                 output_dir,
                 config,
-                sub_counts,
+                {f: row_counts[f] for f in bucket_chunks[bucket]},
                 debug=debug,
                 bridges=bridges,
                 observations=observations,
                 build_id=build_id,
             )
-            future_to_rows[fut] = rows
+            for bucket in buckets_by_rows
+        ]
 
-        partition_results: list[tuple[str, int, int, int, int, float]] = []
+        bucket_results: list[tuple[int, int, int, int, float]] = []
         try:
-            for future in as_completed(future_to_rows):
-                partition_results.extend(future.result())
+            for future in as_completed(futures):
+                bucket_results.append(future.result())
         finally:
             progress_queue.put(None)
             drainer.join(timeout=5)
 
-    for _tier, _pid, skipped, trips, rows, _elapsed in partition_results:
+    for _bucket, skipped, trips, rows, _elapsed in bucket_results:
         total_skipped += skipped
         total_trips += trips
         total_rows += rows
 
-    if partition_results:
-        output_dir.mkdir(parents=True, exist_ok=True)
-        timing_df = pl.DataFrame(
-            partition_results, schema=_TIMING_SCHEMA, orient="row"
-        ).sort("elapsed_s", descending=True)
-        _atomic_write_parquet(timing_df, output_dir / "_timing.parquet")
+    timing_df = pl.DataFrame(bucket_results, schema=_TIMING_SCHEMA, orient="row").sort(
+        "elapsed_s", descending=True
+    )
+    _atomic_write_parquet(timing_df, output_dir / "_timing.parquet")
 
     print("\n--- Map matching complete ---", file=sys.stderr)
-    print(f"  Partitions:  {n:>10,}", file=sys.stderr)
+    print(f"  Buckets:     {n:>10,}", file=sys.stderr)
     print(f"  Chunks:      {total_chunks:>10,}", file=sys.stderr)
     print(f"  Skipped:     {total_skipped:>10,} chunk(s)", file=sys.stderr)
     print(f"  Matched:     {total_trips:>10,} trip(s)", file=sys.stderr)

@@ -3,7 +3,7 @@
 Takes raw truck GPS to time-dependent truck routes:
 
 0. Build Valhalla tiles from an OpenStreetMap extract (first run only).
-1. Split and partition the raw traces.
+1. Group the raw points by truck and split them into trips.
 2. Map-match them, keeping one observation per fix on a road edge.
 3. Measure each edge's speed in each local hour of the week it was driven.
 4. Fill in every hour of every measured edge from a model of the edge.
@@ -33,7 +33,8 @@ from pathlib import Path
 
 import polars as pl
 
-from trucktrack import run_pipeline
+from trucktrack import bucket_by_truck, run_pipeline
+from trucktrack.buckets import read_n_buckets
 from trucktrack.congestion import (
     AggregateConfig,
     ObservationConfig,
@@ -86,7 +87,8 @@ def heading(text: str) -> None:
 
 
 def main() -> None:
-    partitioned, matched = OUTPUT / "partitioned", OUTPUT / "matched"
+    bucketed, split = OUTPUT / "bucketed", OUTPUT / "split"
+    matched = OUTPUT / "matched"
     config = TILES / "valhalla.json"
 
     heading("0. Valhalla tiles")
@@ -95,16 +97,16 @@ def main() -> None:
     else:
         build_tiles(OSM_EXTRACT, TILES)
 
-    heading("1. Split and partition")
-    if any(partitioned.rglob("*.parquet")):
-        print(f"{partitioned} already holds trips; delete it to redo this step")
+    heading("1. Group by truck and split into trips")
+    if read_n_buckets(split) is not None:
+        print(f"{split} already holds trips; delete it to redo this step")
     else:
-        run_pipeline(RAW_DIR, partitioned)
+        if read_n_buckets(bucketed) is None:
+            bucket_by_truck(RAW_DIR, bucketed)
+        run_pipeline(bucketed, split)
 
     heading("2. Map-match, with an observation per fix")
-    run_map_matching(
-        partitioned, matched, config=config, observations=ObservationConfig()
-    )
+    run_map_matching(split, matched, config=config, observations=ObservationConfig())
     obs = pl.scan_parquet(matched / "_observations" / "**" / "*.parquet")
     quality = pl.scan_parquet(matched / "_quality" / "**" / "*.parquet")
     print("Fixes on a road edge, and those flagged as not measuring traffic:")

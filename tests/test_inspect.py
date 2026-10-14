@@ -201,13 +201,13 @@ class TestEvaluateQualityCached:
 
 
 # ---------------------------------------------------------------------------
-# load_truck_trace time filter (raw hive layout fixture)
+# load_truck_trace time filter (provider-style raw layout, scanned in full)
 # ---------------------------------------------------------------------------
 
 
 class TestLoadTruckTrace:
     def test_time_filter_tz_aware(self, tmp_path: Path) -> None:
-        truck_id = "deadbeef"  # chunk_id = "ef"
+        truck_id = "deadbeef"
         chunk_dir = tmp_path / "year=2026" / f"chunk_id={truck_id[-2:]}"
         chunk_dir.mkdir(parents=True)
         times = [
@@ -254,12 +254,4 @@ class TestLoadTruckTrace:
                 datetime(2027, 1, 1),
                 datetime(2027, 1, 2),
                 data_dir=tmp_path,
-            )
-
-    def test_requires_data_dir_or_index(self) -> None:
-        with pytest.raises(ValueError, match="data_dir or index"):
-            tti.load_truck_trace(
-                "abcd",
-                datetime(2026, 1, 1),
-                datetime(2026, 1, 2),
             )

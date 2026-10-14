@@ -1,5 +1,48 @@
 # Changelog
 
+## Unreleased
+
+### Truck buckets replace spatial partitions
+
+The pipeline no longer relies on how the raw input is laid out. A new
+first step, `bucket_by_truck(raw_dir, bucketed_dir, n_buckets=256)`,
+streams parquet files in any folder layout into `bucket=K/` folders, K
+a stable hash of the truck id, so each truck's whole history is in one
+bucket. Split, map-match, `_quality/` and `_observations/` all keep those
+buckets, and a `_buckets.json` records how many.
+
+This fixes trip IDs when a truck's points span several raw files (by
+day, say): each file was split on its own, so trips were cut at file
+boundaries and different trips got the same ID (`{id}_gap0_trip0`).
+
+### Other changes
+
+- The Rust splitters and filters release the GIL, so `run_pipeline`'s
+  threads now run them in parallel (1.85× on 4 threads in a synthetic
+  benchmark; before, threads gained nothing).
+
+### Breaking changes
+
+- **`run_pipeline` takes `bucket_by_truck` output**, writes
+  `bucket=K/part-NNNN.parquet` (files of about `rows_per_file=1_000_000`
+  rows, each truck in one file) instead of `tier=.../partition_id=.../`,
+  and returns counts of buckets, rows and trips. `group_size`, `compact`,
+  `rebalance` and their settings are gone, as are `compact_partitions`
+  and `rebalance_partitions`. Its output folder must be empty.
+- **`run_map_matching` takes `run_pipeline` output** and runs one task
+  per bucket; `chunks_per_worker` and the spatially ordered work units
+  are gone. `_timing.parquet` has a `bucket` column instead of `tier` and
+  `partition_id`.
+- **`trucktrack.partition` is gone** (tiers, Valhalla tile keys, Hilbert
+  ordering), with the `trucktrack partition` command.
+- **Lookups:** `scan_truck(dir, truck_id)` and `scan_trip(dir, trip_id)`
+  (one ID or a list) work on any stage and replace `scan_raw_truck`, `scan_partitioned_*`,
+  `scan_matched_*` and `ChunkIndex`. Raw input without `_buckets.json` is
+  scanned in full, whatever its layout. `inspect_truck` and
+  `inspect_trip` lose `index` and `stage`; `inspect_pipeline` takes
+  `split_dir` instead of `partitioned_dir` and loses the `*_index`
+  arguments; `inspect.load_truck_trace` loses `index`.
+
 ## 0.2.0 (2026-10-14)
 
 ### Truck speeds as Valhalla predicted traffic

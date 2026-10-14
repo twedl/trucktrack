@@ -2,7 +2,8 @@
 
 Three trucks × two trips each, routed through Valhalla between Ontario
 cities and decorated with the default GPS/operational error profile.
-Layout matches the pipeline's raw stage::
+Laid out like the provider's raw input, which the pipeline doesn't
+rely on (see :func:`trucktrack.bucket_by_truck`)::
 
     data/trucks/year=YYYY/chunk_id=XX/part-0.parquet
 
@@ -38,10 +39,11 @@ from pathlib import Path
 import polars as pl
 from trucktrack import generate_trace
 from trucktrack.generate.models import SamplingConfig, TripConfig, random_sampling
-from trucktrack.query import _RAW_CHUNK_ID_LEN
 from trucktrack.valhalla import find_config
 
 OUTPUT_DIR = Path(__file__).parent.parent / "data" / "trucks"
+# The provider's chunk_id: the last characters of the truck id.
+CHUNK_ID_LEN = 2
 
 if find_config() is None:
     raise SystemExit(
@@ -207,7 +209,7 @@ def main() -> None:
 
     full = pl.concat(parts).with_columns(
         pl.col("time").dt.year().alias("year"),
-        pl.col("id").str.slice(-_RAW_CHUNK_ID_LEN).alias("chunk_id"),
+        pl.col("id").str.slice(-CHUNK_ID_LEN).alias("chunk_id"),
     )
 
     for (yr, cid), group in full.group_by("year", "chunk_id", maintain_order=True):

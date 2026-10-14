@@ -185,11 +185,14 @@ def test_bridges_reject_per_fix_with_shapes() -> None:
 
 
 @pytest.fixture(scope="module")
-def partitioned(tmp_path_factory: pytest.TempPathFactory) -> Path:
+def split(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    from trucktrack.buckets import bucket_by_truck
     from trucktrack.pipeline import run_pipeline
 
-    out = tmp_path_factory.mktemp("partitioned")
-    run_pipeline(_SAMPLE, out)
+    bucketed = tmp_path_factory.mktemp("bucketed")
+    bucket_by_truck(_SAMPLE, bucketed, n_buckets=4)
+    out = tmp_path_factory.mktemp("split")
+    run_pipeline(bucketed, out)
     return out
 
 
@@ -202,21 +205,21 @@ def _moving_chunks(input_dir: Path) -> list[Path]:
     )
 
 
-def _run_partitions(
+def _run_buckets(
     input_dir: Path,
     output_dir: Path,
     observations: ObservationConfig | None,
 ) -> int:
-    """Map-match every partition in-process; return chunks skipped."""
+    """Map-match every bucket in-process; return chunks skipped."""
+    from trucktrack.buckets import bucket_dirs, bucket_files
     from trucktrack.pipeline import parquet_row_count
-    from trucktrack.valhalla.pipeline import _process_partition
+    from trucktrack.valhalla.pipeline import _process_bucket
 
     skipped = 0
-    for pdir in sorted({p.parent for p in input_dir.rglob("*.parquet")}):
-        counts = {p: parquet_row_count(p) for p in pdir.glob("*.parquet")}
-        _, _, s, _, _, _ = _process_partition(
-            pdir,
-            input_dir,
+    for bdir in bucket_dirs(input_dir):
+        counts = {p: parquet_row_count(p) for p in bucket_files(bdir)}
+        _, s, _, _, _ = _process_bucket(
+            bdir,
             output_dir,
             None,
             counts,
@@ -230,10 +233,10 @@ def _run_partitions(
 @requires_tiles
 class TestPipelineObservations:
     def test_observations_written_beside_ways(
-        self, partitioned: Path, tmp_path: Path
+        self, split: Path, tmp_path: Path
     ) -> None:
-        assert _run_partitions(partitioned, tmp_path, ObservationConfig()) == 0
-        chunks = _moving_chunks(partitioned)
+        assert _run_buckets(split, tmp_path, ObservationConfig()) == 0
+        chunks = _moving_chunks(split)
         obs_files = sorted(
             p.relative_to(tmp_path / "_observations")
             for p in (tmp_path / "_observations").rglob("*.parquet")
@@ -247,7 +250,7 @@ class TestPipelineObservations:
         assert obs["edge_id"].null_count() == 0
 
         moving = (
-            pl.scan_parquet(partitioned / "**" / "*.parquet")
+            pl.scan_parquet(split / "**" / "*.parquet")
             .filter(~pl.col("is_stop"))
             .select(pl.len())
             .collect()
@@ -256,26 +259,24 @@ class TestPipelineObservations:
         assert 0.8 * moving < len(obs) <= moving
 
     def test_skips_only_when_every_output_exists(
-        self, partitioned: Path, tmp_path: Path
+        self, split: Path, tmp_path: Path
     ) -> None:
-        n_chunks = len(_moving_chunks(partitioned))
-        assert _run_partitions(partitioned, tmp_path, None) == 0
+        n_chunks = len(_moving_chunks(split))
+        assert _run_buckets(split, tmp_path, None) == 0
         assert not (tmp_path / "_observations").exists()
 
         # Ways exist, observations don't: every chunk is redone.
-        assert _run_partitions(partitioned, tmp_path, ObservationConfig()) == 0
-        assert _run_partitions(partitioned, tmp_path, ObservationConfig()) == n_chunks
+        assert _run_buckets(split, tmp_path, ObservationConfig()) == 0
+        assert _run_buckets(split, tmp_path, ObservationConfig()) == n_chunks
 
         lost = next((tmp_path / "_observations").rglob("*.parquet"))
         lost.unlink()
-        assert (
-            _run_partitions(partitioned, tmp_path, ObservationConfig()) == n_chunks - 1
-        )
+        assert _run_buckets(split, tmp_path, ObservationConfig()) == n_chunks - 1
         assert lost.exists()
 
-    def test_bridged_fix_matches_line_up_with_rows(self, partitioned: Path) -> None:
+    def test_bridged_fix_matches_line_up_with_rows(self, split: Path) -> None:
         trips = (
-            pl.scan_parquet(partitioned / "**" / "*.parquet")
+            pl.scan_parquet(split / "**" / "*.parquet")
             .filter(~pl.col("is_stop"))
             .collect()
         )

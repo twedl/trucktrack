@@ -1,57 +1,39 @@
-"""Helpers for pulling individual trucks and trips from pipeline outputs.
+"""Pull one truck's or one trip's rows from any stage of the pipeline.
 
-Each stage of the pipeline uses a different layout:
+Every stage writes ``bucket=K/`` folders, K a stable hash of the truck
+id, with a ``_buckets.json`` recording how many (see
+:mod:`trucktrack.buckets`), so a lookup hashes the id and opens one
+folder:
 
-- **Raw traces**: ``year=YYYY/chunk_id=XX/part-0.parquet``
-  The ``chunk_id`` hive column is the last 2 hex chars of the truck UUID.
+- **Bucketed points** (:func:`~trucktrack.buckets.bucket_by_truck`):
+  the raw columns, ``id`` the truck id.
+- **Split trips** (:func:`~trucktrack.pipeline.run_pipeline`): ``id``
+  the composite trip ID ``{truck_id}_gap{N}_trip{M}``.
+- **Map-matched results**
+  (:func:`~trucktrack.valhalla.pipeline.run_map_matching`): ``id``,
+  ``date``, ``way_id``; its ``_quality/`` and ``_observations/`` are
+  bucketed the same way.
 
-- **Partitioned trips**: ``tier=.../partition_id=.../data.parquet``
-  The ``id`` column contains composite trip IDs like
-  ``{truck_id}_gap{N}_trip{M}``.
+A folder without ``_buckets.json`` — the raw input, in whatever layout
+it arrives — is scanned in full (:func:`~trucktrack.buckets.data_files`).
 
-- **Map-matched results**: same hive layout as partitioned trips, with
-  columns ``id``, ``date``, ``way_id``.
-
-The standalone ``scan_*`` functions scan all files with predicate
-pushdown on the ``id`` column.  For repeated queries,
-:class:`ChunkIndex` builds a persistent index that maps each chunk_id
-to its file paths — reading only the ``id`` column once, then
-saving the mapping for instant reloads.
-
-All functions use :func:`polars.scan_parquet` for lazy evaluation so
-that predicate pushdown avoids reading the full dataset.
+All functions return a :class:`polars.LazyFrame`, so further filters
+and column selections push down into the scan.
 """
 
 from __future__ import annotations
 
-import functools
-import json
-import os
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import polars as pl
-from tqdm import tqdm
 
-_RAW_CHUNK_ID_LEN = 2  # fixed: hive layout of raw data is chunk_id=XX
-_INDEX_CHUNK_ID_LEN = 3  # ChunkIndex resolution (16x finer than raw buckets)
-_INDEX_FILENAME = ".chunk_index.json"
-_INDEX_VERSION = 2  # bump when _INDEX_CHUNK_ID_LEN changes
-
-
-def _raw_chunk_id(truck_id: str) -> str:
-    """Derive the raw-hive chunk_id (last 2 hex chars) from a truck UUID."""
-    return truck_id[-_RAW_CHUNK_ID_LEN:]
-
-
-def _index_chunk_id(truck_id: str) -> str:
-    """Derive the ChunkIndex key (last 3 hex chars) from a truck UUID.
-
-    Finer-grained than the raw-data hive key, so each bucket holds ~1/16
-    as many trucks and ``ChunkIndex.scan_truck`` opens ~1/16 as many files.
-    Independent of the hive layout — the index just stores file paths.
-    """
-    return truck_id[-_INDEX_CHUNK_ID_LEN:]
+from trucktrack.buckets import (
+    bucket_dir,
+    bucket_files,
+    bucket_of,
+    data_files,
+    read_n_buckets,
+)
 
 
 def truck_id_from_trip(trip_id: str) -> str:
@@ -67,259 +49,39 @@ def truck_id_expr(col: str = "id") -> pl.Expr:
     return pl.col(col).str.split("_gap").list.first()
 
 
-def _scan_chunk_glob(
-    data_dir: str | Path,
-    glob: str,
-    filter_expr: pl.Expr,
-) -> pl.LazyFrame:
-    """Scan parquet files matching *glob* under *data_dir* and apply a filter."""
-    return pl.scan_parquet(
-        Path(data_dir) / glob,
-        hive_partitioning=True,
-        extra_columns="ignore",
-    ).filter(filter_expr)
+def _truck_files(data_dir: str | Path, truck_ids: set[str]) -> list[Path]:
+    """Files that can hold these trucks' rows: their buckets', or all of them."""
+    data_dir = Path(data_dir)
+    n_buckets = read_n_buckets(data_dir)
+    if n_buckets is None:
+        files = data_files(data_dir)
+    else:
+        buckets = sorted({bucket_of(t, n_buckets) for t in truck_ids})
+        files = [f for b in buckets for f in bucket_files(bucket_dir(data_dir, b))]
+    if not files:
+        raise FileNotFoundError(f"no files for {sorted(truck_ids)} under {data_dir}")
+    return files
 
 
-# ---------------------------------------------------------------------------
-# ChunkIndex — persistent file-path index keyed by chunk_id
-# ---------------------------------------------------------------------------
+def scan_truck(data_dir: str | Path, truck_id: str) -> pl.LazyFrame:
+    """Lazily scan every row of one truck, from any stage's *data_dir*.
 
-
-class ChunkIndex:
-    """Maps chunk_id to file paths for instant lookups.
-
-    Build once with :meth:`build`, save with :meth:`save`, and reload
-    in later sessions with :meth:`load`::
-
-        idx = ChunkIndex.build("data/partitioned")
-        idx.save()                       # writes .chunk_index.json
-        idx = ChunkIndex.load("data/partitioned")  # instant next time
-        df = idx.scan_truck(truck_id).collect()
+    Matches ``id`` equal to *truck_id* (raw and bucketed points) or a
+    trip of it (split and matched stages).
     """
-
-    def __init__(
-        self,
-        data_dir: str | Path,
-        index: dict[str, list[str]],
-    ) -> None:
-        self._data_dir = Path(data_dir)
-        self._index = index
-
-    @classmethod
-    def build(
-        cls,
-        data_dir: str | Path,
-        *,
-        max_workers: int | None = None,
-        show_progress: bool = True,
-    ) -> ChunkIndex:
-        """Scan *data_dir* and build the chunk_id → file path mapping.
-
-        Reads only the ``id`` column from each file. Files are read in
-        parallel since the Rust parquet reader releases the GIL.
-
-        Parameters
-        ----------
-        max_workers
-            Thread pool size. Defaults to ``os.cpu_count()``.
-        show_progress
-            Display a tqdm progress bar. Defaults to True.
-        """
-        data_dir = Path(data_dir)
-        files = sorted(data_dir.rglob("*.parquet"))
-        index: dict[str, list[str]] = {}
-        if not files:
-            return cls(data_dir, index)
-
-        chunk_id_expr = truck_id_expr().str.slice(-_INDEX_CHUNK_ID_LEN).unique()
-
-        def _extract(p: Path) -> tuple[str, list[str]]:
-            rel = str(p.relative_to(data_dir))
-            cids = (
-                pl.read_parquet(p, columns=["id"]).select(chunk_id_expr)["id"].to_list()
-            )
-            return rel, cids
-
-        if max_workers is None:
-            max_workers = os.cpu_count() or 1
-        max_workers = min(max_workers, len(files))
-
-        with ThreadPoolExecutor(max_workers=max_workers) as pool:
-            iterator = pool.map(_extract, files)
-            if show_progress:
-                iterator = tqdm(
-                    iterator, total=len(files), unit="file", desc="Indexing"
-                )
-            for rel, cids in iterator:
-                for cid in cids:
-                    index.setdefault(cid, []).append(rel)
-
-        return cls(data_dir, index)
-
-    def save(self, path: str | Path | None = None) -> Path:
-        """Write the index to disk. Defaults to ``data_dir/.chunk_index.json``.
-
-        Stores the chunk_id length so :meth:`load` can reject a file built
-        under a different resolution.
-        """
-        out = Path(path) if path is not None else self._data_dir / _INDEX_FILENAME
-        payload = {
-            "version": _INDEX_VERSION,
-            "chunk_id_len": _INDEX_CHUNK_ID_LEN,
-            "index": self._index,
-        }
-        out.write_text(json.dumps(payload, sort_keys=True))
-        return out
-
-    @classmethod
-    def load(cls, data_dir: str | Path, path: str | Path | None = None) -> ChunkIndex:
-        """Load a previously saved index.
-
-        Raises :class:`ValueError` if the saved index was built with a
-        different chunk_id resolution than the current code — rebuild with
-        :meth:`build` in that case.
-        """
-        data_dir = Path(data_dir)
-        src = Path(path) if path is not None else data_dir / _INDEX_FILENAME
-        payload = json.loads(src.read_text())
-        if not isinstance(payload, dict) or "index" not in payload:
-            raise ValueError(
-                f"{src} is a legacy ChunkIndex; rebuild with ChunkIndex.build()"
-            )
-        saved_len = payload.get("chunk_id_len")
-        if saved_len != _INDEX_CHUNK_ID_LEN:
-            raise ValueError(
-                f"{src} was built with chunk_id_len={saved_len}, "
-                f"current code uses {_INDEX_CHUNK_ID_LEN}; "
-                "rebuild with ChunkIndex.build()"
-            )
-        return cls(data_dir, payload["index"])
-
-    def _files_for_chunk(self, cid: str) -> list[Path]:
-        """Resolve relative paths for a chunk_id."""
-        return [self._data_dir / rel for rel in self._index.get(cid, [])]
-
-    def scan_truck(self, truck_id: str) -> pl.LazyFrame:
-        """Scan files for a truck and filter on composite trip ID prefix."""
-        cid = _index_chunk_id(truck_id)
-        files = self._files_for_chunk(cid)
-        if not files:
-            raise FileNotFoundError(f"No files for chunk_id={cid} in index")
-        return pl.scan_parquet(
-            files, hive_partitioning=True, extra_columns="ignore"
-        ).filter(pl.col("id").str.starts_with(truck_id))
-
-    def scan_trip(self, trip_id: str) -> pl.LazyFrame:
-        """Scan files for a single trip by composite trip ID."""
-        cid = _index_chunk_id(truck_id_from_trip(trip_id))
-        files = self._files_for_chunk(cid)
-        if not files:
-            raise FileNotFoundError(f"No files for chunk_id={cid} in index")
-        return pl.scan_parquet(
-            files, hive_partitioning=True, extra_columns="ignore"
-        ).filter(pl.col("id") == trip_id)
-
-    @functools.cached_property
-    def chunk_ids(self) -> list[str]:
-        """All chunk_ids in the index."""
-        return sorted(self._index)
-
-    def __len__(self) -> int:
-        """Number of chunk_ids in the index."""
-        return len(self._index)
-
-    def __repr__(self) -> str:
-        n_files = sum(len(v) for v in self._index.values())
-        return (
-            f"ChunkIndex({self._data_dir}, {len(self._index)} chunks, {n_files} files)"
-        )
-
-
-# ---------------------------------------------------------------------------
-# Raw traces
-# ---------------------------------------------------------------------------
-
-
-def scan_raw_truck(
-    data_dir: str | Path,
-    truck_id: str,
-) -> pl.LazyFrame:
-    """Lazily scan raw traces for a single truck.
-
-    Filters on ``chunk_id`` (hive partition) and ``id`` column to
-    avoid reading the full dataset.
-
-    Parameters
-    ----------
-    data_dir
-        Root of the raw hive-partitioned dataset
-        (``year=.../chunk_id=.../...parquet``).
-    truck_id
-        Full truck UUID (hex string).
-    """
-    cid = _raw_chunk_id(truck_id)
-    return _scan_chunk_glob(
-        data_dir, f"**/chunk_id={cid}/*.parquet", pl.col("id") == truck_id
+    files = _truck_files(data_dir, {truck_id})
+    return pl.scan_parquet(files, hive_partitioning=False).filter(
+        truck_id_expr() == truck_id
     )
 
 
-# ---------------------------------------------------------------------------
-# Partitioned trips (tier/partition_id layout)
-# ---------------------------------------------------------------------------
+def scan_trip(data_dir: str | Path, trip_id: str | list[str]) -> pl.LazyFrame:
+    """Lazily scan one or more trips, by composite trip ID, in one scan.
 
-
-def scan_partitioned_truck(
-    data_dir: str | Path,
-    truck_id: str,
-) -> pl.LazyFrame:
-    """Lazily scan partitioned trips for all trips of a truck.
-
-    Scans all parquet files with predicate pushdown on the ``id``
-    column.  For repeated queries, prefer :class:`ChunkIndex`.
+    From a split or matched stage.
     """
-    return _scan_chunk_glob(
-        data_dir, "**/*.parquet", pl.col("id").str.starts_with(truck_id)
+    trip_ids = [trip_id] if isinstance(trip_id, str) else trip_id
+    files = _truck_files(data_dir, {truck_id_from_trip(t) for t in trip_ids})
+    return pl.scan_parquet(files, hive_partitioning=False).filter(
+        pl.col("id").is_in(trip_ids)
     )
-
-
-def scan_partitioned_trip(
-    data_dir: str | Path,
-    trip_id: str,
-) -> pl.LazyFrame:
-    """Lazily scan partitioned trips for a single trip.
-
-    *trip_id* is the full composite ID (e.g.
-    ``abc123..._gap0_trip1``).  Scans all parquet files with
-    predicate pushdown.  For repeated queries, prefer
-    :class:`ChunkIndex`.
-    """
-    return _scan_chunk_glob(data_dir, "**/*.parquet", pl.col("id") == trip_id)
-
-
-# ---------------------------------------------------------------------------
-# Map-matched results (same hive layout, id/date/way_id columns)
-# ---------------------------------------------------------------------------
-
-
-def scan_matched_truck(
-    data_dir: str | Path,
-    truck_id: str,
-) -> pl.LazyFrame:
-    """Lazily scan map-matched results for all trips of a truck.
-
-    For repeated queries, prefer :class:`ChunkIndex`.
-    """
-    return _scan_chunk_glob(
-        data_dir, "**/*.parquet", pl.col("id").str.starts_with(truck_id)
-    )
-
-
-def scan_matched_trip(
-    data_dir: str | Path,
-    trip_id: str,
-) -> pl.LazyFrame:
-    """Lazily scan map-matched results for a single trip.
-
-    For repeated queries, prefer :class:`ChunkIndex`.
-    """
-    return _scan_chunk_glob(data_dir, "**/*.parquet", pl.col("id") == trip_id)

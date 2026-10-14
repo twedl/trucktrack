@@ -22,4 +22,3 @@ crate-type = ["cdylib", "rlib"]
 pyo3 = { version = "0.29", features = ["extension-module", "abi3-py311"] }
 polars = { version = "0.55", features = ["parquet", "lazy", "temporal", "dtype-duration", "cum_agg", "diff", "abs"] }
 pyo3-polars = "0.28"
-fast_hilbert = "2"

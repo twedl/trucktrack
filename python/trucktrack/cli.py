@@ -12,7 +12,6 @@ import polars as pl
 
 import trucktrack
 from trucktrack.generate import TripConfig, generate_trace, traces_to_parquet
-from trucktrack.partition import partition_existing_parquet
 
 # ── Output helpers ───────────────────────────────────────────────────────
 
@@ -145,16 +144,6 @@ def _cmd_generate(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
     return 0
 
 
-def _cmd_partition(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
-    summary = partition_existing_parquet(args.input, args.output_dir)
-    if not summary:
-        print("No partitions written (input was empty?)", file=sys.stderr)
-        return 0
-    parts = ", ".join(f"{tier}={n}" for tier, n in sorted(summary.items()))
-    print(f"Wrote partitions: {parts}", file=sys.stderr)
-    return 0
-
-
 # ── Parser ───────────────────────────────────────────────────────────────
 
 
@@ -263,14 +252,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to valhalla.json. Uses local pyvalhalla.",
     )
 
-    # partition
-    p_part = sub.add_parser(
-        "partition",
-        help="Rewrite a flat parquet as a Valhalla-tile-aligned hive dataset.",
-    )
-    p_part.add_argument("input", type=Path, help="Input parquet file.")
-    p_part.add_argument("output_dir", type=Path, help="Output directory.")
-
     return parser
 
 
@@ -290,7 +271,6 @@ def main(argv: list[str] | None = None) -> int:
         "split-gap": _cmd_split_gap,
         "split-stops": _cmd_split_stops,
         "generate": _cmd_generate,
-        "partition": _cmd_partition,
     }
     return handlers[args.command](args, parser)
 

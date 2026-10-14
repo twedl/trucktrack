@@ -1,66 +1,75 @@
-"""Tests for ``ChunkIndex`` — chunk_id resolution and save/load versioning."""
+"""Tests for ``trucktrack.query`` — truck and trip lookups at any stage."""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import polars as pl
 import pytest
-from trucktrack.query import ChunkIndex
+from trucktrack.buckets import bucket_dir, bucket_of, write_n_buckets
+from trucktrack.query import scan_trip, scan_truck, truck_id_from_trip
+
+N = 8
 
 
-def _write_trips(path: Path, trip_ids: list[str]) -> None:
+def _write(path: Path, ids: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    pl.DataFrame({"id": trip_ids}).write_parquet(path)
+    pl.DataFrame({"id": ids}).write_parquet(path)
 
 
-def test_chunkindex_keys_use_three_chars(tmp_path: Path) -> None:
-    # Two trucks sharing the last 2 hex chars but differing at the 3rd:
-    # under a 2-char index they'd land in one bucket; 3-char splits them.
-    truck_a = "aaaaaaa0abc"  # last 3 = "abc", last 2 = "bc"
-    truck_b = "bbbbbbb1xbc"  # last 3 = "xbc", last 2 = "bc"
-    _write_trips(
-        tmp_path / "tier=local/partition_id=0/f.parquet",
-        [f"{truck_a}_gap0_trip0"],
-    )
-    _write_trips(
-        tmp_path / "tier=local/partition_id=1/f.parquet",
-        [f"{truck_b}_gap0_trip0"],
-    )
-
-    idx = ChunkIndex.build(tmp_path, show_progress=False)
-
-    assert set(idx.chunk_ids) == {"abc", "xbc"}
-    # scan_truck for truck_a opens only its file, not truck_b's.
-    df_a = idx.scan_truck(truck_a).collect()
-    assert df_a["id"].to_list() == [f"{truck_a}_gap0_trip0"]
+def _bucketed(root: Path, trip_ids: list[str]) -> Path:
+    """Trips written to their trucks' buckets, as run_pipeline would."""
+    by_bucket: dict[int, list[str]] = {}
+    for trip_id in trip_ids:
+        bucket = bucket_of(truck_id_from_trip(trip_id), N)
+        by_bucket.setdefault(bucket, []).append(trip_id)
+    for bucket, ids in by_bucket.items():
+        _write(bucket_dir(root, bucket) / "data.parquet", ids)
+    write_n_buckets(root, N)
+    return root
 
 
-def test_chunkindex_save_load_roundtrip(tmp_path: Path) -> None:
-    truck = "0123456789abcdef"
-    _write_trips(
-        tmp_path / "tier=local/partition_id=0/f.parquet",
-        [f"{truck}_gap0_trip0"],
-    )
+class TestScanTruck:
+    def test_bucketed_opens_only_the_trucks_bucket(self, tmp_path: Path) -> None:
+        _bucketed(tmp_path, ["truck-a_gap0_trip0", "truck-b_gap0_trip0"])
+        # A file in another bucket isn't read, even if it names the truck.
+        other = (bucket_of("truck-a", N) + 1) % N
+        _write(bucket_dir(tmp_path, other) / "x.parquet", ["truck-a_gap9_trip9"])
 
-    idx = ChunkIndex.build(tmp_path, show_progress=False)
-    idx.save()
+        out = scan_truck(tmp_path, "truck-a").collect()
+        assert out["id"].to_list() == ["truck-a_gap0_trip0"]
 
-    reloaded = ChunkIndex.load(tmp_path)
-    assert reloaded.chunk_ids == idx.chunk_ids
+    def test_unbucketed_scans_any_layout_but_side_outputs(self, tmp_path: Path) -> None:
+        _write(tmp_path / "year=2026/chunk_id=01/part-0.parquet", ["truck-a", "b"])
+        _write(tmp_path / "elsewhere.parquet", ["truck-a"])
+        # A side output with other columns would break the scan.
+        (tmp_path / "_quality").mkdir()
+        pl.DataFrame({"ok": [True]}).write_parquet(tmp_path / "_quality" / "q.parquet")
+
+        out = scan_truck(tmp_path, "truck-a").collect()
+        assert out.columns == ["id"]  # folder names aren't columns
+        assert out["id"].to_list() == ["truck-a", "truck-a"]
+
+    def test_whole_truck_ids_not_prefixes(self, tmp_path: Path) -> None:
+        _write(tmp_path / "f.parquet", ["truck-a_gap0_trip0", "truck-ab_gap0_trip0"])
+        assert scan_truck(tmp_path, "truck-a").collect()["id"].to_list() == [
+            "truck-a_gap0_trip0"
+        ]
+
+    def test_missing_bucket_raises(self, tmp_path: Path) -> None:
+        write_n_buckets(tmp_path, N)
+        with pytest.raises(FileNotFoundError, match="truck-a"):
+            scan_truck(tmp_path, "truck-a")
 
 
-def test_chunkindex_load_rejects_wrong_resolution(tmp_path: Path) -> None:
-    (tmp_path / ".chunk_index.json").write_text(
-        json.dumps({"version": 1, "chunk_id_len": 2, "index": {"ef": ["a.parquet"]}})
-    )
-    with pytest.raises(ValueError, match="chunk_id_len=2"):
-        ChunkIndex.load(tmp_path)
+class TestScanTrip:
+    def test_exact_trip(self, tmp_path: Path) -> None:
+        _bucketed(tmp_path, ["truck-a_gap0_trip0", "truck-a_gap0_trip1"])
+        out = scan_trip(tmp_path, "truck-a_gap0_trip1").collect()
+        assert out["id"].to_list() == ["truck-a_gap0_trip1"]
 
-
-def test_chunkindex_load_rejects_legacy_format(tmp_path: Path) -> None:
-    # Pre-versioning format was the bare index dict.
-    (tmp_path / ".chunk_index.json").write_text(json.dumps({"ef": ["a.parquet"]}))
-    with pytest.raises(ValueError, match="legacy"):
-        ChunkIndex.load(tmp_path)
+    def test_trips_of_several_trucks(self, tmp_path: Path) -> None:
+        wanted = ["truck-a_gap0_trip1", "truck-b_gap2_trip0"]
+        _bucketed(tmp_path, ["truck-a_gap0_trip0", *wanted])
+        out = scan_trip(tmp_path, wanted).collect()
+        assert sorted(out["id"].to_list()) == wanted

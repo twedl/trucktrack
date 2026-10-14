@@ -4,20 +4,12 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import polars as pl
 
-from trucktrack.query import (
-    ChunkIndex,
-    scan_partitioned_trip,
-    scan_partitioned_truck,
-    scan_raw_truck,
-    truck_id_from_trip,
-)
+from trucktrack.query import scan_trip, scan_truck, truck_id_from_trip
 from trucktrack.visualize._map import plot_trace, plot_trace_layers, serve_map
-
-Stage = Literal["raw", "partitioned", "matched"]
 
 
 def _apply_date_filter(
@@ -34,55 +26,19 @@ def _apply_date_filter(
 
 def _resolve_data(
     data_dir: str | Path,
-    index: ChunkIndex | None,
-    truck_id: str | None,
-    trip_id: str | None,
-    trip_ids: list[str] | None,
-    date_range: tuple[date, date] | None,
-    stage: Stage,
-) -> pl.DataFrame:
-    """Load and filter data from one of the pipeline stages."""
-    if sum(x is not None for x in (truck_id, trip_id, trip_ids)) != 1:
-        raise ValueError("Provide exactly one of truck_id, trip_id, or trip_ids")
-
-    if trip_ids is not None:
-        frames = [_scan(data_dir, index, stage, trip_id=tid) for tid in trip_ids]
-        lf = pl.concat(frames)
-    elif trip_id is not None:
-        lf = _scan(data_dir, index, stage, trip_id=trip_id)
-    else:
-        if truck_id is None:
-            raise ValueError("truck_id must not be None")
-        lf = _scan(data_dir, index, stage, truck_id=truck_id)
-
-    return _apply_date_filter(lf, date_range).collect()
-
-
-def _scan(
-    data_dir: str | Path,
-    index: ChunkIndex | None,
-    stage: Stage,
+    date_range: tuple[date, date] | None = None,
+    *,
     truck_id: str | None = None,
-    trip_id: str | None = None,
-) -> pl.LazyFrame:
-    """Dispatch to the right scan function based on stage."""
-    if stage == "raw":
-        if truck_id is None:
-            raise ValueError("truck_id is required for stage='raw'")
-        return scan_raw_truck(data_dir, truck_id)
-
-    if index is not None:
-        if trip_id is not None:
-            return index.scan_trip(trip_id)
-        if truck_id is None:
-            raise ValueError("truck_id must not be None")
-        return index.scan_truck(truck_id)
-
-    if trip_id is not None:
-        return scan_partitioned_trip(data_dir, trip_id)
-    if truck_id is None:
-        raise ValueError("truck_id must not be None")
-    return scan_partitioned_truck(data_dir, truck_id)
+    trip_ids: str | list[str] | None = None,
+) -> pl.DataFrame:
+    """Load some trips' rows, if given, else a truck's, from one pipeline stage."""
+    if trip_ids is not None:
+        lf = scan_trip(data_dir, trip_ids)
+    elif truck_id is not None:
+        lf = scan_truck(data_dir, truck_id)
+    else:
+        raise ValueError("Provide truck_id or trip_ids")
+    return _apply_date_filter(lf, date_range).collect()
 
 
 def _plot_and_serve(
@@ -104,8 +60,6 @@ def inspect_truck(
     truck_id: str,
     *,
     date_range: tuple[date, date] | None = None,
-    index: ChunkIndex | None = None,
-    stage: Stage = "partitioned",
     host: str = "127.0.0.1",
     port: int = 5000,
     serve: bool = True,
@@ -116,16 +70,12 @@ def inspect_truck(
     Parameters
     ----------
     data_dir
-        Root of the pipeline output (raw, partitioned, or matched).
+        Root of any stage: raw, bucketed, split, or matched (see
+        :func:`~trucktrack.query.scan_truck`).
     truck_id
         Full truck UUID.
     date_range
         Optional ``(start, end)`` date range to filter trips.
-    index
-        A :class:`~trucktrack.ChunkIndex` for fast file lookups.
-        Falls back to glob-based scanning if not provided.
-    stage
-        Pipeline stage: ``"raw"``, ``"partitioned"``, or ``"matched"``.
     host, port
         Passed to :func:`~trucktrack.visualize.serve_map`.
     serve
@@ -139,7 +89,7 @@ def inspect_truck(
     -------
     folium.Map
     """
-    df = _resolve_data(data_dir, index, truck_id, None, None, date_range, stage)
+    df = _resolve_data(data_dir, date_range, truck_id=truck_id)
     return _plot_and_serve(df, serve, host, port, plot_kwargs)
 
 
@@ -147,8 +97,6 @@ def inspect_trip(
     data_dir: str | Path,
     trip_id: str | list[str],
     *,
-    index: ChunkIndex | None = None,
-    stage: Stage = "partitioned",
     host: str = "127.0.0.1",
     port: int = 5000,
     serve: bool = True,
@@ -159,13 +107,9 @@ def inspect_trip(
     Parameters
     ----------
     data_dir
-        Root of the pipeline output (partitioned or matched).
+        Root of the split or matched stage.
     trip_id
         A single composite trip ID or a list of them.
-    index
-        A :class:`~trucktrack.ChunkIndex` for fast file lookups.
-    stage
-        Pipeline stage: ``"partitioned"`` or ``"matched"``.
     host, port
         Passed to :func:`~trucktrack.visualize.serve_map`.
     serve
@@ -179,10 +123,7 @@ def inspect_trip(
     -------
     folium.Map
     """
-    if isinstance(trip_id, str):
-        df = _resolve_data(data_dir, index, None, trip_id, None, None, stage)
-    else:
-        df = _resolve_data(data_dir, index, None, None, trip_id, None, stage)
+    df = _resolve_data(data_dir, trip_ids=trip_id)
     return _plot_and_serve(df, serve, host, port, plot_kwargs)
 
 
@@ -191,12 +132,9 @@ def inspect_pipeline(
     *,
     trip_id: str | list[str] | None = None,
     raw_dir: str | Path | None = None,
-    partitioned_dir: str | Path | None = None,
+    split_dir: str | Path | None = None,
     matched_dir: str | Path | None = None,
     date_range: tuple[date, date] | None = None,
-    raw_index: ChunkIndex | None = None,
-    partitioned_index: ChunkIndex | None = None,
-    matched_index: ChunkIndex | None = None,
     host: str = "127.0.0.1",
     port: int = 5000,
     serve: bool = True,
@@ -208,7 +146,7 @@ def inspect_pipeline(
     single map with togglable layers via
     :func:`~trucktrack.visualize.plot_trace_layers`.
 
-    Provide at least one of *raw_dir*, *partitioned_dir*, or
+    Provide at least one of *raw_dir*, *split_dir*, or
     *matched_dir*. Each layer is skipped if its directory is not given.
 
     Parameters
@@ -217,20 +155,17 @@ def inspect_pipeline(
         Full truck UUID.  Inferred from *trip_id* when not provided.
     trip_id
         Optional trip ID or list of trip IDs.  When provided, the
-        partitioned and matched layers are scoped to these trips
+        split and matched layers are scoped to these trips
         only.  The raw layer is filtered to the time range covered
         by the trips so only the relevant GPS points appear.
     raw_dir
-        Root of the raw hive-partitioned dataset.
-    partitioned_dir
-        Root of the split+partitioned dataset.
+        Root of the raw input, in any layout, or of its bucketed copy.
+    split_dir
+        Root of the split dataset.
     matched_dir
         Root of the map-matched dataset.
     date_range
         Optional ``(start, end)`` date range to filter all layers.
-    raw_index, partitioned_index, matched_index
-        Optional :class:`~trucktrack.ChunkIndex` instances for fast
-        file lookups on each stage.
     host, port
         Passed to :func:`~trucktrack.visualize.serve_map`.
     serve
@@ -257,31 +192,14 @@ def inspect_pipeline(
             raise ValueError("Provide at least one of truck_id or trip_id")
         truck_id = truck_id_from_trip(trip_ids[0])
 
-    # --- partitioned / matched: scope to trips when given ----------------
-    tid = truck_id if trip_ids is None else None
+    # --- split / matched: scope to trips when given ---------------------
     segments_df = (
-        _resolve_data(
-            partitioned_dir,
-            partitioned_index,
-            tid,
-            None,
-            trip_ids,
-            date_range,
-            "partitioned",
-        )
-        if partitioned_dir is not None
+        _resolve_data(split_dir, date_range, truck_id=truck_id, trip_ids=trip_ids)
+        if split_dir is not None
         else None
     )
     matched_df = (
-        _resolve_data(
-            matched_dir,
-            matched_index,
-            tid,
-            None,
-            trip_ids,
-            date_range,
-            "matched",
-        )
+        _resolve_data(matched_dir, date_range, truck_id=truck_id, trip_ids=trip_ids)
         if matched_dir is not None
         else None
     )
@@ -299,9 +217,7 @@ def inspect_pipeline(
 
     raw_df = None
     if raw_dir is not None:
-        raw_df = _resolve_data(
-            raw_dir, raw_index, truck_id, None, None, raw_date_range, "raw"
-        )
+        raw_df = _resolve_data(raw_dir, raw_date_range, truck_id=truck_id)
 
     m = plot_trace_layers(
         raw=raw_df,

@@ -50,31 +50,29 @@ RS_VER=$(grep -E '^version[[:space:]]*=' Cargo.toml | head -1 | sed 's/.*"\(.*\)
 
 ## Architecture
 
-trucktrack is a Rust + Python hybrid: hot-path trajectory operations live in Rust (`src/`), while orchestration, trace generation, partitioning, map-matching, and visualization live in pure Python (`python/trucktrack/`).
+trucktrack is a Rust + Python hybrid: hot-path trajectory operations live in Rust (`src/`), while orchestration, trace generation, truck bucketing, map-matching, and visualization live in pure Python (`python/trucktrack/`).
 
 ### Rust ↔ Python boundary
 
 - `src/lib.rs` is the PyO3 module (`_core`). Every exported Rust function has two forms: `*_df` (takes/returns a `PyDataFrame` zero-copy via `pyo3-polars`) and `*_file` (reads/writes parquet directly). The file variants let the pipeline stream without materializing chunks Python-side.
-- `src/splitters/{gap,stop,traffic}.rs` implement the trajectory operations (ObservationGapSplitter / StopSplitter analogues plus a bearing-based traffic-stop filter). `src/partition.rs` handles Valhalla-tile classification and Hilbert indexing. `src/transform.rs` holds shared error-conversion helpers (`polars_err`, `io_err`).
-- Rust releases the GIL, so the Python `ThreadPoolExecutor` in `pipeline.py` achieves real parallelism.
-- `_core` is never imported by users — `splitters.py`, `io.py`, and `partition/` wrap it with Pythonic signatures (e.g. `timedelta` → microseconds). Public names are re-exported from `python/trucktrack/__init__.py`.
+- `src/splitters/{gap,stop,traffic}.rs` implement the trajectory operations (ObservationGapSplitter / StopSplitter analogues plus a bearing-based traffic-stop filter). `src/bucket.rs` is the stable truck-id hash behind every `bucket=K/` layout. `src/transform.rs` holds shared error-conversion helpers (`polars_err`, `io_err`).
+- Rust releases the GIL: every wrapper goes through `transform::transform_df` / `transform_file`, which run the work inside `py.detach`, so the Python `ThreadPoolExecutor` in `pipeline.py` achieves real parallelism.
+- `_core` is never imported by users — `splitters.py`, `io.py`, and `buckets.py` wrap it with Pythonic signatures (e.g. `timedelta` → microseconds). Public names are re-exported from `python/trucktrack/__init__.py`.
 
-### Data flow — raw → partitioned → matched
+### Data flow — raw → bucketed → split → matched
 
-Three-stage funnel, each stage writing a different hive layout:
+1. **Raw input** (`data/raw/`). Parquet files in **any layout** — only the columns are a contract (`id, time, lat, lon, speed, heading`). Never rely on the provider's file layout or `chunk_id`, or on truck ids being hex UUIDs.
+2. **Bucket** (`buckets.bucket_by_truck` → `data/bucketed/`). Streams every input file into `bucket=K/` (`pl.PartitionBy`), K = `bucket_of(id, n_buckets)`, so each truck's whole history is in one bucket. Splitting needs that: a truck spread over several files would be split per file, cutting trips at file edges and reusing trip IDs.
+3. **Split** (`pipeline.run_pipeline` → `data/split/`). Per bucket, in parallel: stale-ping + impossible-speed filters → gap-split → stop-split → traffic-filter → compose trip IDs (`{id}_gap{n}_trip{n}`) → `bucket=K/part-NNNN.parquet`, files of about `rows_per_file` (1M) rows with each truck in one file. Files are map-matching's unit of work, memory and resume.
+4. **Map-match** (`valhalla/pipeline.run_map_matching` → `data/matched/`). One process task per bucket; per-trip calls to a local Valhalla actor; `quality.py` scores each match. `_quality/` and `_observations/` mirror the buckets and files. Resumable per file.
 
-1. **Raw ingestion** (`data/raw/`). Input parquet chunks, hive-partitioned by `chunk_id` (last 2 hex chars of truck UUID).
-2. **Split + partition** (`pipeline.run_pipeline` → `data/partitioned/`). Per chunk, in parallel: gap-split → stop-split → traffic-filter → compose trip IDs (`{id}_gap{n}_trip{n}`) → classify into spatial tier (local/regional/longhaul) → write to `tier=.../partition_id=.../{chunk}.parquet`. Workers write **chunk-unique filenames** into shared tile dirs so overlapping tiles accumulate rather than overwrite. `compact_partitions` is the safe merge step (temp file → atomic rename → unlink).
-3. **Map-match** (`valhalla/pipeline.run_map_matching` → `data/matched/`). Per-trip calls to a local Valhalla actor; `quality.py` scores each match.
+### Bucket convention
 
-### Chunk-id convention
-
-Many filenames and partitions key off `chunk_id` = last 2 hex chars of the truck UUID. Query helpers in `query.py` (`scan_raw_truck`, `scan_partitioned_truck`, etc.) exploit this to avoid full scans — they compute the chunk from the truck id and only open matching files. `ChunkIndex` caches the `rglob` result to `.chunk_index.json` so repeat sessions skip the filesystem walk. When compressing 3-char chunk_ids to 2, slice `[-2:]` — partitioning and querying must agree or lookups miss.
+Every stage after raw writes `bucket=K/` folders plus `_buckets.json` (`{"version", "n_buckets"}`). `bucket_by_truck` and `run_pipeline` write it last, so it also marks a finished run; `run_map_matching` writes it first, since it resumes and must check the input matches. `query.scan_truck` / `scan_trip` read it, hash the truck id with `bucket_of`, and open one folder; a dir without it (raw input) is scanned in full via `buckets.data_files`, which skips `_`/`.`-prefixed paths. Stage preconditions live in `buckets.py` (`require_bucketed`, `require_empty`, `bucket_files`, `bucket_number`) — use them rather than re-checking per stage. `bucket_of` (FNV-1a + murmur finaliser in `src/bucket.rs`) must never change — data on disk is laid out by it; the golden values in `tests/test_buckets.py` guard it, and `bucket::HASH_VERSION` (written into `_buckets.json`) must be bumped with any change. Polars' `Expr.hash` is not stable across Polars versions, so never use it for a persisted layout. `bucket_by_truck` and `run_pipeline` refuse a non-empty output dir rather than mixing runs.
 
 ### Subpackages
 
 - `generate/` — pure-Python synthetic GPS trace generator (router, speed profile, noise, parking, operational errors). Entry point: `generate_trace`. Does not emit idle points at origin/destination, so endpoint stops aren't detected downstream.
-- `partition/` — `classify.py` (tier assignment + Hilbert), `tiles.py` (Valhalla L0/L1 tile math), `writer.py` (hive writers). Mirrors Rust `partition.rs` for DataFrames that stay in Python.
 - `valhalla/` — `_actor.py` wraps pyvalhalla; `map_matching.py` / `routing.py` are the callable surfaces; `pipeline.py` is the batch driver; `quality.py` scores matches; `_bridge.py` splits slow trips at large gaps and bridges them with `/route` + `trace_attributes(edge_walk)` (opt in via `run_map_matching(bridges=BridgeConfig(...))`). `valhalla.json` is the **sole** entry point for Valhalla configuration — do **not** read `VALHALLA_TILE_EXTRACT` (or other Valhalla env vars) directly. Use `find_config()` (re-exported from `valhalla/__init__.py`) to auto-discover `./valhalla.json` or `./valhalla_tiles/valhalla.json`, and resolve the tile directory from the loaded config. The file is not checked in; generate it with `python -m trucktrack.valhalla.setup` (`valhalla/setup.py`).
 - `congestion/` — per-edge truck speeds for Valhalla predicted traffic. `fixes.py`/`observations.py` flag and weight matched fixes (written to `_observations/` by `run_map_matching(observations=...)`); `aggregate.py` measures each edge's space-mean speed per local time bin (`edge_cells`, nothing borrowed between edges); `impute.py` fills all 168 hours (`historical_speeds`, `flow_speeds`) and gives unmeasured roads their class's speed ratio and week (`speed_ratios`, `class_weeks`). `valhalla/traffic.py` loads them into the tiles (`python -m trucktrack.valhalla.traffic data/matched`), always rebuilding from the pristine `valhalla_tiles.base.tar`; `valhalla/_tiles.py` reads every edge straight from the binary tiles (Valhalla 3.x layout). See `docs/congestion.md`.
 - `examples/` — scripts installed with the wheel for users to copy and adapt (`congestion.py` walks every congestion step; settings block at the top). Keep them runnable from any directory: no repo-relative imports, paths only in the settings.
@@ -82,8 +80,8 @@ Many filenames and partitions key off `chunk_id` = last 2 hex chars of the truck
 
 ### Gotchas when editing
 
-- Adding a new Rust splitter/transform means: implement in `src/splitters/` (or a new module), wire `*_df` + `*_file` wrappers in `src/lib.rs`, register in the `_core` module, add a Python wrapper in `splitters.py`/`io.py`, re-export from `__init__.py`, then `maturin develop` before tests see it.
-- The Rust splitters assume tz-naive datetime columns — passing a tz-aware column panics.
-- `_write_chunk` in `pipeline.py` is a serial-I/O bottleneck on networked filesystems (k8s); batch/buffer writes rather than looping `write_parquet` per partition.
+- Adding a new Rust splitter/transform means: implement in `src/splitters/` (or a new module), wire `*_df` + `*_file` wrappers in `src/lib.rs` through `transform_df` / `transform_file` (so they release the GIL), register in the `_core` module, add a Python wrapper in `splitters.py`/`io.py`, re-export from `__init__.py`, then `maturin develop` before tests see it.
+- The Rust splitters need a Datetime `time` (any unit, tz-aware or naive) and Float64 `lat`/`lon`/`speed`/`heading`; other types raise. Congestion reads a tz-naive `time` as UTC.
+- Duplicate `(id, time)` rows make the split output vary run to run (seen on `data/trucks_sampling`: 160,453 or 160,454 rows). The Rust sorts use `SortMultipleOptions::default()`, which doesn't keep ties in order.
 - **Prefer LazyFrame to eager DataFrame where possible.** Use `pl.scan_parquet` over `pl.read_parquet` so projection and predicate pushdown cut I/O and peak memory. Collect only at the boundary where an eager result is actually needed (Rust splitter call, per-row Python loop, return value).
 - **Never interpolate between points with straight lines.** Trajectories belong on road geometry (via Valhalla `trace_route` legs); speed/time interpolation belongs on the route's arc-length, not the great-circle chord. Valhalla's `trace_attributes.shape` is the snapped-input polyline, *not* road geometry — do not use it for visualization or length-based quality metrics. If you need a shape between fixes, fetch it from `trace_route` or reuse `map_match_route_shape` / `map_match_full`.

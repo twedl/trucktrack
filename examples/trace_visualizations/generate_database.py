@@ -28,8 +28,11 @@ from trucktrack import generate_trace
 from trucktrack.generate.gps_errors import GPS_ERRORS
 from trucktrack.generate.models import ErrorConfig, TripConfig, default_error_profile
 from trucktrack.generate.operational_errors import OPERATIONAL_ERRORS
-from trucktrack.query import _CHUNK_ID_LEN, _chunk_id
 from trucktrack.valhalla import find_config
+
+# The provider's raw layout: chunk_id = the last characters of the truck id.
+# trucktrack doesn't rely on it (see trucktrack.bucket_by_truck).
+_CHUNK_ID_LEN = 2
 
 OUTPUT_DIR = Path(
     os.environ.get("OUTPUT_DIR", "examples/trace_visualizations/output/trucks")
@@ -109,7 +112,9 @@ def main() -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     # Generate truck UUIDs.
-    truck_ids = [uuid.UUID(int=master_rng.getrandbits(128)).hex for _ in range(N_TRUCKS)]
+    truck_ids = [
+        uuid.UUID(int=master_rng.getrandbits(128)).hex for _ in range(N_TRUCKS)
+    ]
 
     # Assign guaranteed error profiles round-robin across (truck, trip) slots.
     guaranteed = _guaranteed_error_configs()
@@ -142,7 +147,7 @@ def main() -> None:
         }
 
         configs = _make_trip_configs(truck_id, K_TRIPS, start_time, rng, overrides)
-        chunk_id = _chunk_id(truck_id)
+        chunk_id = truck_id[-_CHUNK_ID_LEN:]
 
         truck_points = 0
         for trip_num, config in enumerate(configs, 1):
@@ -162,7 +167,7 @@ def main() -> None:
                 all_ids.append(truck_id)
                 all_lats.append(pt.lat)
                 all_lons.append(pt.lon)
-                all_speeds.append(round(pt.speed_mph, 1))
+                all_speeds.append(round(pt.speed_kmh, 1))
                 all_headings.append(round(pt.heading, 1))
                 all_times.append(pt.timestamp)
 
@@ -201,7 +206,11 @@ def main() -> None:
         data = group.drop("year", "chunk_id")
         data.write_parquet(out_path)
         partition_stats.append(
-            (f"year={yr}/chunk_id={cid}/part-0.parquet", data.height, data["id"].n_unique())
+            (
+                f"year={yr}/chunk_id={cid}/part-0.parquet",
+                data.height,
+                data["id"].n_unique(),
+            )
         )
 
     # Summary.
