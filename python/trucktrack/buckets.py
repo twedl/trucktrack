@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 import polars as pl
 
@@ -125,6 +126,16 @@ def require_empty(root: str | Path) -> None:
         raise FileExistsError(f"{root} is not empty; delete it to redo this step")
 
 
+def _bucket_sink(output_dir: Path) -> Any:
+    """Sink target writing one ``bucket=K/`` folder per bucket.
+
+    Polars 1.31 has only ``PartitionByKey``; 2.0 renamed it ``PartitionBy``.
+    """
+    if hasattr(pl, "PartitionBy"):
+        return pl.PartitionBy(output_dir, key="bucket", include_key=False)
+    return pl.PartitionByKey(output_dir, by="bucket", include_key=False)  # type: ignore[attr-defined]
+
+
 def bucket_by_truck(
     input_dir: str | Path,
     output_dir: str | Path,
@@ -153,9 +164,7 @@ def bucket_by_truck(
         pl.scan_parquet(files, hive_partitioning=False)
         .filter(pl.col("id").is_not_null())
         .with_columns(bucket_expr(n_buckets))
-        .sink_parquet(
-            pl.PartitionBy(output_dir, key="bucket", include_key=False), mkdir=True
-        )
+        .sink_parquet(_bucket_sink(output_dir), mkdir=True)
     )
     write_n_buckets(output_dir, n_buckets)
     return len(bucket_dirs(output_dir))
