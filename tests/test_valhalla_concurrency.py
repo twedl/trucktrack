@@ -10,12 +10,11 @@ doesn't terminate the pytest session.
 
 Note: pyvalhalla 3.5.x (``pyvalhalla-weekly``) holds the GIL during
 ``trace_attributes``, so ``ThreadPoolExecutor`` threads serialize
-and the race never manifests.  The crash was originally observed with
-pyvalhalla 3.6.3 built from source.  Because 3.6.x wheels are not
-available and the source build requires ``prime_server``, the test
-is marked ``xfail(strict=False)`` — it passes (xfail) under 3.5.x
-and would also pass (xpass, still accepted) if 3.6.x is installed
-and the crash fires.
+and the race never manifests.  The crash was first observed with
+pyvalhalla 3.6.3 built from source (SIGTRAP), and fires on the 3.9.1
+wheel too (SIGSEGV, 3 of 3 runs).  The test is marked
+``xfail(strict=False)``: it xfails where the race doesn't fire and
+xpasses where it does.
 
 Guarded by the same skip pattern as ``test_valhalla.py`` — skipped if
 pyvalhalla isn't installed or no ``valhalla.json`` is discoverable.
@@ -100,7 +99,7 @@ _PROBE = textwrap.dedent(
     reason=(
         "pyvalhalla-weekly 3.5.x holds the GIL during trace_attributes, "
         "serializing threads so the race never fires. "
-        "Crash was observed with pyvalhalla 3.6.3 (source build)."
+        "Crash observed with pyvalhalla 3.6.3 (source build) and 3.9.1."
     ),
 )
 def test_shared_actor_concurrent_access_crashes(tmp_path: Path) -> None:

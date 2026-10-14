@@ -40,10 +40,10 @@ from pathlib import Path
 
 import numpy as np
 import polars as pl
-from valhalla.utils import (
+from valhalla.baldr import GraphId
+from valhalla.baldr.utils import (
     BUCKETS_PER_WEEK,
     SPEED_BUCKET_SIZE_MINUTES,
-    GraphId,
     compress_speed_buckets,
     encode_compressed_speeds,
 )

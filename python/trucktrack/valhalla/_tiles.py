@@ -47,6 +47,8 @@ def pack_tiles(tile_dir: Path, tar_path: Path) -> list[Path]:
 # Valhalla 3.x tile layout: a 272-byte header, then 32-byte nodes, 8-byte
 # node transitions and 48-byte (six-word) directed edges.  Bit positions
 # are those of GraphTileHeader and DirectedEdge, packed from the low bit.
+# Checked against pyvalhalla's GraphTileHeader (valhalla.baldr) on tiles
+# built by 3.6.3 and 3.9.1: recheck after a Valhalla upgrade.
 _HEADER_BYTES = 272
 _NODE_BYTES = 32
 _TRANSITION_BYTES = 8

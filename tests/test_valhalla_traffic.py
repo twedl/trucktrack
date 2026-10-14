@@ -26,8 +26,8 @@ from trucktrack.valhalla.traffic import (  # noqa: E402
     traffic_rows,
     write_traffic_csvs,
 )
-from valhalla.utils import (  # noqa: E402
-    GraphId,
+from valhalla.baldr import GraphId  # noqa: E402
+from valhalla.baldr.utils import (  # noqa: E402
     decode_compressed_speeds,
     decompress_speed_bucket,
 )

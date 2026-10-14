@@ -4,7 +4,8 @@ The per-thread cache (via :data:`_local`) is **load-bearing for
 correctness**, not just defensive.  ``pyvalhalla.Actor`` is not safe
 to share across threads: concurrent ``trace_attributes`` calls against
 a single Actor crash with SIGTRAP on pyvalhalla 3.6.x (measured
-2026-04-16 on macOS, 4 threads × 50 calls reproduced reliably).  See
+2026-04-16 on macOS, 4 threads × 50 calls reproduced reliably), and
+with SIGSEGV on the 3.9.1 wheel (2026-10-14, 3 of 3 runs).  See
 ``tests/test_valhalla_concurrency.py`` for the regression guard.
 
 Actor construction is cheap in this configuration — about 10 ms per

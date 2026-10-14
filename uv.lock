@@ -1212,14 +1212,14 @@ wheels = [
 
 [[package]]
 name = "pyvalhalla"
-version = "3.6.3"
+version = "3.9.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/04/67/f1fb5cb3df1fa19555acde4a99e8a7c97333fc2aa8e4077fdb191ddb0b60/pyvalhalla-3.6.3.tar.gz", hash = "sha256:daee61451072739414026ce4b6b642fc534dea7bbc792eb68a9dd0c3a5d78604", size = 35746107, upload-time = "2026-02-19T22:12:40.575Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b3/71/bc3d87dd132694b38186ab5fe6cebff18b5b34e6a1852ced24ea79033ffe/pyvalhalla-3.9.1.tar.gz", hash = "sha256:a0037952a956d7f0212453e7a7195fd3b27c9b357a183f5d33a3ebebaaf5e957", size = 36531675, upload-time = "2026-10-06T11:38:00.082Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/cf/16/7b6f2c3e79a95613b950c0b2d9643278fa77b20b6ea0ff4710e9309d3d2e/pyvalhalla-3.6.3-cp312-abi3-macosx_14_0_arm64.whl", hash = "sha256:ebc46f6d53ed616b89a88c49787e478b941cd7cf2ccbeab0a1d25f1341cf4211", size = 23581417, upload-time = "2026-02-19T22:11:25.708Z" },
-    { url = "https://files.pythonhosted.org/packages/59/d2/c10fe5cdab114153c8270d45d6a1468efc548062183ed16750d2357c871d/pyvalhalla-3.6.3-cp312-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:b3e60b2b474c9e27e3303b964d54603a249ca952ae5100e3a8d361107d1c329d", size = 32612062, upload-time = "2026-02-19T22:11:50.369Z" },
-    { url = "https://files.pythonhosted.org/packages/d3/cc/78891758cd34dfdc9c8924a92cb1a9f48d594acc03d2b62d68d9933abaaf/pyvalhalla-3.6.3-cp312-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:e123720983ce570f340c3ef78289098bf647deba68d56143571384a5aa874868", size = 35154179, upload-time = "2026-02-19T22:12:21.639Z" },
-    { url = "https://files.pythonhosted.org/packages/df/fa/3f32f54e1c34207d47338c73d5982fcc1070e027c51f0430fdfb33f83060/pyvalhalla-3.6.3-cp312-abi3-win_amd64.whl", hash = "sha256:346683e30db8b33851721876e4c9b3e009f035b652e17b72c91c52b55d4eea36", size = 24179974, upload-time = "2026-02-19T22:12:37.938Z" },
+    { url = "https://files.pythonhosted.org/packages/5c/3d/d27b849a66f2c30e030bdbf2b76470766c10d2037d61cb9906fd2df46b33/pyvalhalla-3.9.1-cp312-abi3-macosx_14_0_arm64.whl", hash = "sha256:1780e2a586391a14028ac134f4335eee73dd88df66bf22adbe2d318493b4d053", size = 26380619, upload-time = "2026-10-06T11:37:49.305Z" },
+    { url = "https://files.pythonhosted.org/packages/e5/3a/087f21f1d3551ed30fed4a8945f631482482183ca9bb69a2fddc9454402a/pyvalhalla-3.9.1-cp312-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:6ebe5f9dd6ce3b16413f939a271d68e64a4addd44df8a802a8eda0b9ca0bf16f", size = 34736379, upload-time = "2026-10-06T11:37:52.2Z" },
+    { url = "https://files.pythonhosted.org/packages/df/47/22bf3a1dcc911bc149b854892812e04f42e30c8c34ade8320141b1f3ba32/pyvalhalla-3.9.1-cp312-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:7b49c5e5f86cefd555b473aaaf34df3305889d30aa889b8abd3b4c2acc622271", size = 37532140, upload-time = "2026-10-06T11:37:54.864Z" },
+    { url = "https://files.pythonhosted.org/packages/89/56/3f3087dff7e1057a007a82044d5f957485d093c6e9ca08b7cf485612fa51/pyvalhalla-3.9.1-cp312-abi3-win_amd64.whl", hash = "sha256:542ea3e11da281c63f2043fa69a2f426c5b309cb1e3b0032028f7034847d1c13", size = 22251811, upload-time = "2026-10-06T11:37:57.596Z" },
 ]
 
 [[package]]
@@ -1442,8 +1442,8 @@ requires-dist = [
     { name = "pyarrow", specifier = ">=15.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-benchmark", marker = "extra == 'dev'", specifier = ">=4.0" },
-    { name = "pyvalhalla", marker = "extra == 'dev'", specifier = ">=3.6" },
-    { name = "pyvalhalla", marker = "extra == 'valhalla'", specifier = ">=3.6" },
+    { name = "pyvalhalla", marker = "extra == 'dev'", specifier = ">=3.9.1,<4" },
+    { name = "pyvalhalla", marker = "extra == 'valhalla'", specifier = ">=3.9.1,<4" },
     { name = "requests", specifier = ">=2.31" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
     { name = "tqdm", specifier = ">=4.60" },
