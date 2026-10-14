@@ -19,18 +19,22 @@ Usage (needs the ``valhalla`` extra)::
 
     python -m trucktrack.valhalla.setup                          # Ontario default
     python -m trucktrack.valhalla.setup --pbf my-region.osm.pbf
+
+or from Python, :func:`build_tiles`.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 from trucktrack.valhalla import write_tile_build_id
+from trucktrack.valhalla._actor import CONFIG_FILENAME
 from trucktrack.valhalla._tiles import pack_tiles, valhalla_bin
 
 GEOFABRIK_URL = (
@@ -83,12 +87,9 @@ CONFIG_OPTIONS: dict[str, bool | int | float] = {
 
 
 def _run(cmd: list[str], description: str) -> None:
-    """Run a subprocess, printing a status line and exiting on failure."""
+    """Run a subprocess, printing a status line; raise if it fails."""
     print(f"{description}: {' '.join(cmd)}", file=sys.stderr)
-    result = subprocess.run(cmd, check=False)
-    if result.returncode != 0:
-        print(f"{cmd[0]} exited with code {result.returncode}", file=sys.stderr)
-        raise SystemExit(result.returncode)
+    subprocess.run(cmd, check=True)
 
 
 def _download_pbf(dest: Path) -> None:
@@ -98,11 +99,14 @@ def _download_pbf(dest: Path) -> None:
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     print(f"Downloading {GEOFABRIK_URL} -> {dest}", file=sys.stderr)
+    # Into a .part file, renamed when complete: a cut-off download must
+    # not pass for an extract on the next run.
+    part = dest.with_name(dest.name + ".part")
     with requests.get(GEOFABRIK_URL, stream=True, timeout=60) as resp:
         resp.raise_for_status()
         total = int(resp.headers.get("content-length") or 0)
         with (
-            dest.open("wb") as fh,
+            part.open("wb") as fh,
             tqdm(
                 total=total,
                 unit="B",
@@ -114,6 +118,7 @@ def _download_pbf(dest: Path) -> None:
             for chunk in resp.iter_content(chunk_size=1 << 20):
                 fh.write(chunk)
                 bar.update(len(chunk))
+    os.replace(part, dest)
 
 
 def build_config(
@@ -138,9 +143,7 @@ def build_config(
     for key, value in CONFIG_OPTIONS.items():
         cmd.extend([f"--{key}", str(value)])
     print(f"Generating config: {config_path}", file=sys.stderr)
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    if result.returncode != 0:
-        raise SystemExit(result.returncode)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
 
     # valhalla_build_config has no flag for meili.customizable, so patch it
     # after generation.  Without this, client-side overrides for
@@ -148,6 +151,53 @@ def build_config(
     config = json.loads(result.stdout)
     config.setdefault("meili", {})["customizable"] = MEILI_CUSTOMIZABLE
     config_path.write_text(json.dumps(config, indent=2) + "\n")
+
+
+def build_tiles(
+    pbf: Path | None = None,
+    tile_dir: Path = Path("valhalla_tiles"),
+    config_out: Path | None = None,
+) -> Path:
+    """Build Valhalla tiles from the OSM extract *pbf*; return the config path.
+
+    Without *pbf*, Ontario is downloaded from Geofabrik to
+    ``DEFAULT_PBF_PATH`` (unless already there).  The admin database,
+    packed tiles and tile build ID go in *tile_dir*; the config at
+    *config_out* if given, else ``<tile_dir>/valhalla.json``.  The config
+    is put in place last, so one exists only for a finished build.
+    Raises :class:`FileNotFoundError` for a missing *pbf* and
+    :class:`subprocess.CalledProcessError` if a Valhalla tool fails.
+    """
+    pbf_path = pbf or DEFAULT_PBF_PATH
+    if not pbf_path.exists():
+        if pbf is not None:
+            raise FileNotFoundError(f"PBF file not found: {pbf_path}")
+        _download_pbf(pbf_path)
+
+    tile_dir = tile_dir.resolve()
+    tile_dir.mkdir(parents=True, exist_ok=True)
+    tar_path = tile_dir / "valhalla_tiles.tar"
+    config_path = (config_out or tile_dir / CONFIG_FILENAME).resolve()
+    building = config_path.with_name(config_path.name + ".building")
+    build_config(tile_dir, tar_path, tile_dir / "admin.sqlite", building)
+
+    extract = str(pbf_path.resolve())
+    for tool, step in (
+        ("valhalla_build_admins", "Building admins"),
+        ("valhalla_build_tiles", "Building tiles"),
+    ):
+        _run([str(valhalla_bin(tool)), "-c", str(building), extract], step)
+
+    print(f"Packing tile directories into {tar_path}", file=sys.stderr)
+    for level in pack_tiles(tile_dir, tar_path):
+        shutil.rmtree(level)
+
+    # Before any predicted traffic: observations tag edges with this ID.
+    build_id = write_tile_build_id(tar_path)
+    print(f"Tile build ID: {build_id}", file=sys.stderr)
+    os.replace(building, config_path)
+    print(f"Done: {config_path}", file=sys.stderr)
+    return config_path
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -178,50 +228,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Where to write valhalla.json (default: <tile-dir>/valhalla.json).",
     )
     args = parser.parse_args(argv)
-
-    pbf_path: Path = args.pbf if args.pbf is not None else DEFAULT_PBF_PATH
-    if not pbf_path.exists():
-        if args.pbf is not None:
-            parser.error(f"PBF file not found: {pbf_path}")
-        _download_pbf(pbf_path)
-
-    tile_dir: Path = args.tile_dir.resolve()
-    tile_dir.mkdir(parents=True, exist_ok=True)
-
-    tar_path = (tile_dir / "valhalla_tiles.tar").resolve()
-    admin_path = (tile_dir / "admin.sqlite").resolve()
-    config_path = (args.config_out or tile_dir / "valhalla.json").resolve()
-    build_config(tile_dir, tar_path, admin_path, config_path)
-
-    _run(
-        [
-            str(valhalla_bin("valhalla_build_admins")),
-            "-c",
-            str(config_path),
-            str(pbf_path.resolve()),
-        ],
-        "Building admins",
-    )
-
-    _run(
-        [
-            str(valhalla_bin("valhalla_build_tiles")),
-            "-c",
-            str(config_path),
-            str(pbf_path.resolve()),
-        ],
-        "Building tiles",
-    )
-
-    print(f"Packing tile directories into {tar_path}", file=sys.stderr)
-    for level in pack_tiles(tile_dir, tar_path):
-        shutil.rmtree(level)
-
-    # Before any predicted traffic: observations tag edges with this ID.
-    build_id = write_tile_build_id(tar_path)
-    print(f"Tile build ID: {build_id}", file=sys.stderr)
-
-    print(f"Done: {tar_path}", file=sys.stderr)
+    if args.pbf is not None and not args.pbf.exists():
+        parser.error(f"PBF file not found: {args.pbf}")
+    try:
+        build_tiles(args.pbf, args.tile_dir, args.config_out)
+    except subprocess.CalledProcessError as exc:
+        print(exc, exc.stderr or "", sep="\n", file=sys.stderr)
+        return exc.returncode
     return 0
 
 

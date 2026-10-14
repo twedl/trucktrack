@@ -2,6 +2,7 @@
 
 Takes raw truck GPS to time-dependent truck routes:
 
+0. Build Valhalla tiles from an OpenStreetMap extract (first run only).
 1. Split and partition the raw traces.
 2. Map-match them, keeping one observation per fix on a road edge.
 3. Measure each edge's speed in each local hour of the week it was driven.
@@ -16,15 +17,13 @@ the directory this prints::
     python -c "import trucktrack.examples as e; print(e.__path__[0])"
 
 then change the settings below and run ``python congestion.py``.
-It needs the ``valhalla`` extra and tiles from
-``python -m trucktrack.valhalla.setup`` (found as ``./valhalla.json``
-or ``./valhalla_tiles/valhalla.json``).
+It needs the ``valhalla`` extra (``pip install "trucktrack[valhalla]"``).
 
-Step 6 writes the speeds into those tiles.  Each load starts again from
+Step 6 writes the speeds into the tiles.  Each load starts again from
 the tiles as first packed, kept beside them as ``*.base.tar``, so a
 rerun replaces the speeds instead of adding to them.  Reruns skip
-partitioning and map-matching already done under ``OUTPUT``; delete it
-to start over.
+any step whose output is already in ``TILES`` or ``OUTPUT``; delete it
+to redo that step.
 """
 
 from __future__ import annotations
@@ -45,6 +44,7 @@ from trucktrack.congestion import (
     speed_ratios,
 )
 from trucktrack.valhalla import route, run_map_matching
+from trucktrack.valhalla.setup import build_tiles
 from trucktrack.valhalla.traffic import add_predicted_traffic, graph_edges
 
 # ── Settings: change these for your data ────────────────────────────────
@@ -55,6 +55,11 @@ from trucktrack.valhalla.traffic import add_predicted_traffic, graph_edges
 # repo's synthetic sample: 200 trucks, six trips each over four weeks.
 RAW_DIR = Path("data/trucks_sampling")
 OUTPUT = Path("congestion_output")
+# Valhalla tiles, built here on the first run from OSM_EXTRACT: an
+# .osm.pbf covering your trucks' roads, e.g. a Geofabrik extract.  None
+# downloads Ontario (about 250 MB) to data/osm/.
+TILES = Path("valhalla_tiles")
+OSM_EXTRACT: Path | None = None
 # Speeds are binned by hour of the week on this zone's clock.
 LOCAL_TZ = "America/Toronto"
 # Trips to route, (lat, lon) to (lat, lon), at each departure time: local
@@ -82,6 +87,13 @@ def heading(text: str) -> None:
 
 def main() -> None:
     partitioned, matched = OUTPUT / "partitioned", OUTPUT / "matched"
+    config = TILES / "valhalla.json"
+
+    heading("0. Valhalla tiles")
+    if config.exists():
+        print(f"{TILES} already holds tiles; delete it to redo this step")
+    else:
+        build_tiles(OSM_EXTRACT, TILES)
 
     heading("1. Split and partition")
     if any(partitioned.rglob("*.parquet")):
@@ -90,7 +102,9 @@ def main() -> None:
         run_pipeline(RAW_DIR, partitioned)
 
     heading("2. Map-match, with an observation per fix")
-    run_map_matching(partitioned, matched, observations=ObservationConfig())
+    run_map_matching(
+        partitioned, matched, config=config, observations=ObservationConfig()
+    )
     obs = pl.scan_parquet(matched / "_observations" / "**" / "*.parquet")
     quality = pl.scan_parquet(matched / "_quality" / "**" / "*.parquet")
     print("Fixes on a road edge, and those flagged as not measuring traffic:")
@@ -104,8 +118,9 @@ def main() -> None:
     )
 
     heading("3. Measure: each edge's speed per local hour of the week")
-    config = AggregateConfig(local_tz=LOCAL_TZ)
-    cells = edge_cells(obs, quality=quality, config=config).collect()
+    cells = edge_cells(
+        obs, quality=quality, config=AggregateConfig(local_tz=LOCAL_TZ)
+    ).collect()
     one_truck = cells.select((pl.col("trucks") < 1.5).mean()).item()
     print(
         f"{cells['fixes'].sum():,} usable fixes measure "
@@ -130,7 +145,7 @@ def main() -> None:
     print(flows.head(3))
 
     heading("5. Roads no truck drove: truck speed / Valhalla speed")
-    ratios = speed_ratios(level, cells, graph_edges())
+    ratios = speed_ratios(level, cells, graph_edges(config))
     print(
         ratios.with_columns(pl.col("band").replace_strict(BANDS))
         .pivot("band", index="road_class", values="ratio")
@@ -138,7 +153,9 @@ def main() -> None:
     )
 
     heading("6. Load into the tiles")
-    counts = add_predicted_traffic(historical, flows, pattern=pattern, ratios=ratios)
+    counts = add_predicted_traffic(
+        historical, flows, config, pattern=pattern, ratios=ratios
+    )
     print(
         f"{counts['edges']:,} measured and {counts['class_edges']:,} other edges "
         f"in {counts['files']} tiles"
@@ -147,12 +164,9 @@ def main() -> None:
     heading("7. Route at different times (minutes)")
     rows = []
     for trip, (origin, destination) in TRIPS.items():
-        row: dict[str, object] = {
-            "trip": trip,
-            "no time": route(origin, destination).total_duration_s / 60,
-        }
-        for label, when in DEPARTURES.items():
-            timed = route(origin, destination, depart_at=when)
+        row: dict[str, object] = {"trip": trip}
+        for label, when in {"no time": None, **DEPARTURES}.items():
+            timed = route(origin, destination, config=config, depart_at=when)
             row[label] = timed.total_duration_s / 60
         rows.append(row)
     print(pl.DataFrame(rows))

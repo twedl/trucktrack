@@ -77,7 +77,8 @@ python -m trucktrack.valhalla.setup
 Produces `valhalla_tiles/valhalla.json`, `valhalla_tiles/admin.sqlite`, and
 `valhalla_tiles/valhalla_tiles.tar` — all gitignored.  `find_config()`
 discovers the json automatically.  Pass `--pbf path.osm.pbf` to reuse an
-existing OSM extract.
+existing OSM extract.  From Python, `build_tiles(pbf, tile_dir)` in
+`trucktrack.valhalla.setup` does the same and returns the config path.
 
 ### Map-match
 
