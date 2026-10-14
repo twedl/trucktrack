@@ -11,7 +11,9 @@ between Python and Rust zero-copy via `pyo3-polars`.
 
 In addition to the Rust splitters, trucktrack ships pure-Python
 subpackages for trace generation, spatial partitioning, map-matching,
-querying, and visualization.
+per-edge truck speeds as Valhalla predicted traffic (`congestion`),
+querying, and visualization.  What's new in each release:
+[CHANGELOG.md](https://github.com/twedl/trucktrack/blob/main/CHANGELOG.md).
 
 ## Install
 
