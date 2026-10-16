@@ -42,6 +42,16 @@ pub fn filter_stale_pings(
         return Ok(df);
     }
 
+    // Providers may send integer speeds.  They're compared as f64, which is
+    // exact for any integer a speed could be; the output keeps the input
+    // dtype.  Anything else would cast to nulls and silently pass through.
+    let speed_dtype = df.column(speed_col)?.dtype();
+    polars_ensure!(
+        speed_dtype.is_primitive_numeric(),
+        SchemaMismatch: "invalid series dtype: expected a number, got `{}` for series with name `{}`",
+        speed_dtype, speed_col
+    );
+
     let sorted = df
         .lazy()
         .sort([id_col, time_col], SortMultipleOptions::default())
@@ -54,7 +64,8 @@ pub fn filter_stale_pings(
         let n = group.height();
         let lats = group.column(lat_col)?.f64()?;
         let lons = group.column(lon_col)?.f64()?;
-        let speeds = group.column(speed_col)?.f64()?;
+        let speeds = group.column(speed_col)?.cast(&DataType::Float64)?;
+        let speeds = speeds.f64()?;
         let headings = group.column(heading_col)?.f64()?;
 
         let mut keep = vec![true; n];

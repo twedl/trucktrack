@@ -401,6 +401,28 @@ class TestStalePingFilter:
         out = trucktrack.filter_stale_pings(df)
         assert out.height == 3
 
+    def test_integer_speed(self) -> None:
+        """Integer speeds filter like floats, and stay integers."""
+        df = _make_raw(
+            [
+                ("a", 0, 43.0, -79.0, 55, 90.0),
+                ("a", 60, 43.001, -79.0, 56, 91.0),
+                ("a", 63, 43.0, -79.0, 55, 90.0),  # stale copy of row 0
+                ("a", 120, 43.002, -79.0, 0, 0.0),
+                ("a", 180, 43.002, -79.0, 0, 0.0),  # stopped — keep
+            ]
+        )
+        assert df.schema["speed"] == pl.Int64
+        out = trucktrack.filter_stale_pings(df)
+        assert out["speed"].to_list() == [55, 56, 0, 0]
+        assert out.schema["speed"] == pl.Int64
+
+    def test_non_numeric_speed_raises(self) -> None:
+        df = _make_raw([("a", 0, 43.0, -79.0, 55.0, 90.0)])
+        df = df.with_columns(pl.col("speed").cast(pl.String))
+        with pytest.raises(ValueError, match="expected a number"):
+            trucktrack.filter_stale_pings(df)
+
 
 # ── ImpossibleSpeedFilter ────────────────────────────────────────────────
 

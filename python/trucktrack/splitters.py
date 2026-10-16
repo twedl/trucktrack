@@ -129,6 +129,9 @@ def filter_stale_pings(
     are also exempt — a stopped truck legitimately emits many repeated
     identical pings.  Output is sorted by ``(id, time)``.
 
+    ``lat``, ``lon`` and ``heading`` must be Float64; ``speed`` may be any
+    integer or float, and keeps its dtype.
+
     Parameters
     ----------
     window
