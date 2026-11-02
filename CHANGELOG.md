@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.3 (2026-11-02)
+
+- **`import trucktrack` works without the valhalla extra again.** In
+  0.2.2 it raised `ModuleNotFoundError: No module named 'valhalla'`.
+- **`corridor_passes` works on polars 1.31**, the oldest polars
+  trucktrack supports.
+
 ## 0.2.2 (2026-11-02)
 
 ### Travel times along a corridor
