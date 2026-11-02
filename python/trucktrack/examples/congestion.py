@@ -4,7 +4,8 @@ Takes raw truck GPS to time-dependent truck routes:
 
 0. Build Valhalla tiles from an OpenStreetMap extract (first run only).
 1. Group the raw points by truck and split them into trips.
-2. Map-match them, keeping one observation per fix on a road edge.
+2. Map-match them between large gaps, bridged by a route (one match
+   across a gap is slow), keeping one observation per fix on a road edge.
 3. Measure each edge's speed in each local hour of the week it was driven.
 4. Fill in every hour of every measured edge from a model of the edge.
 5. Give roads no truck drove their road class's truck speed and week.
@@ -44,7 +45,7 @@ from trucktrack.congestion import (
     historical_speeds,
     speed_ratios,
 )
-from trucktrack.valhalla import route, run_map_matching
+from trucktrack.valhalla import BridgeConfig, route, run_map_matching
 from trucktrack.valhalla.setup import build_tiles
 from trucktrack.valhalla.traffic import add_predicted_traffic, graph_edges
 
@@ -106,7 +107,14 @@ def main() -> None:
         run_pipeline(bucketed, split)
 
     heading("2. Map-match, with an observation per fix")
-    run_map_matching(split, matched, config=config, observations=ObservationConfig())
+    run_map_matching(
+        split,
+        matched,
+        config=config,
+        quiet=True,
+        observations=ObservationConfig(),
+        bridges=BridgeConfig(),
+    )
     obs = pl.scan_parquet(matched / "_observations" / "**" / "*.parquet")
     quality = pl.scan_parquet(matched / "_quality" / "**" / "*.parquet")
     print("Fixes on a road edge, and those flagged as not measuring traffic:")

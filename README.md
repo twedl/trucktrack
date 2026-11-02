@@ -130,7 +130,10 @@ trucks did:
 from trucktrack.congestion import ObservationConfig
 
 run_map_matching(
-    Path("data/split"), Path("data/matched"), observations=ObservationConfig()
+    Path("data/split"),
+    Path("data/matched"),
+    observations=ObservationConfig(),
+    bridges=BridgeConfig(),
 )
 ```
 
