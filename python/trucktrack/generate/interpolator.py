@@ -12,12 +12,15 @@ import numpy as np
 
 from trucktrack.generate.models import (
     DEFAULT_INTERVAL_S,
+    DelayConfig,
     RouteSegment,
     SamplingConfig,
     TracePoint,
 )
 from trucktrack.generate.speed_profile import (
     congestion_factor,
+    day_depth,
+    incident_factor,
     inject_traffic_stops,
     mps_to_kmh,
     road_class,
@@ -158,12 +161,14 @@ def interpolate_route(
     departure_time: datetime,
     rng: random.Random,
     schedule: FixSchedule,
+    delays: DelayConfig | None = None,
 ) -> tuple[list[TracePoint], datetime]:
     """Walk the route polyline at the schedule's fix times.
 
     Returns the trace points and the arrival time.  The arrival time
     comes from the speed profile, not the last fix, so a long gap at
-    the end of the drive doesn't pull the arrival earlier.
+    the end of the drive doesn't pull the arrival earlier.  *delays*
+    adds congestion that doesn't recur to the rush hours.
     """
     coords = route.coords
     if len(coords) < 2:
@@ -173,9 +178,9 @@ def interpolate_route(
     speeds, distances, sources = inject_traffic_stops(speeds, route.distances_m, rng)
     classes = [road_class(route.speeds_mps[j]) for j in sources]
     scales = [rush_hour_scale(*coords[j]) for j in sources]
+    headings = [bearing(*coords[j], *coords[j + 1]) for j in sources]
     inbound = [
-        rush_hour_inbound(*coords[j], bearing(*coords[j], *coords[j + 1]))
-        for j in sources
+        rush_hour_inbound(*coords[j], h) for j, h in zip(sources, headings, strict=True)
     ]
 
     orig_cum_dist = [0.0]
@@ -198,7 +203,13 @@ def interpolate_route(
             seg_time = rng.uniform(15, 45)
         else:
             reached = departure_time + timedelta(seconds=elapsed)
-            factor = congestion_factor(classes[i], reached, scales[i], inbound[i])
+            scale = scales[i]
+            if delays is not None:
+                scale *= day_depth(delays, reached)
+            factor = congestion_factor(classes[i], reached, scale, inbound[i])
+            if delays is not None and classes[i] == "highway":
+                lat, lon = coords[sources[i]]
+                factor *= incident_factor(delays, lat, lon, headings[i], reached)
             speeds[i] = spd * factor
             seg_time = dist / speeds[i]
         seg_times.append(seg_time)

@@ -1,13 +1,16 @@
-"""Truck speed caps, acceleration smoothing, traffic stops, and rush hours."""
+"""Truck speed caps, acceleration smoothing, traffic stops, rush hours and incidents."""
 
 from __future__ import annotations
 
 import math
 import random
 from datetime import UTC, datetime
+from functools import lru_cache
 from zoneinfo import ZoneInfo
 
 import numpy as np
+
+from trucktrack.generate.models import DelayConfig
 
 # Truck speed caps by road class (m/s)
 HIGHWAY_CAP = 29.0  # ~104 km/h
@@ -138,6 +141,64 @@ def congestion_factor(
         bump = math.exp(-0.5 * ((hour - centre) / width) ** 2)
         factor *= 1.0 - min(MAX_DIP, depth * weight * tilt * bump)
     return factor
+
+
+def day_depth(delays: DelayConfig, when: datetime) -> float:
+    """How deep rush hours run on *when*'s local day, as a multiple of usual."""
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    return _day_depth(delays, when.astimezone(LOCAL_TZ).date().toordinal())
+
+
+@lru_cache(maxsize=4096)
+def _day_depth(delays: DelayConfig, day: int) -> float:
+    rng = random.Random(f"{delays.seed}:day:{day}")
+    return math.exp(rng.gauss(0.0, delays.day_sd))
+
+
+def incident_factor(
+    delays: DelayConfig, lat: float, lon: float, heading: float, when: datetime
+) -> float:
+    """Highway speed multiplier from incidents at (*lat*, *lon*) heading *heading*.
+
+    1.0 unless an incident in the square and direction (see
+    :class:`DelayConfig`) is under way at *when*; the slowest if several.
+    Naive *when* is taken as UTC.
+    """
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    east, north = _to_toronto_km(lat, lon)
+    cell = (math.floor(east / delays.cell_km), math.floor(north / delays.cell_km))
+    way = int(heading % 360.0 >= 180.0)
+    t = when.timestamp()
+    day = math.floor(t / 86400.0)
+    factor = 1.0
+    # An incident can run on past midnight from the day before.
+    for d in (day - 1, day):
+        for start, end, slowdown in _incidents(delays, cell, way, d):
+            if start <= t < end:
+                factor = min(factor, slowdown)
+    return factor
+
+
+@lru_cache(maxsize=65536)
+def _incidents(
+    delays: DelayConfig, cell: tuple[int, int], way: int, day: int
+) -> tuple[tuple[float, float, float], ...]:
+    """(start, end, slowdown) of the square's incidents that start on UTC *day*."""
+    rng = random.Random(f"{delays.seed}:incidents:{cell[0]}:{cell[1]}:{way}:{day}")
+    mean = delays.incidents_per_km_day * delays.cell_km
+    # Poisson by counting uniform draws until their product falls below e^-mean.
+    count, product, limit = 0, rng.random(), math.exp(-mean)
+    while product > limit:
+        count += 1
+        product *= rng.random()
+    out = []
+    for _ in range(count):
+        start = day * 86400.0 + rng.uniform(0.0, 86400.0)
+        end = start + 3600.0 * rng.uniform(*delays.duration_h)
+        out.append((start, end, rng.uniform(*delays.slowdown)))
+    return tuple(out)
 
 
 def smooth_speeds(speeds_mps: list[float], distances_m: list[float]) -> list[float]:

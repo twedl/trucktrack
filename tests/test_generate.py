@@ -13,6 +13,7 @@ import pytest
 import requests
 import trucktrack
 from trucktrack.generate import (
+    DelayConfig,
     RouteSegment,
     SamplingConfig,
     TracePoint,
@@ -41,6 +42,8 @@ from trucktrack.generate.speed_profile import (
     MAX_DIP,
     TORONTO,
     congestion_factor,
+    day_depth,
+    incident_factor,
     rush_hour_inbound,
     rush_hour_scale,
 )
@@ -428,6 +431,54 @@ class TestRushHours:
             _, slow_arrival = self._drive(start, slower)
             _, fast_arrival = self._drive(start, faster)
             assert slow_arrival - start > 1.3 * (fast_arrival - start)
+
+
+class TestDelays:
+    # Every incident runs all day: one is always under way.
+    BUSY = DelayConfig(incidents_per_km_day=1.0, duration_h=(24.0, 24.0))
+
+    @staticmethod
+    def _drive(
+        route: RouteSegment, delays: DelayConfig | None, start: datetime = _START
+    ) -> datetime:
+        sched = FixSchedule(SamplingConfig(), start, random.Random(0))
+        return interpolate_route(route, start, random.Random(1), sched, delays)[1]
+
+    def test_rush_depth_drawn_per_local_day(self) -> None:
+        delays = DelayConfig(day_sd=0.3)
+        # 08:00 and 23:00 on Tuesday 3 March in Toronto, then Wednesday.
+        tuesday = day_depth(delays, _RUSH_EST)
+        assert day_depth(delays, _RUSH_EST + timedelta(hours=15)) == tuesday
+        assert day_depth(delays, _RUSH_EST + timedelta(hours=17)) != tuesday
+        assert day_depth(DelayConfig(day_sd=0.0), _RUSH_EST) == 1.0
+        assert day_depth(DelayConfig(day_sd=0.3, seed=1), _RUSH_EST) != tuesday
+
+    def test_incidents_by_square_and_direction(self) -> None:
+        at = (43.0, -80.0)
+        slow = incident_factor(self.BUSY, *at, 90.0, _START)
+        assert 0.2 <= slow < 0.6
+        # The same for any truck there then; ~1 km on is the same square.
+        nearby = offset_to_latlon(*at, 1000.0, 0.0)
+        assert incident_factor(self.BUSY, *nearby, 80.0, _START) == slow
+        assert incident_factor(self.BUSY, *at, 270.0, _START) != slow
+        quiet = DelayConfig(incidents_per_km_day=0.0)
+        assert incident_factor(quiet, *at, 90.0, _START) == 1.0
+
+    def test_incidents_slow_highways_only(self) -> None:
+        # Night, so rush hours don't slow either drive.
+        slowdown = replace(self.BUSY, slowdown=(0.5, 0.5), day_sd=0.0)
+        highway = _straight_route(km=30.0)
+        arterial = _straight_route(km=30.0, mps=14.0)
+        slow = (self._drive(highway, slowdown) - _START).total_seconds()
+        free = (self._drive(highway, None) - _START).total_seconds()
+        assert slow == pytest.approx(2 * free, rel=0.01)
+        assert self._drive(arterial, slowdown) == self._drive(arterial, None)
+
+    def test_without_delays_drawn_the_drive_is_unchanged(self) -> None:
+        none = DelayConfig(day_sd=0.0, incidents_per_km_day=0.0)
+        assert self._drive(_ROUTE, none, _RUSH_EST) == self._drive(
+            _ROUTE, None, _RUSH_EST
+        )
 
 
 class TestGenerateTraceSampling:

@@ -61,6 +61,61 @@ route(origin, destination, depart_at=datetime(2026, 3, 10, 8, 0))  # local time
 
 Without `depart_at`, Valhalla uses each edge's `constrained_speed`.
 
+## Rush hour against free flow
+
+For how much rush hour slows each road, without the week:
+
+```python
+from trucktrack.congestion import edge_cells, rush_speeds, rush_window
+
+rush = rush_speeds(edge_cells(obs, by=rush_window(), quality=quality))
+```
+
+Each edge's `free_speed` is its space-mean speed at night (00:00–05:00,
+any day), and `rush_speed` the slower of its weekday 07:00–09:00 and
+16:00–18:00 speeds (`rush_window` says which), from its own fixes
+only. `ratio` is rush / free, and `delay_s` the seconds rush hour adds
+to the edge. The hours are `rush_window`'s arguments.
+
+From half the trucks' fixes, against the other half's 5 s data
+(weighted by rush-hour driving time; the true ratio averages 0.45):
+
+| Edge length | held-out rush driving covered | \|ratio error\| | class mean ratio |
+|---|---|---|---|
+| < 50 m | 2% | 0.44 | 0.30 |
+| 50–200 m | 11% | 0.41 | 0.24 |
+| 200 m–1 km | 44% | 0.09 | 0.13 |
+| > 1 km | 26% | 0.08 | 0.13 |
+
+Under 200 m the ratio is noise: a fix or two, often at a light. Rush
+speed is the noisy half (7.8 km/h off, free speed 1.3): few trucks
+drive an edge in a two-hour weekday window. Requiring two effective
+trucks in each window (`min_trucks=2`) cuts coverage from 83% to 53%
+for 0.14 → 0.12. Taking the slower window costs little against knowing
+which one is right (0.14 vs 0.13), while pooling the two does worse
+(0.18): an edge slows in one. Which trucks fall in which half moves
+the mean error by -0.02 to +0.05 over five splits.
+
+`way_rush_speeds(cells)` gives the same for each directed OSM way
+(`way_id`, `forward`): way ids outlast a tile build and join to
+OpenStreetMap; edge ids do neither. Each window's speeds come from
+travel time summed over the way's edges measured in it and at night,
+and the way takes the window that slows it more. On the sample a way
+is mostly one edge (82% of rush driving; median 213 m), so ways score
+like edges: 0.13 over all, 0.09 over ways of 200 m or more. The
+synthetic congestion changes over tens of kilometres, so it can't show
+a long way averaging away a bottleneck that its edges would show.
+
+`trucktrack.valhalla.with_geometry(rows)` adds each row's road as WKT
+(`geometry`), read from the tiles: a LINESTRING for an edge, a
+MULTILINESTRING of the edges measured for a way, in the direction
+driven. The two directions of a road share a line on a map; split them
+by `forward`, or offset them, to show both.
+
+[`trucktrack/examples/rush_hour.py`](https://github.com/twedl/trucktrack/blob/main/python/trucktrack/examples/rush_hour.py)
+runs it from raw GPS (its first steps are `congestion.py`'s, and either
+reuses the other's output) and writes both tables, with geometry, as CSV.
+
 ## Measured on synthetic data
 
 200 trucks × 6 trips over four weeks, each truck on its own reporting

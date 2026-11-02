@@ -81,7 +81,8 @@ existing OSM extract.  From Python, `build_tiles(pbf, tile_dir)` in
 Map-match all trips against a local Valhalla instance:
 
 ```python
-from trucktrack.valhalla.pipeline import run_map_matching
+from pathlib import Path
+from trucktrack.valhalla import run_map_matching
 
 run_map_matching(
     Path("data/split"),
@@ -100,6 +101,7 @@ normally, and gaps are filled in with a single `/route` + `edge_walk`
 call to recover way IDs:
 
 ```python
+from pathlib import Path
 from trucktrack.valhalla import BridgeConfig, run_map_matching
 
 run_map_matching(
@@ -127,7 +129,9 @@ the tiles; time-dependent truck routes then slow down where and when the
 trucks did:
 
 ```python
+from pathlib import Path
 from trucktrack.congestion import ObservationConfig
+from trucktrack.valhalla import BridgeConfig, run_map_matching
 
 run_map_matching(
     Path("data/split"),
@@ -149,6 +153,7 @@ class's week (`--measured-only` leaves them alone).
 from datetime import datetime
 from trucktrack.valhalla import route
 
+origin, destination = (43.7387, -79.7271), (43.6555, -79.3800)  # (lat, lon)
 route(origin, destination, depart_at=datetime(2026, 3, 10, 8, 0))  # local time
 ```
 
@@ -159,6 +164,33 @@ package: copy it from the directory
 prints, point its settings at your data, and run it.
 [docs/congestion.md](https://github.com/twedl/trucktrack/blob/main/docs/congestion.md)
 covers the method, how it measures up on synthetic data, and its caveats.
+
+### Travel times along a corridor
+
+Time every truck between points on a highway, and summarize the travel
+times by FHWA's truck travel time reliability method (15-minute
+averages, five periods of the week, 95th over 50th percentile):
+
+```python
+import polars as pl
+from trucktrack.congestion import corridor_passes, travel_time_reliability
+from trucktrack.valhalla import build_corridor
+
+corridor = build_corridor(
+    {"Windsor": (42.23307, -82.98941), "London": (42.86689, -81.26432)},
+    before=(42.2611, -83.0418),
+    after=(42.89784, -81.23929),
+)
+obs = pl.scan_parquet("data/matched/_observations/**/*.parquet")
+edges = corridor.edges(obs.select(pl.col("edge_id").unique()).collect()["edge_id"])
+passes = corridor_passes(obs, edges, corridor.spans())
+reliability = travel_time_reliability(passes).collect()
+```
+
+[`trucktrack/examples/corridor.py`](https://github.com/twedl/trucktrack/blob/main/python/trucktrack/examples/corridor.py)
+does it from raw GPS for the 401 from Windsor to Toronto, and
+[docs/reliability.md](https://github.com/twedl/trucktrack/blob/main/docs/reliability.md)
+covers the method and how it measures up on synthetic data.
 
 ## Querying
 

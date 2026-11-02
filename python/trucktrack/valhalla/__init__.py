@@ -11,6 +11,7 @@ from trucktrack.valhalla._bridge import (
 )
 from trucktrack.valhalla._build_id import tile_build_id, write_tile_build_id
 from trucktrack.valhalla._parsing import decode_polyline6, parse_valhalla_response
+from trucktrack.valhalla.corridor import Corridor, Route, build_corridor, locate_edges
 from trucktrack.valhalla.map_matching import (
     MatchedPoint,
     map_match,
@@ -25,6 +26,7 @@ from trucktrack.valhalla.map_matching import (
 from trucktrack.valhalla.pipeline import map_match_trip, run_map_matching
 from trucktrack.valhalla.quality import evaluate_map_match_with_bridges
 from trucktrack.valhalla.routing import route
+from trucktrack.valhalla.shapes import edge_shapes, with_geometry
 
 __all__ = [
     "DEFAULT_TRUCK_COSTING",
@@ -32,12 +34,17 @@ __all__ = [
     "BridgeFailure",
     "BridgeFit",
     "BridgedMatchResult",
+    "Corridor",
     "MatchedPoint",
+    "Route",
     "bridge_gap",
+    "build_corridor",
     "decode_polyline6",
+    "edge_shapes",
     "evaluate_map_match_with_bridges",
     "find_config",
     "get_actor",
+    "locate_edges",
     "map_match",
     "map_match_dataframe",
     "map_match_dataframe_full",
@@ -52,5 +59,6 @@ __all__ = [
     "run_map_matching",
     "tile_build_id",
     "trace_attributes",
+    "with_geometry",
     "write_tile_build_id",
 ]

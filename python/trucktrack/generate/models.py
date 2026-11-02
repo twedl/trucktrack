@@ -121,6 +121,29 @@ def random_sampling(
     )
 
 
+@dataclass(frozen=True)
+class DelayConfig:
+    """Congestion that doesn't recur: different every day, the same for every truck.
+
+    Each local day's rush hours run e^N(0, *day_sd*) times as deep as
+    usual.  Incidents slow highways: each *cell_km* square of the map
+    gets, for each way through it (headings from north to just short
+    of south, and the rest), a Poisson number of them a day with mean
+    *incidents_per_km_day* × *cell_km*, each starting at a uniform time
+    of day, lasting a uniform *duration_h* and multiplying the speed of
+    every highway that way through the square by a uniform *slowdown*.
+    All of it is drawn from *seed*, the place and the day, so every
+    truck there then meets the same delays.
+    """
+
+    seed: int = 0
+    day_sd: float = 0.25
+    incidents_per_km_day: float = 0.01
+    cell_km: float = 10.0
+    duration_h: tuple[float, float] = (0.5, 2.0)
+    slowdown: tuple[float, float] = (0.2, 0.6)
+
+
 @dataclass
 class TripConfig:
     origin: tuple[float, float]  # (lat, lon)
@@ -135,6 +158,8 @@ class TripConfig:
     config: str | Path | None = None
     errors: list[ErrorConfig] = field(default_factory=default_error_profile)
     sampling: SamplingConfig = field(default_factory=SamplingConfig)
+    # None: rush hours only, the same every week.
+    delays: DelayConfig | None = None
 
 
 @dataclass

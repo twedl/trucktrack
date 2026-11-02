@@ -66,7 +66,9 @@ def generate_trace(config: TripConfig) -> list[TracePoint]:
         departure_path[-1].timestamp if departure_path else config.departure_time
     )
 
-    driving_pts, arrival_start = interpolate_route(route, driving_start, rng, schedule)
+    driving_pts, arrival_start = interpolate_route(
+        route, driving_start, rng, schedule, config.delays
+    )
     all_points.extend(driving_pts)
 
     arrival_path = generate_arrival_maneuver(

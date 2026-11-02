@@ -14,7 +14,10 @@ from trucktrack.congestion import (
     edge_cells,
     flow_window,
     hour_of_week,
+    rush_speeds,
+    rush_window,
     usable_observations,
+    way_rush_speeds,
 )
 
 # Tuesday 3 March 2026, 08:00 in Toronto (EST, UTC-5).
@@ -201,3 +204,181 @@ class TestEdgeCells:
         out = _cells(obs)
         assert out["tile_build_id"].to_list() == ["x", "y"]
         assert out["speed"].to_list() == [40.0, 60.0]
+
+
+class TestRushWindow:
+    @pytest.mark.parametrize(
+        ("local_hour", "expected"),
+        [
+            (8, "am"),
+            (17, "pm"),
+            (3, "night"),
+            (12, None),  # midday
+            (9, None),  # the morning rush ends at 09:00
+            (4 * 24 + 8, None),  # Saturday has no rush hour
+            (4 * 24 + 3, "night"),  # but has a night
+        ],
+    )
+    def test_windows(self, local_hour: int, expected: str | None) -> None:
+        obs = _at(_obs(("a", 1, 50.0, 30.0)), local_hour)
+        assert obs.select(rush_window()).item() == expected
+
+    def test_hours_are_configurable(self) -> None:
+        obs = _at(_obs(("a", 1, 50.0, 30.0)), 6)
+        assert obs.select(rush_window(am=(6, 9))).item() == "am"
+
+
+def _rush(obs: pl.DataFrame, min_trucks: float = 1.0) -> pl.DataFrame:
+    return rush_speeds(_cells(obs, rush_window()), min_trucks).collect()
+
+
+class TestRushSpeeds:
+    def test_slower_rush_against_night(self) -> None:
+        # Edge 1, 400 m: 60 km/h at night, 30 in the morning, 45 in the evening.
+        obs = _at(
+            _obs(("a", 1, 60.0, 30.0), ("b", 1, 30.0, 30.0), ("c", 1, 45.0, 30.0)),
+            3,
+            8,
+            17,
+        )
+        row = _rush(obs).row(0, named=True)
+        assert row["free_speed"] == 60.0
+        assert row["rush_speed"] == 30.0
+        assert row["rush_window"] == "am"
+        assert row["ratio"] == pytest.approx(0.5)
+        # 48 s at 30 km/h against 24 s at 60.
+        assert row["delay_s"] == pytest.approx(24.0)
+
+    def test_needs_a_night_and_a_rush(self) -> None:
+        # Edge 1 is seen at night and midday, edge 2 only in the morning.
+        obs = _at(
+            _obs(("a", 1, 60.0, 30.0), ("b", 1, 30.0, 30.0), ("c", 2, 30.0, 30.0)),
+            3,
+            12,
+            8,
+        )
+        assert _rush(obs).height == 0
+
+    def test_thin_windows_left_out(self) -> None:
+        # Two trucks at night and in the evening, one in the morning.
+        obs = _at(
+            _obs(
+                *[(t, 1, 60.0, 30.0) for t in "ab"],
+                ("c", 1, 20.0, 30.0),
+                *[(t, 1, 40.0, 30.0) for t in "de"],
+            ),
+            3,
+            3,
+            8,
+            17,
+            17,
+        )
+        assert _rush(obs)["rush_window"].to_list() == ["am"]
+        assert _rush(obs, min_trucks=2.0)["rush_window"].to_list() == ["pm"]
+        assert _rush(obs, min_trucks=3.0).height == 0
+
+    def test_stopped_cells_left_out(self) -> None:
+        # The morning's one fix caught a truck stopped; the evening measures.
+        obs = _at(
+            _obs(("a", 1, 60.0, 30.0), ("b", 1, 0.0, 30.0), ("c", 1, 45.0, 30.0)),
+            3,
+            8,
+            17,
+        )
+        assert _rush(obs)["rush_window"].to_list() == ["pm"]
+        stopped_at_night = obs.with_columns(speed=pl.Series([0.0, 30.0, 45.0]))
+        assert _rush(stopped_at_night).height == 0
+
+    def test_tie_goes_to_the_morning(self) -> None:
+        # The evening is slower only by float noise.
+        obs = _at(
+            _obs(
+                ("a", 1, 60.0, 30.0), ("b", 1, 45.0, 30.0), ("c", 1, 45 - 1e-12, 30.0)
+            ),
+            3,
+            8,
+            17,
+        )
+        assert _rush(obs)["rush_window"].to_list() == ["am"]
+
+
+def _ways(obs: pl.DataFrame, min_trucks: float = 1.0) -> pl.DataFrame:
+    return way_rush_speeds(_cells(obs, rush_window()), min_trucks).collect()
+
+
+class TestWayRushSpeeds:
+    def test_travel_time_over_the_ways_edges(self) -> None:
+        # Edges 1 (400 m) and 2 (250 m) of way 7 run 60 and 50 km/h at
+        # night, 30 and 25 in the morning; edge 1 runs 40 in the evening.
+        obs = _at(
+            _obs(
+                ("a", 1, 60.0, 30.0),
+                ("b", 2, 50.0, 30.0),
+                ("c", 1, 30.0, 30.0),
+                ("d", 2, 25.0, 30.0),
+                ("e", 1, 40.0, 30.0),
+            ),
+            3,
+            3,
+            8,
+            8,
+            17,
+        )
+        row = _ways(obs).row(0, named=True)
+        assert (row["way_id"], row["forward"]) == (7, True)
+        assert row["rush_window"] == "am"
+        assert row["edge_ids"] == [1, 2]
+        assert row["length"] == 650.0
+        free_h = 0.4 / 60 + 0.25 / 50  # and twice that in the morning
+        assert row["free_speed"] == pytest.approx(0.65 / free_h)
+        assert row["ratio"] == pytest.approx(0.5)
+        assert row["delay_s"] == pytest.approx(3600 * free_h)
+
+    def test_both_speeds_from_the_same_edges(self) -> None:
+        # Edge 2 has no night cell, so its slow morning doesn't count.
+        obs = _at(
+            _obs(("a", 1, 60.0, 30.0), ("b", 1, 45.0, 30.0), ("c", 2, 10.0, 30.0)),
+            3,
+            8,
+            8,
+        )
+        row = _ways(obs).row(0, named=True)
+        assert row["edge_ids"] == [1]
+        assert row["ratio"] == pytest.approx(0.75)
+
+    def test_directions_kept_apart(self) -> None:
+        # Edge 3 is way 7 against its direction, slow in the evening.
+        obs = _at(
+            _obs(
+                ("a", 1, 60.0, 30.0),
+                ("b", 1, 30.0, 30.0),
+                ("c", 3, 50.0, 30.0),
+                ("d", 3, 45.0, 30.0),
+            ),
+            3,
+            8,
+            3,
+            17,
+        )
+        out = _ways(obs)
+        assert out.select("forward", "rush_window").rows() == [
+            (False, "pm"),
+            (True, "am"),
+        ]
+
+    def test_tie_goes_to_the_morning(self) -> None:
+        # Edge 2's evening matches edge 1's morning but for float noise.
+        obs = _at(
+            _obs(
+                ("a", 1, 60.0, 30.0),
+                ("b", 2, 60.0, 30.0),
+                ("c", 1, 30.0, 30.0),
+                ("d", 2, 30 - 1e-12, 30.0),
+            ),
+            3,
+            3,
+            8,
+            17,
+        )
+        row = _ways(obs).row(0, named=True)
+        assert (row["rush_window"], row["edge_ids"]) == ("am", [1])
