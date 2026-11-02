@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.2.2 (2026-11-02)
+
+### Travel times along a corridor
+
+Time every truck between points on a highway and summarize the travel
+times by FHWA's truck travel time reliability method. See
+[docs/reliability.md](https://github.com/twedl/trucktrack/blob/main/docs/reliability.md)
+for the method, how it measures up on synthetic data, and its caveats;
+`trucktrack/examples/corridor.py` does the 401 from Windsor to Toronto
+from raw GPS.
+
+- **Corridor.** `build_corridor` routes a highway through named points,
+  once each way. Motorway edges within 300 m of a route, running along
+  it, belong to that direction, express and collector lanes alike.
+  `Corridor.spans` gives the whole corridor, its sections and FHWA
+  reporting segments (at most 1 mile in urban areas, 10 elsewhere).
+- **Passes.** `corridor_passes` times each truck over each span, from
+  its fixes on the highway, interpolating crossing times on distance
+  along it. Passes follow the truck, not the trip.
+- **Reliability.** `travel_time_reliability` averages passes per 15
+  minutes and gives each FHWA period's percentiles, TTTR (95th over
+  50th) and buffer index; `tttr_index` is FHWA's length-weighted TTTR
+  Index of the segments.
+
+### Rush hour against free flow, road by road
+
+- `rush_speeds` gives each edge's night speed, its slower weekday rush
+  window, their ratio and the delay rush hour adds; `way_rush_speeds`
+  gives the same per OSM way and direction. See "Rush hour against
+  free flow" in docs/congestion.md.
+- `trucktrack.valhalla.with_geometry` adds each edge's or way's road as
+  WKT, read from the tiles (`edge_shapes`), to map the results.
+- `trucktrack/examples/rush_hour.py` runs it from raw GPS to CSVs.
+
+### Other changes
+
+- **Integer speeds.** The stale-ping filter, the one step that needed a
+  Float64 `speed`, takes any integer or float speed and keeps its dtype.
+- **polars 1.31.** `bucket_by_truck` works on polars 1.31, which has
+  `PartitionByKey` but not `PartitionBy`.
+- **Generator.** `TripConfig.delays` (`DelayConfig`) adds congestion
+  that doesn't recur: a rush-hour depth drawn per day, and highway
+  incidents drawn per place and day that every truck there meets.
+- The congestion example and README map-match with `BridgeConfig()`,
+  and the README's snippets import what they use.
+
 ## 0.2.1 (2026-10-14)
 
 ### Truck buckets replace spatial partitions
