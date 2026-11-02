@@ -95,16 +95,20 @@ def corridor_passes(
         .with_columns(ch=chainage)
         .sort("truck", "t")
     )
-    prev = {c: pl.col(c).shift(1).over("truck") for c in ("direction", "t", "ch")}
     new_run = (
         pl.col("direction").is_null()
-        | prev["direction"].is_null()
-        | (pl.col("direction") != prev["direction"])
-        | (pl.col("t") - prev["t"] > max_gap_s)
-        | (pl.col("ch") < prev["ch"] - backtrack_m)
+        | pl.col("prev_direction").is_null()
+        | (pl.col("direction") != pl.col("prev_direction"))
+        | (pl.col("t") - pl.col("prev_t") > max_gap_s)
+        | (pl.col("ch") < pl.col("prev_ch") - backtrack_m)
     )
     runs = (
-        fixes.with_columns(run=new_run.cum_sum().over("truck"))
+        # The fix before in its own step: polars 1.31 can't nest windows.
+        fixes.with_columns(
+            pl.col(c).shift(1).over("truck").name.prefix("prev_")
+            for c in ("direction", "t", "ch")
+        )
+        .with_columns(run=new_run.cum_sum().over("truck"))
         .filter(pl.col("direction").is_not_null())
         .with_columns(x=pl.col("ch").cum_max().over("truck", "run"))
         .select("truck", "run", "direction", "x", "t")

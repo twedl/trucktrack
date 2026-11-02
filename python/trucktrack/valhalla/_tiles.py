@@ -11,11 +11,14 @@ from pathlib import Path
 
 import numpy as np
 import polars as pl
-import valhalla
 
 
 def valhalla_bin(name: str) -> Path:
     """Path to a pyvalhalla-bundled binary (``valhalla_build_tiles``, ...)."""
+    # Here, not at the top: reading tiles doesn't need pyvalhalla, and
+    # trucktrack.valhalla must import without it.
+    import valhalla
+
     path = Path(valhalla.__file__).parent / "bin" / name
     if not path.is_file():
         raise FileNotFoundError(
