@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.4 (2026-11-03)
+
+- **Raw input with other column names.** `bucket_by_truck(...,
+  columns={"vehicle_id": "id", "gps_time": "time"})` renames the input's
+  columns to trucktrack's as it buckets them, and every later stage uses
+  trucktrack's names. The example scripts take a `COLUMNS` setting.
+- `bucket_by_truck` raises before writing anything if the input lacks
+  any of `id`, `time`, `lat`, `lon`, `speed` or `heading`, naming them.
+
 ## 0.2.3 (2026-11-02)
 
 - **`import trucktrack` works without the valhalla extra again.** In
