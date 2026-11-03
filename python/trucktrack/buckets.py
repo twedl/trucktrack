@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,9 @@ from trucktrack import _core
 
 # As many as the raw chunks (~270 MB each) the pipeline was sized on.
 DEFAULT_N_BUCKETS = 256
+# The raw input's columns, by trucktrack's names: truck, fix time, and
+# position, speed (km/h) and heading (degrees) at it.
+RAW_COLUMNS = ("id", "time", "lat", "lon", "speed", "heading")
 
 _META = "_buckets.json"
 
@@ -141,11 +145,15 @@ def bucket_by_truck(
     output_dir: str | Path,
     *,
     n_buckets: int = DEFAULT_N_BUCKETS,
+    columns: Mapping[str, str] | None = None,
 ) -> int:
     """Stream every parquet file under *input_dir* into truck buckets.
 
     Reads :func:`data_files` in any folder layout; folder names are not
-    read as columns.  Rows with a null ``id`` are dropped.  Writes
+    read as columns.  The input needs :data:`RAW_COLUMNS`; *columns*
+    renames the input's own names to them, as ``{"vehicle_id": "id",
+    "ts": "time"}``, and the output and every later stage use
+    trucktrack's names.  Rows with a null ``id`` are dropped.  Writes
     ``output_dir/bucket=K/*.parquet`` and ``_buckets.json``, streaming,
     so the input never has to fit in memory.  Each bucket does, later:
     :func:`~trucktrack.pipeline.run_pipeline` loads one at a time, so
@@ -158,11 +166,18 @@ def bucket_by_truck(
     files = data_files(input_dir)
     if not files:
         raise FileNotFoundError(f"no parquet files under {input_dir}")
+    raw = pl.scan_parquet(files, hive_partitioning=False).rename(dict(columns or {}))
+    schema = raw.collect_schema()
+    missing = [c for c in RAW_COLUMNS if c not in schema]
+    if missing:
+        raise ValueError(
+            f"{input_dir} has no column {', '.join(missing)} (it has "
+            f"{', '.join(schema)}); rename the input's with columns="
+        )
     require_empty(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     (
-        pl.scan_parquet(files, hive_partitioning=False)
-        .filter(pl.col("id").is_not_null())
+        raw.filter(pl.col("id").is_not_null())
         .with_columns(bucket_expr(n_buckets))
         .sink_parquet(_bucket_sink(output_dir), mkdir=True)
     )

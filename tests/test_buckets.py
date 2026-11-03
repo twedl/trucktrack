@@ -115,12 +115,41 @@ class TestBucketByTruck:
     def test_drops_null_ids(self, tmp_path: Path) -> None:
         raw = tmp_path / "raw"
         raw.mkdir()
-        pl.DataFrame({"id": ["truck-a", None], "x": [1, 2]}).write_parquet(
+        start = datetime(2026, 1, 1, 8, tzinfo=UTC)
+        pl.concat(
+            [_points("truck-a", start, 1, 43.0), _points("x", start, 1, 43.0)]
+        ).with_columns(id=pl.Series(["truck-a", None])).write_parquet(
             raw / "part.parquet"
         )
         bucket_by_truck(raw, tmp_path / "out", n_buckets=4)
         df = pl.read_parquet(tmp_path / "out" / "**" / "*.parquet")
         assert df["id"].to_list() == ["truck-a"]
+
+    def test_renames_the_input_columns(self, tmp_path: Path) -> None:
+        raw = _raw_by_day(tmp_path, ["truck-a"])
+        theirs = {"id": "vehicle_id", "time": "ts", "speed": "speed_kmh"}
+        renamed = tmp_path / "theirs"
+        for f in data_files(raw):
+            out = renamed / f.relative_to(raw)
+            out.parent.mkdir(parents=True)
+            pl.read_parquet(f).rename(theirs).write_parquet(out)
+        ours = {v: k for k, v in theirs.items()}
+
+        bucket_by_truck(renamed, tmp_path / "bucketed", n_buckets=4, columns=ours)
+
+        bucketed = pl.read_parquet(tmp_path / "bucketed" / "**" / "*.parquet")
+        assert bucketed.columns == ["id", "time", "lat", "lon", "speed", "heading"]
+        assert len(bucketed) == 40
+        summary = run_pipeline(tmp_path / "bucketed", tmp_path / "split")
+        assert summary["trips"] == 2
+
+    def test_missing_columns_named(self, tmp_path: Path) -> None:
+        raw = _raw_by_day(tmp_path, ["truck-a"])
+        with pytest.raises(ValueError, match="no column id, time.*columns="):
+            bucket_by_truck(
+                raw, tmp_path / "out", columns={"id": "truck", "time": "ts"}
+            )
+        assert not (tmp_path / "out").exists()
 
     def test_refuses_non_empty_output(self, tmp_path: Path) -> None:
         raw = _raw_by_day(tmp_path, ["truck-a"])

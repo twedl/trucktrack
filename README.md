@@ -56,6 +56,10 @@ bucket_by_truck(Path("data/raw"), Path("data/bucketed"))  # n_buckets=256
 run_pipeline(Path("data/bucketed"), Path("data/split"))
 ```
 
+If your columns have other names, rename them as you bucket, with
+`bucket_by_truck(..., columns={"vehicle_id": "id", "gps_time": "time"})`;
+every later stage uses trucktrack's names.
+
 Buckets are a stable hash of the truck id, and every later stage keeps
 them (`bucket=K/` folders plus a `_buckets.json`).  `run_pipeline` loads
 one bucket per worker, so set `n_buckets` for your data's size.

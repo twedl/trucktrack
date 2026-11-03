@@ -61,6 +61,9 @@ from trucktrack.valhalla.setup import build_tiles
 # UTC), lat, lon, speed (km/h) and heading (degrees).  The default is the
 # repo's synthetic sample: 200 trucks, six trips each over four weeks.
 RAW_DIR = Path("data/trucks_sampling")
+# Your names for those columns, where they differ, as
+# {"vehicle_id": "id", "gps_time": "time", "latitude": "lat"}.
+COLUMNS: dict[str, str] = {}
 OUTPUT = Path("congestion_output")
 # Valhalla tiles, built here on the first run from OSM_EXTRACT: an
 # .osm.pbf covering your trucks' roads, e.g. a Geofabrik extract.  None
@@ -122,7 +125,7 @@ def main() -> None:
         print(f"{split} already holds trips; delete it to redo this step")
     else:
         if read_n_buckets(bucketed) is None:
-            bucket_by_truck(RAW_DIR, bucketed)
+            bucket_by_truck(RAW_DIR, bucketed, columns=COLUMNS)
         run_pipeline(bucketed, split)
 
     heading("2. Map-match, with an observation per fix")
